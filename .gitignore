@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+data/
+*.db*
+*.tgz
+.env
+.env.*
+!.env.example
+security-watch.yaml
+systems.yaml
+.docker-check-*/

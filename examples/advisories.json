@@ -1,0 +1,15 @@
+[
+  {
+    "id": "DEMO-NOT-A-REAL-ADVISORY",
+    "source": "fixture",
+    "kind": "advisory",
+    "title": "Fictional example-parser vulnerability for the offline demonstration",
+    "url": "https://example.com/security/demo",
+    "description": "This is synthetic test data, not a report about a real package or vulnerability. Example versions below 1.3.0 match this demonstration advisory.",
+    "aliases": [],
+    "severity": "critical",
+    "modified_at": "2026-10-23T00:00:00Z",
+    "fetched_at": "2026-10-23T00:00:00Z",
+    "packages": [{"ecosystem":"npm","name":"example-parser","range":">=1.0.0 <1.3.0","fixed":"1.3.0"}]
+  }
+]

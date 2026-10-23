@@ -1,0 +1,35 @@
+services:
+  data-init:
+    build: .
+    image: shielda-security-watch:0.1.0-alpha.0
+    user: "0:0"
+    entrypoint: [chown]
+    command: ["${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}", /data]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - watch-data:/data
+  security-watch:
+    build: .
+    image: shielda-security-watch:0.1.0-alpha.0
+    user: "${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}"
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    env_file: .env
+    volumes:
+      - ./security-watch.yaml:/config/security-watch.yaml:ro
+      - ./systems.yaml:/config/systems.yaml:ro
+      - watch-data:/data
+    stop_grace_period: 2m
+volumes:
+  watch-data:
