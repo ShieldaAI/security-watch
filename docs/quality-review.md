@@ -14,6 +14,7 @@ The alpha supports small installations with npm inventory, cve.now advisories, T
 - Relevant tracked CVEs and identifiers found in news are refreshed. Recent-entry collection does not establish exhaustive historical coverage for every product.
 - Multi-CVE articles keep unmatched subjects as separate review candidates until advisory aliases establish that they describe the same vulnerability.
 - OSV event ordering and independent limit events follow the [OSV schema algorithm](https://ossf.github.io/osv-schema/).
+- News text comes from an inert HTML parser, excluding scripts, styles, templates, comments and attributes. Parsing and traversal have input, depth and node limits. An article needs an explicit closing wrapper to be considered complete; malformed or over-limit pages retain the feed excerpt.
 - Newer source revisions take precedence. Future timestamps fail collection, and unchanged KEV records retain their content revision when the catalog changes.
 - The scan interval and news discovery window are independent. RSS/Atom and The Hacker News filter new stories by publication or modification time before fetching articles. Successful checkpoints allow catch-up after downtime; tracked findings and authoritative package matches remain in scope. Undated entries produce a health warning, and unchanged undated content does not create duplicate revisions or model calls.
 
@@ -42,7 +43,7 @@ The alpha supports small installations with npm inventory, cve.now advisories, T
 
 ## Validation
 
-The current checkout passes **458 tests** on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They include news-window and catch-up behavior, partial-collection regressions, exclusions citing unrelated or same-vendor products, worker cancellation during delivery, and real loopback SMTP socket/TLS checks. Provider transport tests exercise every profile through real loopback HTTP with simulated model responses, including authentication, schema/evidence validation, refusals, truncation and secret-bearing errors. `npm run check` also passes formatting, strict compilation and clean-package installation checks. The packed CLI, public types and runtime exports also pass on the minimum supported Node 24.0.0; CI now repeats that consumer check.
+The current checkout passes **514 tests** on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They include news-window and catch-up behavior, partial-collection regressions, exclusions citing unrelated or same-vendor products, worker cancellation during delivery, and real loopback SMTP socket/TLS checks. Provider transport tests exercise every profile through real loopback HTTP with simulated model responses, including authentication, schema/evidence validation, refusals, truncation and secret-bearing errors. `npm run check` also passes formatting, strict compilation and clean-package installation checks. The packed CLI, public types and runtime exports also pass on the minimum supported Node 24.0.0; CI now repeats that consumer check.
 
 Hosted CI for the release branch must pass at its final commit before merge. The repository requires an independent approval and passing checks.
 
@@ -54,6 +55,7 @@ Live source checks on 2026-10-24 included:
 
 - An exact query for `lodash@4.17.20` returned eight advisories without source errors, including five historical package matches.
 - A broad 24-hour scan initially hit HTTP 403 during detail collection. After pacing was added, a new scan of the 24-system sample completed all 157 public requests successfully: eight complete news articles and 143 advisories (134 published in the window and nine older records cited by news), with no source errors. The window was 2026-10-23 15:55 UTC through 2026-10-24 15:55 UTC. These are records returned by the configured sources, not a claim of exhaustive CVE coverage.
+- After the HTML parser change, a fresh live check completed nine public requests and returned the same eight complete article extracts. All eight text bodies were identical to the model evaluation sample.
 - Against one live feed snapshot, a 40-minute news window returned zero stories and a one-day window returned eight. All eight fell within that window. Public requests still occur in dry-run mode; models and notifications do not.
 
 Live model checks on 2026-10-24 used a fictional security bulletin through the production analyzer and HTTP client:

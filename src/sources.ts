@@ -1,4 +1,5 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { defaultTreeAdapter, parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5';
 import { compare, valid } from 'semver';
 import type {
   Config,
@@ -543,84 +544,90 @@ function xmlText(value: unknown): string {
   if (!value || typeof value !== 'object') return '';
   if (Array.isArray(value)) return value.map(xmlText).join(' ');
   return Object.entries(value)
-    .filter(([key]) => !key.startsWith('@_'))
+    .filter(([key]) => !key.startsWith('@_') && !HIDDEN_HTML_ELEMENTS.has(key.toLowerCase()))
     .map(([, child]) => xmlText(child))
     .join(' ');
 }
-const HTML_ENTITIES = new Map([
-  ['amp', '&'],
-  ['AMP', '&'],
-  ['lt', '<'],
-  ['LT', '<'],
-  ['gt', '>'],
-  ['GT', '>'],
-  ['quot', '"'],
-  ['QUOT', '"'],
-  ['apos', "'"],
-  ['nbsp', '\u00a0'],
-  ['NonBreakingSpace', '\u00a0'],
-  ['ensp', '\u2002'],
-  ['emsp', '\u2003'],
-  ['thinsp', '\u2009'],
-  ['hairsp', '\u200a'],
-  ['ndash', '–'],
-  ['mdash', '—'],
-  ['lsquo', '‘'],
-  ['rsquo', '’'],
-  ['sbquo', '‚'],
-  ['ldquo', '“'],
-  ['rdquo', '”'],
-  ['bdquo', '„'],
-  ['laquo', '«'],
-  ['raquo', '»'],
-  ['lsaquo', '‹'],
-  ['rsaquo', '›'],
-  ['hellip', '…'],
-  ['bull', '•'],
-  ['middot', '·'],
-  ['copy', '©'],
-  ['reg', '®'],
-  ['trade', '™'],
-  ['cent', '¢'],
-  ['pound', '£'],
-  ['yen', '¥'],
-  ['euro', '€'],
-  ['deg', '°'],
-  ['plusmn', '±'],
-  ['times', '×'],
-  ['divide', '÷'],
-  ['minus', '−'],
-  ['le', '≤'],
-  ['ge', '≥'],
-  ['ne', '≠'],
-]);
-function decodeEntities(value: string): string {
-  // Decode once, after stripping markup. A bounded reference cannot expand the
-  // input or turn escaped text into another round of HTML parsing.
-  return value.replace(
-    /&(#(?:[xX][\da-fA-F]{1,8}|\d{1,10})|[a-zA-Z][a-zA-Z0-9]{1,31});/g,
-    (entity, reference: string) => {
-      if (!reference.startsWith('#')) return HTML_ENTITIES.get(reference) ?? entity;
-      const hexadecimal = reference[1]?.toLowerCase() === 'x';
-      const code = parseInt(reference.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
-      return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
-        ? String.fromCodePoint(code)
-        : '\ufffd';
+const HIDDEN_HTML_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
+const MAX_HTML_BYTES = 2_000_000;
+const MAX_HTML_NODES = 100_000;
+const MAX_HTML_DEPTH = 256;
+type HtmlNode = DefaultTreeAdapterTypes.Node;
+
+function parseHtml(html: string, document = false): HtmlNode {
+  if (Buffer.byteLength(html) > MAX_HTML_BYTES) throw new SourceError('HTML input exceeds the size limit.');
+  let nodes = 0;
+  let depth = 0;
+  const account = () => {
+    if (++nodes > MAX_HTML_NODES) throw new SourceError('HTML structure exceeds the node limit.');
+  };
+  const treeAdapter: typeof defaultTreeAdapter = {
+    ...defaultTreeAdapter,
+    createDocument() {
+      account();
+      return defaultTreeAdapter.createDocument();
     },
-  );
+    createDocumentFragment() {
+      account();
+      return defaultTreeAdapter.createDocumentFragment();
+    },
+    createElement(...args) {
+      account();
+      return defaultTreeAdapter.createElement(...args);
+    },
+    createCommentNode(...args) {
+      account();
+      return defaultTreeAdapter.createCommentNode(...args);
+    },
+    insertText(parent, text) {
+      if (parent.childNodes.at(-1)?.nodeName !== '#text') account();
+      defaultTreeAdapter.insertText(parent, text);
+    },
+    insertTextBefore(parent, text, reference) {
+      if (parent.childNodes[parent.childNodes.indexOf(reference) - 1]?.nodeName !== '#text') account();
+      defaultTreeAdapter.insertTextBefore(parent, text, reference);
+    },
+    onItemPush() {
+      if (++depth > MAX_HTML_DEPTH) throw new SourceError('HTML structure exceeds the depth limit.');
+    },
+    onItemPop() {
+      depth--;
+    },
+  };
+  // parse5 builds an inert tree: it does not execute scripts or fetch resources.
+  return document
+    ? parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true, treeAdapter })
+    : parseFragment(html, { scriptingEnabled: true, treeAdapter });
+}
+function* visibleHtmlNodes(root: HtmlNode): Generator<HtmlNode> {
+  const pending: { node: HtmlNode; depth: number }[] = [{ node: root, depth: 0 }];
+  let visited = 0;
+  while (pending.length) {
+    const { node, depth } = pending.pop()!;
+    if (++visited > MAX_HTML_NODES || depth > MAX_HTML_DEPTH)
+      throw new SourceError('HTML structure exceeds the traversal limit.');
+    if (
+      node.nodeName === '#comment' ||
+      ('tagName' in node && HIDDEN_HTML_ELEMENTS.has(node.tagName.toLowerCase()))
+    )
+      continue;
+    yield node;
+    if ('childNodes' in node) {
+      if (visited + pending.length + node.childNodes.length > MAX_HTML_NODES)
+        throw new SourceError('HTML structure exceeds the traversal limit.');
+      for (let index = node.childNodes.length - 1; index >= 0; index--)
+        pending.push({ node: node.childNodes[index]!, depth: depth + 1 });
+    }
+  }
+}
+function htmlText(root: HtmlNode, limit = 16_000): string {
+  const parts: string[] = [];
+  for (const node of visibleHtmlNodes(root)) if ('value' in node) parts.push(node.value);
+  // Entity references have already been decoded once by the HTML parser.
+  return cleanText(parts.join(' ').replace(/\s+/g, ' ').trim(), limit);
 }
 function plainText(value: unknown, limit = 16_000): string {
-  return cleanText(
-    decodeEntities(
-      xmlText(value)
-        .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-        .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-        .replace(/<[^>]*>/g, ' '),
-    )
-      .replace(/\s+/g, ' ')
-      .trim(),
-    limit,
-  );
+  return htmlText(parseHtml(xmlText(value)), limit);
 }
 function list(value: unknown): unknown[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
@@ -791,39 +798,25 @@ function hackerNewsUrl(value: string): string | undefined {
 
 /** Extract only the marked article body, never navigation/related-story text.
  * Missing or malformed wrappers leave the feed excerpt explicitly incomplete. */
-function articleBody(html: string): string | undefined {
-  const sanitized = html
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ');
-  const tags = /<\/?[a-z][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>/gi;
-  let match: RegExpExecArray | null;
-  let element: string | undefined;
-  let start = 0;
-  let depth = 0;
-  while ((match = tags.exec(sanitized))) {
-    const tag = match[0];
-    const name = tag.match(/^<\/?([a-z][a-z0-9-]*)/i)?.[1]?.toLowerCase();
-    if (!name) continue;
-    if (!element) {
-      if (tag.startsWith('</') || !['div', 'article', 'section'].includes(name)) continue;
-      const attributes = new Map<string, string>();
-      for (const attribute of tag.matchAll(/\b([a-z][a-z0-9_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi))
-        attributes.set(attribute[1]!.toLowerCase(), attribute[2] ?? attribute[3] ?? '');
-      if (
-        !(attributes.get('itemprop') ?? '').split(/\s+/).includes('articleBody') &&
-        !(attributes.get('class') ?? '')
-          .split(/\s+/)
-          .some((value) => ['articlebody', 'post-body'].includes(value))
-      )
-        continue;
-      element = name;
-      start = tags.lastIndex;
-      depth = 1;
-    } else if (name === element) {
-      depth += tag.startsWith('</') ? -1 : tag.endsWith('/>') ? 0 : 1;
-      if (depth === 0) return sanitized.slice(start, match.index);
-    }
+function articleBody(html: string): DefaultTreeAdapterTypes.Element | undefined {
+  for (const node of visibleHtmlNodes(parseHtml(html, true))) {
+    if (
+      !('tagName' in node) ||
+      node.namespaceURI !== 'http://www.w3.org/1999/xhtml' ||
+      !['div', 'article', 'section'].includes(node.tagName)
+    )
+      continue;
+    const attributes = new Map(node.attrs.map(({ name, value }) => [name, value]));
+    if (
+      !(attributes.get('itemprop') ?? '').split(/\s+/).includes('articleBody') &&
+      !(attributes.get('class') ?? '')
+        .split(/\s+/)
+        .some((value) => ['articlebody', 'post-body'].includes(value))
+    )
+      continue;
+    // Parser recovery can create or implicitly close nodes. Only an explicit
+    // source wrapper establishes that the complete article body was received.
+    return node.sourceCodeLocation?.startTag && node.sourceCodeLocation.endTag ? node : undefined;
   }
   return undefined;
 }
@@ -847,7 +840,7 @@ async function hackerNews(http: HttpClient, now: number, window: NewsWindow): Pr
           if (response.status !== 200) return;
           const body = articleBody(response.body);
           if (!body) return;
-          const full = plainText(body, 16_001);
+          const full = htmlText(body, 16_001);
           if (!full || full.length < entry.description.length) return;
           entry.description = full.slice(0, 16_000);
           entry.content_status = full.length <= 16_000 ? 'full' : 'excerpt';

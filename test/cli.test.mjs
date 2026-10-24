@@ -351,13 +351,15 @@ test('doctor reports variable names without exposing supplied secrets or making 
     },
   });
   const secret = 'DO_NOT_PRINT_MODEL_SECRET';
-  const webhook = 'https://hooks.slack.com/services/DO_NOT_PRINT_SLACK_SECRET';
+  const webhookSecret = 'DO_NOT_PRINT_SLACK_SECRET';
+  const webhook = `https://hooks.slack.com/services/${webhookSecret}`;
   const ready = run(['doctor'], f.dir, { WATCH_CLI_MODEL_SECRET: secret, WATCH_CLI_SLACK_TOKEN: webhook });
   assert.equal(ready.code, 0, ready.stderr);
   assert.equal(JSON.parse(ready.stdout).ok, true);
   assert(!ready.stdout.includes(secret));
-  assert(!ready.stdout.includes(webhook));
+  assert(!ready.stdout.includes(webhookSecret));
   assert(!ready.stderr.includes(secret));
+  assert(!ready.stderr.includes(webhookSecret));
   const missing = run(['doctor'], f.dir, { WATCH_CLI_MODEL_SECRET: '', WATCH_CLI_SLACK_TOKEN: '' });
   assert.equal(missing.code, 2);
   const report = JSON.parse(missing.stdout);
