@@ -51,7 +51,7 @@ The alpha supports small installations with library inventories across 12 ecosys
 
 All **639 tests** pass on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They cover news windows, source recovery, package identity/version boundaries, model evidence validation, notification retries, concurrent SQLite readers and worker-lock contention. Maintenance tests cover read-only previews, bounded atomic pruning, protected records, migration, temporary restore verification and damaged-backup rejection. Provider protocol tests use real loopback HTTP with simulated responses; they do not establish hosted-model accuracy. `npm run check` also passes formatting, strict compilation and clean-package consumer checks.
 
-Hosted CI for the release branch must pass at its final commit before merge. The repository requires an independent approval and passing checks.
+Hosted CI for the release branch must pass at its final commit before merge. The sole-maintainer workflow requires a pull request, passing checks and resolved review conversations, without a mandatory second-person approval. Branch and release-tag protections remain enabled.
 
 The runtime image passes checks with a non-root user, a read-only root filesystem, disabled network access, private configuration and a native SQLite volume. Repeated scans, deduplication, monitoring health and verified backup pass. The packed CLI, public types and exports also pass on the minimum supported Node 24.0.0. The production dependency audit reports no known vulnerabilities at review time.
 
@@ -95,7 +95,7 @@ A real-article evaluation used the sample inventory of 24 common systems with no
 
 These results support using model analysis as a review aid. They do not establish reliable automatic classification across arbitrary articles. Disagreement, failed validation and missing installed versions remain visible and cannot establish that a system is safe. No real notifications were sent.
 
-- Obtain passing hosted checks and the required independent approval for the final commit before publishing.
+- Merge through a checked pull request and verify the release commit before publishing.
 - Repeat the synthetic live check when selecting other model IDs or provider accounts, and validate notification destinations separately. Mocked protocol tests do not cover hosted model behavior or destination credentials.
 - Observe scheduled operation, source outages and delivery failures in a representative deployment before relying on the monitor operationally.
 - Plan storage and retention before increasing the installation size. Retention is opt-in, and protected unresolved records can continue growing. Current evidence and findings are loaded into memory during a scan.

@@ -2,7 +2,7 @@
 
 An experimental TypeScript bot that compares security advisories and news with your system inventory, records its evidence, and routes findings to Slack or email.
 
-**Alpha.** The package is `@shieldaai/security-watch`. It is not yet published to npm; build it locally using the steps below. See [coverage and security limits](SECURITY.md) before deploying it.
+**Alpha.** The package is `@shieldaai/security-watch`; prereleases use the `alpha` tag. See [coverage and security limits](SECURITY.md) before deploying it.
 
 ## Features
 
@@ -26,7 +26,13 @@ An experimental TypeScript bot that compares security advisories and news with y
 
 ## Install and preview
 
-Use Node.js **24 or newer**. From this checkout:
+Use Node.js **24 or newer**. Install the alpha release:
+
+```sh
+npm install --global @shieldaai/security-watch@alpha
+```
+
+To build and install from a source checkout:
 
 ```sh
 npm ci

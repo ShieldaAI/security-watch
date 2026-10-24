@@ -63,7 +63,7 @@ Keep provider and source schemas explicit. Do not accept a new service's respons
 
 For behavioral changes, include a concise reproduction, before/after behavior, relevant tests and any change to coverage or privacy. Tests should exercise outcomes rather than mirror implementation details.
 
-`main` and release branches require a pull request, one approving review, resolved review conversations and passing CI against the latest base branch. New commits dismiss stale approvals, and someone other than the last person to push must approve the latest changes. Direct pushes, force pushes, deletion and administrator bypass are blocked.
+`main` and release branches require a pull request, resolved review conversations and passing CI against the latest base branch, including CodeQL. A sole maintainer may merge their own checked pull request; a second person's approval is not required. Direct pushes, force pushes, deletion and administrator bypass are blocked.
 
 CI checks out source without saving its GitHub token and installs dependencies without lifecycle scripts. Pull requests also receive a dependency review. The CodeQL workflow scans TypeScript, JavaScript and GitHub Actions without building the project; Dependabot checks npm packages and pinned Actions weekly. New workflow checks must pass on GitHub before they become required merge checks.
 
