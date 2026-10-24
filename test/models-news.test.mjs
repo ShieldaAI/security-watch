@@ -128,6 +128,8 @@ test('new vulnerability analysis targets the configured product and event and pr
   const context = JSON.parse(request.messages[1].content);
   assert.deepEqual(context.target, {
     event_id: CVE,
+    verified_aliases: [CVE],
+    installed_version_known: true,
     component_id: 'product:acme gateway',
     category: 'product',
   });
@@ -159,6 +161,29 @@ test('an explicitly fixed installed product version is recorded quietly as model
   assert.equal(result.applicability, 'unknown');
   assert.equal(decide(result, configuration()).action, 'record');
 });
+
+for (const product of ['Another Gateway', 'Acme Controller'])
+  test(`an exclusion quoted for ${product} cannot suppress an Acme Gateway finding`, async () => {
+    const quote = `Researchers disclosed ${CVE}, which affects ${product} versions before 2.5.0. Version 2.5.0 fixes the issue.`;
+    const result = await analyze(
+      payload(
+        {
+          impact: 'not_affected',
+          affected_products: [product],
+          rationale: `The article reports a fixed version of ${product}.`,
+        },
+        quote,
+      ),
+      {
+        evidence: [{ ...article, description: quote }],
+        inventory: { ...system, products: [{ ...system.products[0], version: '2.5.0' }] },
+      },
+    );
+    assert.equal(result.news_analysis.impact, 'unknown');
+    assert.equal(result.relevance, 'unknown');
+    assert.equal(result.applicability, 'unknown');
+    assert.equal(decide(result, configuration()).action, 'digest');
+  });
 
 test('a mere product mention is general news while a known-vulnerability exploitation update stays actionable', async () => {
   const general =
@@ -259,7 +284,7 @@ test('ordinary complete article text fits the actual input budget and larger art
     http,
   });
   assert.equal(full.news_analysis.impact, 'affected');
-  assert(context.evidence[0].description.length > 6000);
+  assert(context.evidence[0].excerpts.map((excerpt) => excerpt.text).join('').length > 6000);
   assert.deepEqual(context.coverage.truncated_evidence_ids, []);
   const truncated = await analyze(payload(), {
     evidence: [{ ...article, description: `${QUOTE} ${'Additional context. '.repeat(2000)}` }],
@@ -367,4 +392,409 @@ test('an affected claim naming another product cannot assert impact for the conf
   });
   assert.equal(result.news_analysis.impact, 'unknown');
   assert.equal(decide(result, configuration()).action, 'digest');
+});
+
+function referencedPayload(context, news = {}) {
+  const excerpts = context.evidence.flatMap((item) => item.excerpts);
+  const quotes = excerpts.filter((item) => item.text.length >= 20).map((item) => ({ excerpt_id: item.id }));
+  const value = payload({ ...news, quotes }, QUOTE, {
+    evidence_ids: context.evidence.map((item) => item.id),
+    quotes,
+  });
+  const { classification, impact, ...rest } = value.news_analysis;
+  value.news_analysis = { ...rest, classification_and_impact: `${classification}:${impact}` };
+  return value;
+}
+
+test('excerpt references preserve article entities, table spacing and Unicode without model transcription', async () => {
+  // These entity and table forms caused failed verbatim quotes in the live Brotli article review.
+  const description =
+    'Tracked as&nbsp; CVE-2026-111497 , the flaw allows crafted compressed data to corrupt memory. ' +
+    'The flaw was&nbsp; first disclosed on October 21 , when Node.js and Google shipped fixes. ' +
+    'Node.js 22.x, 24.x, 26.x before the fix; 20.x and older (end of life) 22.23.4, 24.22.1, 26.12.1 ' +
+    'The built-in&nbsp;fetch()&nbsp;reads a response sent with&nbsp;Content-Encoding: br. ' +
+    'Quotes such as “decoder state” and Unicode 🔒 remain exactly as supplied. '.repeat(4);
+  const source = { ...article, title: 'Brotli decoder report', aliases: ['CVE-2026-111497'], description };
+  const inventory = { ...system, products: [{ name: 'Node.js', keywords: [] }] };
+  const target = { ...finding, event_id: 'CVE-2026-111497', component_id: 'product:node.js' };
+  let context;
+  let wire;
+  let cached;
+  let calls = 0;
+  const store = state();
+  const analyzer = new ModelAnalyzer(
+    configuration(),
+    {
+      ...store,
+      setMeta: (key, value) => {
+        cached = value;
+        store.setMeta(key, value);
+      },
+    },
+    async (_url, options) => {
+      calls++;
+      wire = JSON.parse(options.body);
+      context = JSON.parse(wire.messages[1].content);
+      return response(
+        referencedPayload(context, {
+          classification: 'known_vulnerability_update',
+          impact: 'unknown',
+          affected_products: ['Node.js'],
+          affected_versions: ['22.x, 24.x, 26.x before the fix'],
+          prerequisites: ['Content-Encoding: br'],
+        }),
+      );
+    },
+    () => NOW,
+  );
+  const result = await analyzer.analyze(target, inventory, [source]);
+  assert.equal(result.ai.status, 'complete');
+  assert.equal(result.news_analysis.classification, 'known_vulnerability_update');
+  assert.equal(result.news_analysis.impact, 'unknown');
+  const excerpts = context.evidence[0].excerpts;
+  assert.equal(excerpts.map((item) => item.text).join(''), `${source.title}\n${description}`);
+  assert(excerpts.every((item) => item.text.length >= 20 && item.text.length <= 600));
+  assert(excerpts.every((item) => item.text.isWellFormed()));
+  assert.deepEqual(
+    result.news_analysis.quotes,
+    excerpts.map((item) => ({ evidence_id: source.id, quote: item.text })),
+  );
+  assert(!cached.includes('excerpt_id'), 'Only exact source quotes are persisted, not request-scoped IDs');
+  assert(!cached.includes('classification_and_impact'));
+  const unsupportedBounds = (value) =>
+    value &&
+    typeof value === 'object' &&
+    Object.entries(value).some(
+      ([key, child]) =>
+        ['minLength', 'maxLength', 'minItems', 'maxItems'].includes(key) || unsupportedBounds(child),
+    );
+  assert(
+    !unsupportedBounds(wire.response_format.json_schema.schema),
+    'The common schema uses the portable Claude/Cohere subset',
+  );
+  const schema = wire.response_format.json_schema.schema;
+  assert.deepEqual(
+    schema.properties.quotes.items.properties.excerpt_id.enum,
+    excerpts.map((item) => item.id),
+  );
+  assert.match(schema.properties.summary.description, /1600 characters/);
+  assert.match(schema.properties.quotes.description, /1 to 8/);
+  assert(
+    !schema.properties.news_analysis.anyOf[1].properties.classification_and_impact.enum.includes(
+      'unknown:affected',
+    ),
+  );
+  assert.equal((await analyzer.analyze(target, inventory, [source])).ai.status, 'complete');
+  assert.equal(calls, 1, 'Resolved source quotes remain valid on cache reuse');
+});
+
+test('reference citations cannot invent text, override evidence, or bypass claim and news checks', async (t) => {
+  for (const [name, change, expected] of [
+    [
+      'unknown ID',
+      (value) => {
+        value.quotes = [{ excerpt_id: 'e999s0' }];
+      },
+      'MODEL_UNSUPPORTED_EXCERPT',
+    ],
+    [
+      'overridden evidence',
+      (value) => {
+        value.quotes[0].evidence_id = 'invented';
+      },
+      'MODEL_UNSUPPORTED_EXCERPT',
+    ],
+    [
+      'overridden quote',
+      (value) => {
+        value.quotes[0].quote = 'This invented source claims that all releases are safe.';
+      },
+      'MODEL_UNSUPPORTED_EXCERPT',
+    ],
+    [
+      'uncited evidence',
+      (value) => {
+        value.evidence_ids = ['unknown'];
+      },
+      'MODEL_UNKNOWN_EVIDENCE',
+    ],
+    [
+      'paraphrased claim',
+      (value) => {
+        value.news_analysis.prerequisites = ['No authentication is required'];
+      },
+      'MODEL_UNSUPPORTED_NEWS_CLAIM',
+    ],
+    [
+      'overlong summary',
+      (value) => {
+        value.summary = 'x'.repeat(1601);
+      },
+      'MODEL_ANALYSIS_FAILED',
+    ],
+    [
+      'too many references',
+      (value) => {
+        value.quotes = Array(9).fill(value.quotes[0]);
+      },
+      'MODEL_ANALYSIS_FAILED',
+    ],
+    [
+      'overlong claim',
+      (value) => {
+        value.news_analysis.affected_products = ['x'.repeat(201)];
+      },
+      'MODEL_ANALYSIS_FAILED',
+    ],
+    [
+      'inconsistent verdict',
+      (value) => {
+        value.news_analysis.classification_and_impact = 'general_news:affected';
+      },
+      'MODEL_INCONSISTENT_NEWS_ANALYSIS',
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const result = await analyze(undefined, {
+        http: async (_url, options) => {
+          const context = JSON.parse(JSON.parse(options.body).messages[1].content);
+          const value = referencedPayload(context);
+          change(value);
+          return response(value);
+        },
+      });
+      assert.equal(result.ai.status, 'unavailable');
+      assert(result.reasons.some((reason) => reason.startsWith(expected)));
+    });
+  }
+  const advisory = { ...article, kind: 'advisory', id: 'osv:advisory' };
+  const result = await analyze(undefined, {
+    evidence: [article, advisory],
+    target: { ...finding, evidence_ids: [article.id, advisory.id] },
+    http: async (_url, options) => {
+      const wire = JSON.parse(options.body);
+      const context = JSON.parse(wire.messages[1].content);
+      const schema = wire.response_format.json_schema.schema;
+      const newsIds = context.evidence
+        .filter((item) => item.kind === 'news')
+        .flatMap((item) => item.excerpts.map((excerpt) => excerpt.id));
+      assert.deepEqual(
+        schema.properties.news_analysis.anyOf[1].properties.quotes.items.properties.excerpt_id.enum,
+        newsIds,
+      );
+      assert.deepEqual(
+        schema.properties.quotes.items.properties.excerpt_id.enum,
+        context.evidence.flatMap((item) => item.excerpts.map((excerpt) => excerpt.id)),
+      );
+
+      const value = referencedPayload(context);
+      value.news_analysis.quotes = [
+        { excerpt_id: context.evidence.find((item) => item.id === advisory.id).excerpts[0].id },
+      ];
+      return response(value);
+    },
+  });
+  assert.equal(result.ai.status, 'unavailable');
+  assert(result.reasons.some((reason) => reason.startsWith('MODEL_UNSUPPORTED_NEWS_QUOTE')));
+});
+
+test('an advisory-verified CVE alias can identify a canonical GHSA target but news co-mentions cannot', async (t) => {
+  const ghsa = 'GHSA-2222-3333-4444';
+  const other = 'CVE-2026-54321';
+  const news = {
+    ...article,
+    aliases: [CVE, other, ghsa],
+    description: `${QUOTE} Another issue is ${other}.`,
+  };
+  const advisory = { ...article, kind: 'advisory', id: 'osv:ghsa', aliases: [ghsa, CVE] };
+  const target = { ...finding, event_id: ghsa, evidence_ids: [article.id, advisory.id] };
+  let context;
+  const result = await analyze(undefined, {
+    evidence: [news, advisory],
+    target,
+    http: async (_url, options) => {
+      context = JSON.parse(JSON.parse(options.body).messages[1].content);
+      return response(payload());
+    },
+  });
+  assert.equal(result.ai.status, 'complete');
+  assert.deepEqual(context.target.verified_aliases, [ghsa, CVE]);
+  for (const [name, evidence] of [
+    ['only news co-mentions', [news]],
+    ['unrelated advisory', [news, { ...advisory, aliases: [other, CVE] }]],
+  ])
+    await t.test(name, async () => {
+      const rejected = await analyze(payload(), { evidence, target });
+      assert.equal(rejected.ai.status, 'unavailable');
+      assert(rejected.reasons.some((reason) => reason.startsWith('MODEL_AMBIGUOUS_NEWS_SUBJECT')));
+    });
+  const prefix = `${CVE}0`;
+  const wrongId = `${prefix} affects Acme Gateway versions before 2.5.0. Version 2.5.0 fixes it.`;
+  const rejected = await analyze(payload({}, wrongId), {
+    evidence: [{ ...article, description: wrongId, aliases: [CVE, prefix] }],
+  });
+  assert(rejected.reasons.some((reason) => reason.startsWith('MODEL_AMBIGUOUS_NEWS_SUBJECT')));
+});
+
+test('excerpt metadata and source escaping stay within the input limit at maximum context size', async () => {
+  const config = configuration();
+  config.models.max_input_chars = 100_000;
+  let context;
+  let schema;
+  const result = await analyze(payload(), {
+    config,
+    evidence: [{ ...article, description: `${QUOTE} ${'Unicode 🔒 and \\"quoted\\" text. '.repeat(6000)}` }],
+    http: async (_url, options) => {
+      const request = JSON.parse(options.body);
+      context = JSON.parse(request.messages[1].content);
+      schema = request.response_format.json_schema.schema;
+      assert(request.messages[1].content.length <= config.models.max_input_chars);
+      return response(payload());
+    },
+  });
+  assert.equal(result.ai.status, 'complete');
+  assert.equal(result.news_analysis.classification, 'unknown');
+  assert.deepEqual(context.coverage.truncated_evidence_ids, [article.id]);
+  assert(context.evidence[0].excerpts.every((item) => item.text.length <= 600 && item.text.isWellFormed()));
+  const countEnums = (value) =>
+    !value || typeof value !== 'object'
+      ? 0
+      : (Array.isArray(value.enum) ? value.enum.length : 0) +
+        Object.entries(value)
+          .filter(([key]) => key !== 'enum')
+          .reduce((sum, [, child]) => sum + countEnums(child), 0);
+  assert(
+    countEnums(schema) < 1000,
+    'Large source contexts stay within the strict provider schema enum limit',
+  );
+});
+
+test('the title length cap never splits a Unicode character in transported excerpts', async () => {
+  let context;
+  const result = await analyze(payload(), {
+    evidence: [{ ...article, title: `${'A'.repeat(299)}🔒` }],
+    http: async (_url, options) => {
+      context = JSON.parse(JSON.parse(options.body).messages[1].content);
+      return response(payload());
+    },
+  });
+  assert.equal(result.ai.status, 'complete');
+  assert(context.evidence[0].title.isWellFormed());
+  assert(context.evidence[0].excerpts.every((item) => item.text.isWellFormed()));
+  assert.equal(context.evidence[0].title.length, 299);
+  assert.equal(result.news_analysis.classification, 'unknown');
+  assert.deepEqual(context.coverage.truncated_evidence_ids, [article.id]);
+});
+
+test('impact verdicts require a version for the exact configured target', async (t) => {
+  for (const [name, inventory, target, known] of [
+    ['versioned target product', system, finding, true],
+    [
+      'unversioned target',
+      { ...system, products: [{ ...system.products[0], version: undefined }] },
+      finding,
+      false,
+    ],
+    [
+      'unrelated versioned product',
+      {
+        ...system,
+        products: [
+          { ...system.products[0], version: undefined },
+          { name: 'Another Gateway', version: '1.0.0', keywords: [] },
+        ],
+      },
+      finding,
+      false,
+    ],
+    [
+      'unrelated versioned component',
+      {
+        ...system,
+        products: [{ ...system.products[0], version: undefined }],
+        components: [{ id: 'react', ecosystem: 'npm', name: 'react', version: '20.0.0' }],
+      },
+      finding,
+      false,
+    ],
+    [
+      'versioned target component',
+      { ...system, components: [{ id: 'acme', ecosystem: 'npm', name: 'Acme Gateway', version: '2.4.0' }] },
+      { ...finding, component_id: 'acme' },
+      true,
+    ],
+    ['unscoped target', system, { ...finding, component_id: undefined }, false],
+  ])
+    await t.test(name, async () => {
+      let context;
+      let verdicts;
+      const result = await analyze(undefined, {
+        inventory,
+        target,
+        http: async (_url, options) => {
+          const wire = JSON.parse(options.body);
+          context = JSON.parse(wire.messages[1].content);
+          verdicts =
+            wire.response_format.json_schema.schema.properties.news_analysis.anyOf[1].properties
+              .classification_and_impact.enum;
+          return response(referencedPayload(context, { impact: 'unknown', affected_versions: [] }));
+        },
+      });
+      assert.equal(result.ai.status, 'complete');
+      assert.equal(context.target.installed_version_known, known);
+      assert.equal(verdicts.includes('known_vulnerability_update:not_affected'), known);
+      assert.equal(verdicts.includes('new_vulnerability:affected'), known);
+      assert(verdicts.includes('general_news:not_applicable'));
+      assert(verdicts.includes('known_vulnerability_update:unknown'));
+      if (!known)
+        assert(
+          verdicts.every((value) => value.endsWith(':unknown') || value === 'general_news:not_applicable'),
+        );
+    });
+});
+
+test('a fixed version statement cannot become an invented affected range', async () => {
+  const report = `${CVE} affects Acme Gateway. Fixed in September 2026 in version 26.4.303.`;
+  const result = await analyze(undefined, {
+    evidence: [{ ...article, description: report }],
+    http: async (_url, options) => {
+      const context = JSON.parse(JSON.parse(options.body).messages[1].content);
+      return response(
+        referencedPayload(context, { impact: 'unknown', affected_versions: ['before 26.4.303'] }),
+      );
+    },
+  });
+  assert.equal(result.ai.status, 'unavailable');
+  assert(result.reasons.some((reason) => reason.startsWith('MODEL_UNSUPPORTED_NEWS_CLAIM')));
+  assert.equal(result.news_analysis.impact, 'unknown');
+});
+
+test('schema-ignoring models cannot use an unscoped versioned product to declare safety, including cache hits', async (t) => {
+  for (const form of ['legacy', 'excerpt'])
+    await t.test(form, async () => {
+      let calls = 0;
+      const inventory = { ...system, products: [{ ...system.products[0], version: '2.5.0' }] };
+      const target = { ...finding, component_id: undefined, category: 'news' };
+      const analyzer = new ModelAnalyzer(
+        configuration(),
+        state(),
+        async (_url, options) => {
+          calls++;
+          const context = JSON.parse(JSON.parse(options.body).messages[1].content);
+          assert.equal(context.target.installed_version_known, false);
+          const news = { impact: 'not_affected' };
+          return response(form === 'legacy' ? payload(news) : referencedPayload(context, news));
+        },
+        () => NOW,
+      );
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await analyzer.analyze(target, inventory, [article]);
+        assert.equal(result.ai.status, 'complete');
+        assert.equal(result.news_analysis.impact, 'unknown');
+        assert.equal(result.relevance, 'unknown');
+        assert.equal(result.applicability, 'unknown');
+        assert.notEqual(decide(result, configuration()).action, 'record');
+      }
+      assert.equal(calls, 1, 'Cached output must receive the same target guard as fresh output');
+    });
 });

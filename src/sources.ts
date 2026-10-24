@@ -11,7 +11,7 @@ import type {
 } from './types.js';
 import { cleanText, hash, highest, timestamp } from './util.js';
 import { collectCveNow, evidenceRelevant } from './cve-now.js';
-import { SourceError } from './source-error.js';
+import { PartialSourceError, SourceError } from './source-error.js';
 
 const OSV = 'https://api.osv.dev/v1';
 const GITHUB = 'https://api.github.com/advisories';
@@ -547,23 +547,76 @@ function xmlText(value: unknown): string {
     .map(([, child]) => xmlText(child))
     .join(' ');
 }
+const HTML_ENTITIES = new Map([
+  ['amp', '&'],
+  ['AMP', '&'],
+  ['lt', '<'],
+  ['LT', '<'],
+  ['gt', '>'],
+  ['GT', '>'],
+  ['quot', '"'],
+  ['QUOT', '"'],
+  ['apos', "'"],
+  ['nbsp', '\u00a0'],
+  ['NonBreakingSpace', '\u00a0'],
+  ['ensp', '\u2002'],
+  ['emsp', '\u2003'],
+  ['thinsp', '\u2009'],
+  ['hairsp', '\u200a'],
+  ['ndash', '–'],
+  ['mdash', '—'],
+  ['lsquo', '‘'],
+  ['rsquo', '’'],
+  ['sbquo', '‚'],
+  ['ldquo', '“'],
+  ['rdquo', '”'],
+  ['bdquo', '„'],
+  ['laquo', '«'],
+  ['raquo', '»'],
+  ['lsaquo', '‹'],
+  ['rsaquo', '›'],
+  ['hellip', '…'],
+  ['bull', '•'],
+  ['middot', '·'],
+  ['copy', '©'],
+  ['reg', '®'],
+  ['trade', '™'],
+  ['cent', '¢'],
+  ['pound', '£'],
+  ['yen', '¥'],
+  ['euro', '€'],
+  ['deg', '°'],
+  ['plusmn', '±'],
+  ['times', '×'],
+  ['divide', '÷'],
+  ['minus', '−'],
+  ['le', '≤'],
+  ['ge', '≥'],
+  ['ne', '≠'],
+]);
+function decodeEntities(value: string): string {
+  // Decode once, after stripping markup. A bounded reference cannot expand the
+  // input or turn escaped text into another round of HTML parsing.
+  return value.replace(
+    /&(#(?:[xX][\da-fA-F]{1,8}|\d{1,10})|[a-zA-Z][a-zA-Z0-9]{1,31});/g,
+    (entity, reference: string) => {
+      if (!reference.startsWith('#')) return HTML_ENTITIES.get(reference) ?? entity;
+      const hexadecimal = reference[1]?.toLowerCase() === 'x';
+      const code = parseInt(reference.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
+      return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+        ? String.fromCodePoint(code)
+        : '\ufffd';
+    },
+  );
+}
 function plainText(value: unknown, limit = 16_000): string {
   return cleanText(
-    xmlText(value)
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-      .replace(/<[^>]*>/g, ' ')
-      .replace(
-        /&(?:amp|lt|gt|quot|apos);/g,
-        (entity) =>
-          ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" })[entity] ?? entity,
-      )
-      .replace(/&#(x[\da-f]+|\d+);/gi, (_, value: string) => {
-        const code = value[0]?.toLowerCase() === 'x' ? parseInt(value.slice(1), 16) : Number(value);
-        return Number.isInteger(code) && code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
-          ? String.fromCodePoint(code)
-          : ' ';
-      })
+    decodeEntities(
+      xmlText(value)
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+        .replace(/<[^>]*>/g, ' '),
+    )
       .replace(/\s+/g, ' ')
       .trim(),
     limit,
@@ -576,7 +629,62 @@ function feedDate(value: unknown): string | undefined {
   const input = xmlText(value);
   return input && Number.isFinite(Date.parse(input)) ? timestamp(Date.parse(input)) : undefined;
 }
-async function feed(url: string, source: string, http: HttpClient, now: number): Promise<Evidence[]> {
+interface NewsWindow {
+  cutoff: number;
+  tracked: Set<string>;
+  previous: Map<string, Evidence>;
+}
+interface FeedResult {
+  evidence: Evidence[];
+  undated: Set<string>;
+}
+function newsWindow(
+  source: string,
+  checkpoint: string | undefined,
+  lookbackMinutes: number,
+  previous: Evidence[],
+  inventory: Inventory,
+  now: number,
+): NewsWindow {
+  const lookback = lookbackMinutes * 60_000;
+  const last = checkpoint === undefined ? now : Date.parse(checkpoint);
+  if (!Number.isFinite(last) || last > now)
+    throw new SourceError('Invalid news checkpoint; reset it before collecting.');
+  return {
+    // Revisit a small checkpoint overlap after an outage, even when the normal window is shorter.
+    cutoff: Math.max(0, Math.min(now - lookback, last - Math.min(5 * 60_000, lookback))),
+    tracked: new Set(
+      previous
+        .filter((item) => item.source === source && item.kind === 'news' && evidenceRelevant(item, inventory))
+        .map((item) => item.id),
+    ),
+    previous: new Map(previous.filter((item) => item.source === source).map((item) => [item.id, item])),
+  };
+}
+function stabilizeUndated(result: FeedResult, previous: Map<string, Evidence>): void {
+  const content = (item: Evidence) =>
+    hash([
+      item.title,
+      item.url,
+      item.description,
+      item.aliases,
+      item.severity,
+      item.published_at,
+      item.content_status,
+    ]);
+  for (const item of result.evidence) {
+    const old = previous.get(item.id);
+    if (result.undated.has(item.id) && old && content(old) === content(item))
+      item.modified_at = old.modified_at;
+  }
+}
+async function feed(
+  url: string,
+  source: string,
+  http: HttpClient,
+  now: number,
+  window: NewsWindow,
+): Promise<FeedResult> {
   const response = await http(url, { maxBytes: 2_000_000 });
   if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
   if (/<!\s*(?:DOCTYPE|ENTITY)\b/i.test(response.body))
@@ -608,6 +716,7 @@ async function feed(url: string, source: string, http: HttpClient, now: number):
   fallback.search = '';
   fallback.hash = '';
   const results = new Map<string, Evidence>();
+  const undated = new Set<string>();
   for (const rawEntry of entries) {
     const entry = record(rawEntry);
     const title = plainText(entry.title, 500);
@@ -625,13 +734,17 @@ async function feed(url: string, source: string, http: HttpClient, now: number):
     const externalId = xmlText(entry.id ?? entry.guid).trim() || (link !== fallback.href ? link : '');
     if (!externalId) throw new SourceError('Feed entry is missing a stable ID or link.');
     const published = feedDate(entry.published ?? entry.pubDate);
-    const modified = feedDate(entry.updated) ?? published ?? timestamp(now);
+    const sourceModified = feedDate(entry.updated) ?? published;
+    if ([sourceModified, published].some((value) => value && Date.parse(value) > now + 5 * 60_000))
+      throw new SourceError('Feed returned a future timestamp; collection is incomplete.');
+    const modified = sourceModified ?? timestamp(now);
     const id = `${source}:entry:${hash(externalId).slice(0, 32)}`;
+    if (sourceModified && Date.parse(sourceModified) < window.cutoff && !window.tracked.has(id)) continue;
     const foundAliases =
       `${title}\n${description}\n${link}`.match(
         /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
       ) ?? [];
-    retainNewest(results, {
+    const evidence: Evidence = {
       id,
       source,
       kind: 'news',
@@ -645,9 +758,15 @@ async function feed(url: string, source: string, http: HttpClient, now: number):
       ...(published ? { published_at: published } : {}),
       packages: [],
       content_status: description ? 'excerpt' : 'unavailable',
-    });
+    };
+    const old = results.get(id);
+    if (!old || Date.parse(modified) >= Date.parse(old.modified_at)) {
+      results.set(id, evidence);
+      if (sourceModified) undated.delete(id);
+      else undated.add(id);
+    }
   }
-  return [...results.values()];
+  return { evidence: [...results.values()], undated };
 }
 
 function hackerNewsUrl(value: string): string | undefined {
@@ -709,8 +828,9 @@ function articleBody(html: string): string | undefined {
   return undefined;
 }
 
-async function hackerNews(http: HttpClient, now: number): Promise<Evidence[]> {
-  const entries = await feed(HACKER_NEWS, 'hacker_news', http, now);
+async function hackerNews(http: HttpClient, now: number, window: NewsWindow): Promise<FeedResult> {
+  const result = await feed(HACKER_NEWS, 'hacker_news', http, now, window);
+  const entries = result.evidence;
   // RSS is a finite current window. Articles outside the fetch budget remain
   // visible as excerpts; models cannot use them as complete dismissal evidence.
   for (let offset = 0; offset < Math.min(entries.length, 50); offset += 4)
@@ -743,10 +863,11 @@ async function hackerNews(http: HttpClient, now: number): Promise<Evidence[]> {
         }
       }),
     );
-  return entries;
+  stabilizeUndated(result, window.previous);
+  return result;
 }
 
-/** Collect complete source revisions. Failed sources retain their checkpoint and cached evidence. */
+/** Collect source evidence and report failures without advancing failed sources' checkpoints. */
 export async function collectSources(
   inventory: Inventory,
   config: Config,
@@ -756,8 +877,18 @@ export async function collectSources(
   previousEvidence: Evidence[] = [],
 ): Promise<SourceResult> {
   const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints } };
-  const jobs: { source: string; run: () => Promise<Evidence[]> }[] = [];
-  if (config.sources.hacker_news) jobs.push({ source: 'hacker_news', run: () => hackerNews(http, now) });
+  const jobs: { source: string; run: () => Promise<Evidence[] | FeedResult> }[] = [];
+  const window = (source: string) =>
+    newsWindow(
+      source,
+      checkpoints[source],
+      config.news_lookback_minutes ?? 60,
+      previousEvidence,
+      inventory,
+      now,
+    );
+  if (config.sources.hacker_news)
+    jobs.push({ source: 'hacker_news', run: () => hackerNews(http, now, window('hacker_news')) });
   if (config.sources.osv)
     jobs.push({ source: 'osv', run: () => osv(inventory, previousEvidence, http, now) });
   if (config.sources.github)
@@ -769,7 +900,15 @@ export async function collectSources(
   if (config.sources.kev) jobs.push({ source: 'kev', run: () => kev(http, now, previousEvidence) });
   for (const url of new Set(config.sources.feeds)) {
     const source = `feed:${hash(url).slice(0, 16)}`;
-    jobs.push({ source, run: () => feed(url, source, http, now) });
+    jobs.push({
+      source,
+      run: async () => {
+        const current = window(source);
+        const result = await feed(url, source, http, now, current);
+        stabilizeUndated(result, current.previous);
+        return result;
+      },
+    });
   }
   if (config.sources.cve_now)
     jobs.push({
@@ -778,11 +917,17 @@ export async function collectSources(
     });
   for (const job of jobs) {
     try {
-      const evidence = await job.run();
+      const collected = await job.run();
+      const evidence = Array.isArray(collected) ? collected : collected.evidence;
       if (evidence.some((item) => Date.parse(item.modified_at) > now + 5 * 60_000))
         throw new SourceError('Source returned a future modification timestamp; collection is incomplete.');
       result.evidence.push(...evidence);
       result.checkpoints[job.source] = timestamp(now);
+      if (!Array.isArray(collected) && collected.undated.size)
+        result.errors.push({
+          source: `${job.source}:timestamps`,
+          message: `${collected.undated.size} news item(s) have no valid publication or update time; included as first-seen evidence because their age cannot be verified.`,
+        });
       if (job.source === 'hacker_news') {
         const incomplete = evidence.filter(
           (item) => item.content_status !== 'full' && evidenceRelevant(item, inventory),
@@ -794,6 +939,7 @@ export async function collectSources(
           });
       }
     } catch (error) {
+      if (error instanceof PartialSourceError) result.evidence.push(...error.evidence);
       // Never expose exception text from transports/parsers: it can contain feed tokens or HTTP headers.
       result.errors.push({
         source: job.source,

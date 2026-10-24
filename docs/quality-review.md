@@ -1,69 +1,80 @@
-# Security Watch quality review
+# Release review
 
-Reviewed on 2026-10-24 against the hardening changes on `audit/reliability-hardening`.
+Review date: 2026-10-24. Package: `@shieldaai/security-watch`, `0.1.0-alpha.0`.
 
-**Assessment: 9.0/10 for the documented small-installation alpha implementation.** This is an engineering judgment based on reproduced defects, fixes and verification, not a certification, measured probability of safety, or production-readiness guarantee. The score applies to supported npm inventory, selected advisory/feed sources, optional model analysis and single-host Slack/SMTP monitoring. It does not apply to comprehensive enterprise vulnerability coverage.
+The alpha supports small installations with npm inventory, cve.now advisories, The Hacker News articles, optional model analysis, and Slack/SMTP delivery from one host. The checks below cover that scope. Product backports, runtime reachability, large fleets and distributed workers are outside it.
 
-## Review rubric
+## Changes covered
 
-| Area                              | Weight | Score | Evidence and limits                                                                                                                                                                              |
-| --------------------------------- | ------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Matching and decision correctness | 30%    | 9.2   | OSV range boundaries, multi-advisory grouping, criticality floors, source revision ordering and inventory transitions have outcome regressions. Generic product applicability remains uncertain. |
-| Security boundaries               | 25%    | 9.0   | Socket-level destination checks, bounded/cancelable requests, untrusted model context, quote validation, private database files and atomic backups. No independent penetration test.             |
-| Reliability and operations        | 20%    | 9.2   | Durable outbox, current-policy dispatch, immediate-alert priority, honest uncertain receipt, shutdown cancellation, heartbeat/freshness/delivery health. No extended production soak.            |
-| Installation and maintainability  | 15%    | 9.2   | Clean builds, strict TypeScript, consistent formatting, packaged consumer checks, non-root Linux image and documented recovery/migration.                                                        |
-| Deployment validation             | 10%    | 7.8   | Local Node and Linux matrices pass. Hosted CI is blocked by GitHub account billing; real paid providers and real notification destinations were not exercised.                                   |
+### Sources and assessment
 
-Weighted result: 9.01, reported as **9.0/10**. Broad production readiness is not rated 9/10 while the deployment-validation gaps below remain.
+- New configurations use cve.now and The Hacker News. Existing optional OSV, GitHub, CISA KEV and RSS/Atom adapters remain available.
+- cve.now uses original descriptions and structured affected ranges. Its model-generated summaries are excluded from evidence. Separate exact npm queries preserve matches that the provider would deduplicate in a combined request.
+- cve.now requests start at least 1.1 seconds apart. A supplied `Retry-After` on HTTP 403/429 delays later requests, with a one-hour cap. Isolated detail failures preserve other records; batch and failure limits bound collection. An incomplete source keeps its previous checkpoint and reports degraded health.
+- Relevant tracked CVEs and identifiers found in news are refreshed. Recent-entry collection does not establish exhaustive historical coverage for every product.
+- Multi-CVE articles keep unmatched subjects as separate review candidates until advisory aliases establish that they describe the same vulnerability.
+- OSV event ordering and independent limit events follow the [OSV schema algorithm](https://ossf.github.io/osv-schema/).
+- Newer source revisions take precedence. Future timestamps fail collection, and unchanged KEV records retain their content revision when the catalog changes.
+- The scan interval and news discovery window are independent. RSS/Atom and The Hacker News filter new stories by publication or modification time before fetching articles. Successful checkpoints allow catch-up after downtime; tracked findings and authoritative package matches remain in scope. Undated entries produce a health warning, and unchanged undated content does not create duplicate revisions or model calls.
 
-## Material fixes made during this review
+### Model analysis
 
-- Pending alerts could outlive inventory exclusions, withdrawals, removals or routing changes. The engine reconciles known changes before yielding to network/AI work, and dispatch checks current policy before external I/O.
-- A partly matched multi-CVE article could lose its remaining subjects. Unmatched subjects now remain review candidates until authoritative alias evidence joins them.
-- AI irrelevance could suppress urgent news, and truncated/stale context could appear complete. Critical news and configured exploitation overrides survive AI irrelevance; incomplete context remains uncertain.
-- A first critical AI proposal could disappear when verification failed or disagreed. The highest validated proposal is retained with explicit unavailable/conflicting status.
-- Valid unsorted OSV events and independent limit events could fail collection. Evaluation now follows the [OSV schema algorithm](https://ossf.github.io/osv-schema/).
-- Duplicate or far-future source revisions could poison cached state. Newest valid revisions win, future timestamps fail visibly, and unchanged KEV entries no longer create history revisions just because the catalog changed.
-- Old digests could delay immediate alerts; pending wording/citations could remain stale. Immediate jobs take priority, and unsent payload updates preserve their schedule and attempt count.
-- Linked database files and backup destination races could modify unintended files. File checks reject links; backups publish atomically without replacing an existing destination.
-- Early delivery failures were omitted from a one-shot command's final result. Cumulative failures now produce exit code 2.
-- Cross-command flags such as `test-notification --dry-run` could be silently ignored. Invalid combinations fail before activity.
-- Shutdown could wait through a long source/model scan. Cancellation reaches native HTTP and stops subsequent requests/analysis. Worker and delivery health can be inspected without network calls or state writes.
-- Generated build residue could enter a later package. Builds now clean `dist`; package checks verify CLI version, public types, runtime imports, documented files and installation in a fresh consumer.
+- A shared catalog defines 22 provider profiles: 17 cloud services, four local/gateway profiles and a generic Chat Completions adapter. Provider-specific authentication, request formats, output limits and response validation cover six protocol families. The CLI can list the catalog without configuration or network access. Models select source excerpt IDs; the application resolves them to exact quotations and rejects unsupported claims. Installed-version constraints apply to fresh responses and cached results.
+- Structured output defaults follow each provider's API, including native JSON Schema for OpenAI and Anthropic, with explicit overrides for model-specific capabilities. Incomplete, refused, asynchronous and unexpected tool/code responses are rejected. Model failures do not silently switch providers or weaken evidence validation.
+- System news has separate classifications for new vulnerabilities, known-vulnerability updates, general coverage and uncertainty. Claimed system impact is recorded separately from deterministic package applicability.
+- Product identity, installed versions, supporting quotes, article completeness and evidence freshness constrain impact conclusions. Linked CVEs preserve product-news analysis without weakening package matching.
+- Both affected and excluded impact claims must cite the configured product name. Search keywords, including a shared vendor name, cannot establish product identity. An exclusion quoted for another product remains uncertain and goes to review. The analysis version changed so stored conclusions are reassessed.
+- Critical-source severity and configured exploitation overrides survive model dismissals. Missing, truncated or stale context leaves the assessment uncertain.
+- Failed or conflicting verification retains the highest validated priority proposal and records the failure or disagreement.
+- General coverage remains historical when its article, inventory and model settings are unchanged. Current affected or excluded impact claims require fresh evidence.
 
-The review used separate matching/source, HTTP/model, persistence/delivery and orchestration passes. Automated tests support these conclusions; their count alone is not the quality criterion.
+### Setup and operations
 
-## Verification performed
+- `init` accepts common-system templates, provider/model selection and independent scan/news timing. The default generated schedule is 30 minutes with a 40-minute news window. Templates do not invent installed versions or deployment details.
+- `--credentials-file` explicitly loads dotenv data with existing environment values taking precedence. Reads are bounded to 128 KiB; Unix permissions, file type and runtime-variable checks happen before environment changes. The flag avoids Node’s startup handling of `--env-file`.
 
-- **222 tests passed** on Node 26.12.0 and Node 24.22.1 locally.
-- **222 tests passed** in the Linux Docker test stage on Node 24.22.1.
-- `npm run check` passed: formatting, strict compilation, tests, packed CLI installation, public TypeScript declarations and runtime exports.
-- The runtime image passed checks with a non-root user, read-only root, network disabled, private configuration, native SQLite volume, repeated scans, monitoring health and backup.
-- `npm audit` reported **zero known vulnerabilities** in the dependency graph at review time. This is a registry snapshot, not proof that dependencies are vulnerability-free.
-- A persistent-SQLite synthetic load check used 10 deployments, 1,000 declared components, 100 advisories and 1,000 findings. Three scans took 355, 197 and 191 ms locally, with about 184 MiB peak process RSS and no duplicate revisions. This excludes network, model and delivery latency and is not a fleet-scale or endurance benchmark.
-- No real Slack/email messages were sent and no paid model calls were made.
+- Inventory exclusions, withdrawals, removed components and changed routes are reconciled before delivery. Dispatch checks the current policy again before sending.
+- Immediate alerts take priority over old digests. Pending messages receive updated wording and citations without resetting their schedule or attempt count.
+- Early delivery failures appear in the final one-shot scan result and return exit code 2. Invalid command/flag combinations fail before activity.
+- Database file checks reject links. Backups are published atomically without replacing an existing destination.
+- Shutdown cancels source/model requests and active Slack/SMTP sends, closes SMTP sockets, and leaves queued messages untouched. An interrupted send keeps an unknown receipt and is not retried automatically. Worker heartbeat, scan freshness and actionable delivery failures are available through a read-only health command.
+- Builds clean `dist` before compiling. Package checks install the tarball in a fresh consumer and verify the CLI version, public types and runtime exports.
 
-## Remaining release and deployment gates
+## Validation
 
-1. Resolve the GitHub account billing lock and obtain successful hosted CI on the reviewed commit. Local checks do not turn an unstarted hosted job into a passing job.
-2. Validate the chosen real model IDs and actual notification destinations using synthetic inventory. Model IDs, provider response behavior and destination credentials are deployment-specific.
-3. Observe a representative deployment through source outages, recipient failures and multiple scheduled cycles before relying on it operationally.
-4. Keep the stated coverage limits: npm evidence does not prove deployment/reachability; products/backports lack authoritative adapters; aliases may change canonical identity; cached conclusions during outages are historical.
-5. Plan retention and pagination before increasing scale. Evidence, finding history and model caches are retained; this alpha has no automatic pruning or distributed worker coordination.
+The current checkout passes **458 tests** on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They include news-window and catch-up behavior, partial-collection regressions, exclusions citing unrelated or same-vendor products, worker cancellation during delivery, and real loopback SMTP socket/TLS checks. Provider transport tests exercise every profile through real loopback HTTP with simulated model responses, including authentication, schema/evidence validation, refusals, truncation and secret-bearing errors. `npm run check` also passes formatting, strict compilation and clean-package installation checks. The packed CLI, public types and runtime exports also pass on the minimum supported Node 24.0.0; CI now repeats that consumer check.
 
-Database schema is now 4. Back up an operational database, stop the old worker, and use `scan` or `start` to migrate before running read-only commands with this version. This review does not publish the npm package or merge a release.
+Hosted CI for the release branch must pass at its final commit before merge. The repository requires an independent approval and passing checks.
 
-## Source and system-news update (2026-10-24)
+The current runtime image passed checks with a non-root user, a read-only root filesystem, disabled network access, private configuration and a native SQLite volume. Repeated scans, deduplication, monitoring health and backup passed. The full dependency audit reported no known vulnerabilities at review time.
 
-The source update switches new configurations to cve.now and The Hacker News. cve.now original descriptions and structured affected ranges support CVE matching; model-generated source summaries are excluded. Exact npm queries are separate so the provider's response deduplication cannot hide another installed version. Relevant historical CVEs are refreshed without repeatedly fetching all unrelated global history.
+A local SQLite load check used 10 deployments, 1,000 components, 100 advisories and 1,000 findings. Three scans took 355, 197 and 191 ms with about 184 MiB peak process RSS and no duplicate revisions. Network requests, model calls and delivery were excluded; this was not an endurance test.
 
-System news now records new vulnerabilities, known-vulnerability updates, general coverage or uncertainty separately from claimed deployment impact. Quotes, product identity, installed versions, article completeness and evidence freshness constrain model conclusions. Linked CVEs retain generic-product news classification while deterministic package matching and critical/exploitation safeguards remain authoritative. Completed general coverage stays historical unless its source, inventory or model context changes; stale affected claims cannot escape in previously queued alerts.
+Live source checks on 2026-10-24 included:
 
-Independent source, model and integration reviews found and corrected lost exact matches, cumulative refresh limits, unsupported supersession, incomplete-article health visibility, linked-CVE routing and stale/historical news lifecycle issues.
+- An exact query for `lodash@4.17.20` returned eight advisories without source errors, including five historical package matches.
+- A broad 24-hour scan initially hit HTTP 403 during detail collection. After pacing was added, a new scan of the 24-system sample completed all 157 public requests successfully: eight complete news articles and 143 advisories (134 published in the window and nine older records cited by news), with no source errors. The window was 2026-10-23 15:55 UTC through 2026-10-24 15:55 UTC. These are records returned by the configured sources, not a claim of exhaustive CVE coverage.
+- Against one live feed snapshot, a 40-minute news window returned zero stories and a one-day window returned eight. All eight fell within that window. Public requests still occur in dry-run mode; models and notifications do not.
 
-- **289 tests pass** on Node 24.22.1 and 26.12.0 locally, and on Node 24.22.1 in the Linux Docker test stage.
-- `npm run check` passes, including strict compilation, formatting and installation/type/runtime checks from a clean npm tarball.
-- A live cve.now check with the public test package `lodash@4.17.20` and a recent checkpoint returned eight advisory entries without source errors, including five historical exact package matches. This does not validate an exhaustive historical product scan.
-- Four live cursor pages returned distinct, ordered records. A broader listing probe encountered HTTP 403; full seven-day bootstrap success is not claimed. Source failures remain visible and do not advance the checkpoint.
-- A live The Hacker News check through the runtime HTTP client returned 50 stories: 48 complete article extracts and two bounded excerpts. Relevant incomplete articles produced the expected monitoring-health warning.
-- No real Slack/email messages or paid model calls were made. Deployment-specific provider/destination validation and observation remain required; the alpha-scope assessment is not a production guarantee.
+Live model checks on 2026-10-24 used a fictional security bulletin through the production analyzer and HTTP client:
+
+| Provider  | Model              | Result                                         | Requests | Duration     |
+| --------- | ------------------ | ---------------------------------------------- | -------- | ------------ |
+| OpenAI    | `gpt-6-luna`       | HTTP 200; schema and evidence quotes validated | 1        | 10.0 seconds |
+| Anthropic | `claude-haiku-5-5` | HTTP 200; schema and evidence quotes validated | 1        | 4.8 seconds  |
+
+Each request had a 2,048-output-token cap and a 60-second timeout. No private inventory, tools, verification calls or notifications were involved. Both model IDs were checked against the providers' current documentation: [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna) and [Anthropic](https://platform.claude.com/docs/en/models/haiku-5-5/overview). These checks establish compatibility for the tested models and credentials at review time, not general model accuracy. The remaining 20 provider profiles have simulated transport coverage only. No real Slack/email messages were sent.
+
+## Before deployment
+
+A real-article evaluation used the sample inventory of 24 common systems with no installed versions. The initial run completed only two of 19 assessments. The final test used the same 19 target/event pairs from the successful paced source scan, with native JSON Schema output from OpenAI and Anthropic. Nine assessments completed, seven had conflicting classifications, and three were rejected for unsupported extracted claims. All 36 API requests returned HTTP 200; there were no JSON-format or quotation-reference failures. The clock was fixed at the source capture time for this evaluation. This is a small operational sample, not an accuracy benchmark.
+
+These results support using model analysis as a review aid. They do not establish reliable automatic classification across arbitrary articles. Disagreement, failed validation and missing installed versions remain visible and cannot establish that a system is safe. No real notifications were sent.
+
+- Obtain passing hosted checks and the required independent approval for the final commit before publishing.
+- Repeat the synthetic live check when selecting other model IDs or provider accounts, and validate notification destinations separately. Mocked protocol tests do not cover hosted model behavior or destination credentials.
+- Observe scheduled operation, source outages and delivery failures in a representative deployment before relying on the monitor operationally.
+- Plan storage and retention before increasing the installation size. Evidence, findings, history and model caches are retained without automatic pruning. Current evidence and findings are loaded into memory during a scan.
+- Treat cached conclusions during source outages as historical. New advisory aliases can change a finding's canonical identity; this alpha does not migrate those identities automatically.
+
+Schema 4 adds indexed evidence lookup. Before upgrading an operational database, take a backup and stop the old worker. Run `scan` or `start` to migrate, then use the read-only commands from the new version.

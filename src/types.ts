@@ -1,3 +1,4 @@
+import type { ModelProvider, OutputFormat } from './providers.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
@@ -43,7 +44,7 @@ export interface Evidence {
   title: string;
   url: string;
   description: string;
-  /** News adapters disclose whether the article text, only an excerpt, or no article was retrieved. */
+  /** Whether the adapter retrieved full text, an excerpt or no usable content. */
   content_status?: 'full' | 'excerpt' | 'unavailable';
   aliases: string[];
   severity: Severity;
@@ -56,7 +57,8 @@ export interface Evidence {
   malware?: boolean;
 }
 export interface ModelSpec {
-  provider: 'openai' | 'anthropic' | 'openai-compatible';
+  provider: ModelProvider;
+  output_format?: OutputFormat;
   model: string;
   api_key_env: string;
   endpoint?: string;
@@ -69,6 +71,7 @@ export interface Config {
   inventory: string;
   database: string;
   poll_interval_minutes: number;
+  news_lookback_minutes: number;
   inventory_stale_days: number;
   digest_interval_hours: number;
   sources: {
@@ -135,7 +138,7 @@ export interface Assessment {
   updated_at: string;
   withdrawn?: boolean;
   relevance?: 'relevant' | 'irrelevant' | 'unknown';
-  /** Evidence-grounded model opinion, distinct from authoritative applicability. */
+  /** Model assessment of the article, separate from version-range applicability. */
   news_analysis?: NewsAnalysis;
   ai?: {
     model: string;
@@ -165,6 +168,8 @@ export interface HttpOptions {
   body?: string;
   maxBytes?: number;
   timeoutMs?: number;
+  /** Minimum delay between request starts to an origin; shared by concurrent calls. */
+  minIntervalMs?: number;
   allowPrivate?: boolean;
   redirects?: number;
   /** When present, every redirect must remain within one of these exact origins. */
@@ -194,7 +199,7 @@ export interface NewsAnalysis {
   classification: 'new_vulnerability' | 'known_vulnerability_update' | 'general_news' | 'unknown';
   impact: 'affected' | 'not_affected' | 'unknown' | 'not_applicable';
   affected_products: string[];
-  /** Source wording describing affected or fixed versions, not invented normalized ranges. */
+  /** Affected or fixed versions quoted from the source. */
   affected_versions: string[];
   /** Source wording describing the conditions necessary for exploitation. */
   prerequisites: string[];

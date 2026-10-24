@@ -1,10 +1,10 @@
 # Security policy and boundaries
 
-Security Watch is an experimental monitoring tool. It has not received an independent security audit and does not certify that a system is secure, affected, reachable or remediated. The initial alpha has no production support or patch-response SLA.
+Security Watch is an experimental monitoring tool without an independent security audit or a patch-response SLA. Validate findings against your deployment before using them to make remediation decisions.
 
 ## Report a vulnerability
 
-If the hosting repository enables private vulnerability reporting, use **Security → Advisories → Report a vulnerability**. If that option is unavailable, ask a maintainer for a private reporting channel without posting exploit details, credentials, private inventory or affected customer data publicly. Do not send real secrets in examples. A dedicated reporting address has not been established in this checkout.
+Use [GitHub's private vulnerability reporting form](https://github.com/ShieldaAI/security-watch/security/advisories/new). If that option is unavailable, ask a maintainer for a private reporting channel without posting exploit details, credentials, private inventory or affected customer data publicly. Do not send real secrets in examples. There is no dedicated security reporting address yet.
 
 Include the relevant commit/version, Node version, a minimal synthetic reproduction, expected versus observed behavior, and which trust boundary is crossed. Reports involving lost alerts, false safety conclusions, credential disclosure, unsafe network access or duplicate/incorrect delivery are particularly useful.
 
@@ -17,13 +17,13 @@ Implemented boundaries include:
 - Strict configuration/inventory parsing, bounded input sizes and metadata-only lockfile import. No package installation or lifecycle-script execution occurs during monitoring.
 - Public HTTPS fetching with checks on the addresses used by the connection, bounded redirects/timeouts/response sizes, and removal of authentication headers on cross-origin redirects. Model endpoints may explicitly opt into private addressing; SMTP endpoints are operator-selected.
 - Models receive no shell, browser, filesystem or notification tools. Output is schema-checked, evidence IDs must exist, and supporting quotes must appear in the supplied evidence.
-- The Hacker News article fetches are restricted to allowed publication hosts and bounded text extraction; arbitrary linked websites are not crawled. Missing, excerpted, stale or truncated evidence cannot support a new decisive AI-only news-impact conclusion. Completed general-news classifications can remain historical records when the article/inventory/model context is unchanged; current affected/excluded claims remain freshness-gated.
+- The Hacker News article requests are restricted to its publication hosts and have size limits. Article links to other sites are not crawled. Missing, excerpted, stale or truncated evidence cannot support a new decisive AI impact conclusion. Historical general-news classifications are retained; current affected/excluded claims require fresh evidence.
 - Deterministic package matching and source-severity floors govern library/product decisions. AI cannot rewrite recipients, authoritative version constraints or dependency applicability.
 - AI news classification and claimed system impact are stored separately from authoritative applicability. Evidence-backed general news or an AI-reported exclusion can suppress noncritical news alerts, but cannot override source-critical or enabled known-exploitation safeguards.
 - Slack destinations come only from operator configuration and are restricted to standard `hooks.slack.com` incoming webhooks. SMTP requires TLS. Notification content is rendered as text and cannot enable attachments, filesystem reads or URL-fetching features in the email transport.
 - Findings and their delivery jobs are committed together. Ambiguous delivery is visible and requires a manual receipt check before retrying.
 
-These controls reduce risks; they are not a general prompt-injection detector or sandbox. A model can still misinterpret a quoted source. A feed can omit important facts. A valid advisory may be wrong, withdrawn or delayed. Source failures and uncertain applicability must remain visible in operational review.
+Models can misinterpret sources, feeds can omit important facts, and advisories can be wrong or delayed. Check source failures and uncertain findings during operational review. The bot does not provide a general prompt-injection detector or execution sandbox.
 
 ## Data handling
 
@@ -37,9 +37,9 @@ SQLite stores evidence, finding revisions, model analysis excerpts, caches, budg
 
 - Exact vulnerability matching is limited to supported npm identity/version evidence. Lockfile entries include dependencies that may not be present in production.
 - Generic products, operating systems and SaaS services have name/keyword candidate matching plus optional AI news/impact analysis. AI impact is an evidence-backed opinion, not a deterministic product-version result. Vendor backports, enabled features and exploit reachability are not automatically established.
-- Missing versions, unknown constraints and stale inventory remain uncertain. No returned advisory does not mean no vulnerability exists.
+- Missing versions, unknown constraints and stale inventory remain uncertain. An empty advisory search does not establish that a system has no vulnerabilities.
 - CVSS v3.0/v3.1 calculation and supplied source labels/scores are supported; CVSS v4 vectors are not calculated in this alpha.
-- Sources and model contexts are bounded. Incomplete collection or analysis is degraded monitoring, not successful clearance.
+- Source requests and model inputs have size and request limits. Incomplete collection or analysis reports degraded monitoring and requires review.
 - Recent cve.now entry collection, tracked/news-cited refreshes and exact npm stack queries do not establish exhaustive historical coverage for every product. The Hacker News may block article access; the feed excerpt remains available for review without a confident impact conclusion.
 - There is no general SBOM ingestion, authenticated web crawling, automatic remediation, distributed lock, multi-host worker or independent penetration-test certification.
 - Notifications are not exactly-once delivery. A timeout can occur after a destination accepts a message. Verify receipt before retrying an `unknown` job.

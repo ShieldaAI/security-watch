@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { createConnection, type Socket } from 'node:net';
 import type { Assessment, Config, HttpClient, Notification } from './types.js';
 import { cleanText } from './util.js';
 import { decide } from './assessment.js';
@@ -10,6 +11,7 @@ export interface EmailMessage {
   to: string[];
   subject: string;
   text: string;
+  signal?: AbortSignal;
 }
 export interface EmailReceipt {
   accepted: string[];
@@ -18,6 +20,7 @@ export interface EmailReceipt {
 export type EmailSender = (message: EmailMessage) => Promise<EmailReceipt>;
 
 export const sendEmail: EmailSender = async (message) => {
+  message.signal?.throwIfAborted();
   const url = new URL(message.url);
   if (
     !['smtp:', 'smtps:'].includes(url.protocol) ||
@@ -26,8 +29,9 @@ export const sendEmail: EmailSender = async (message) => {
     (url.pathname && url.pathname !== '/')
   )
     throw new Error('Invalid SMTP configuration');
+  let socket: Socket | undefined;
   const transport = nodemailer.createTransport({
-    host: url.hostname,
+    host: url.hostname.replace(/^\[|\]$/g, ''),
     port: Number(url.port || (url.protocol === 'smtps:' ? 465 : 587)),
     secure: url.protocol === 'smtps:',
     requireTLS: true,
@@ -41,9 +45,41 @@ export const sendEmail: EmailSender = async (message) => {
     socketTimeout: 30_000,
     disableFileAccess: true,
     disableUrlAccess: true,
+    // Keep the underlying socket so cancellation also stops SMTP/STARTTLS traffic.
+    getSocket: (_options, callback) => {
+      if (message.signal?.aborted) {
+        callback(new Error('Email delivery aborted'), {});
+        return;
+      }
+      let connected = false;
+      socket = createConnection({
+        host: url.hostname.replace(/^\[|\]$/g, ''),
+        port: Number(url.port || (url.protocol === 'smtps:' ? 465 : 587)),
+        signal: message.signal,
+      });
+      const deadline = setTimeout(() => socket?.destroy(new Error('SMTP connection timeout')), 30_000);
+      socket.once('close', () => clearTimeout(deadline));
+      socket.once('error', (error) => {
+        if (!connected) callback(error, {});
+      });
+      socket.once('connect', () => {
+        connected = true;
+        clearTimeout(deadline);
+        callback(null, { connection: socket });
+      });
+    },
   });
+  let abort: (() => void) | undefined;
   try {
-    const result = await transport.sendMail({
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => {
+        reject(new Error('Email delivery aborted'));
+        socket?.destroy();
+        transport.close();
+      };
+      message.signal?.addEventListener('abort', abort, { once: true });
+    });
+    const sending = transport.sendMail({
       from: message.from,
       to: message.to,
       subject: message.subject,
@@ -51,9 +87,12 @@ export const sendEmail: EmailSender = async (message) => {
       disableFileAccess: true,
       disableUrlAccess: true,
     });
+    const result = await Promise.race([sending, cancelled]);
     return { accepted: result.accepted.map(String), rejected: result.rejected.map(String) };
   } finally {
+    if (abort) message.signal?.removeEventListener('abort', abort);
     transport.close();
+    socket?.destroy();
   }
 };
 
@@ -126,7 +165,7 @@ function retryAt(headers: Record<string, string>, now: number, attempts: number)
   const raw = Object.entries(headers).find(([name]) => name.toLowerCase() === 'retry-after')?.[1];
   const retry =
     raw === undefined ? NaN : /^\d+(\.\d+)?$/.test(raw) ? now + Number(raw) * 1000 : Date.parse(raw);
-  // Bound remote instructions and avoid tight retry loops.
+  // Clamp Retry-After values to avoid immediate retries or excessive delays.
   return Number.isFinite(retry)
     ? Math.min(now + 86_400_000, Math.max(now + 1000, retry))
     : now + Math.min(3_600_000, 30_000 * 2 ** Math.min(attempts - 1, 7));
@@ -144,6 +183,7 @@ export async function deliverPending(
   http: HttpClient,
   now = Date.now(),
   emailSender: EmailSender = sendEmail,
+  signal?: AbortSignal,
 ): Promise<{ accepted: number; failed: number; unknown: number }> {
   const result = { accepted: 0, failed: 0, unknown: 0 };
   let job: Notification | undefined;
@@ -151,6 +191,7 @@ export async function deliverPending(
   let batches = 0;
   // One snapshot of due work avoids waiting in-process for rate limits or retry timers.
   while (
+    !signal?.aborted &&
     batches++ < 50 &&
     Date.now() - started < 2000 &&
     (job = store.claimDue(now, Number(store.getMeta('delivery:slack:next_at') ?? 0) > now ? ['slack'] : []))
@@ -248,6 +289,7 @@ export async function deliverPending(
       try {
         const escaped = text.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const response = await http(secret, {
+          signal,
           method: 'POST',
           redirects: 0,
           timeoutMs: 30_000,
@@ -306,6 +348,7 @@ export async function deliverPending(
           to: [...new Set(settings.to)],
           subject: text.subject,
           text: text.text,
+          signal,
         });
         const expected = new Set(settings.to);
         const accepted = new Set(receipt.accepted);

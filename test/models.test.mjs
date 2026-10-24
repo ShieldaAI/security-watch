@@ -207,6 +207,7 @@ test('OpenAI, Anthropic and compatible adapters send bounded protocol-specific r
         assert.equal(sent.options.headers.authorization, 'Bearer fixture-token-only');
         assert.equal(sent.body.store, false);
         assert.equal(sent.body.text.format.strict, true);
+        assert.deepEqual(sent.body.text.format.schema.properties.news_analysis, { type: 'null' });
         assert.equal(sent.body.max_output_tokens, cfg.models.max_output_tokens);
         assert.equal(JSON.parse(sent.body.input).system.components[0].name, 'alpha');
       } else if (provider === 'anthropic') {

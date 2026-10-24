@@ -3,6 +3,13 @@ import { dirname, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import type { Config } from './types.js';
+import {
+  PROVIDER_IDS,
+  providerDefinition,
+  allowsMissingKey,
+  modelOutputFormat,
+  modelEndpoint,
+} from './providers.js';
 
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
@@ -12,15 +19,20 @@ const channels = z
   .refine((a) => new Set(a).size === a.length, 'Duplicate channel');
 const model = z
   .object({
-    provider: z.enum(['openai', 'anthropic', 'openai-compatible']),
+    provider: z.enum(PROVIDER_IDS),
+    output_format: z.enum(['auto', 'json_schema', 'json_object', 'prompt']).default('auto'),
     model: z.string().min(1).max(200),
-    api_key_env: envName,
+    api_key_env: envName.optional(),
     endpoint: z.url().optional(),
     allow_private_endpoint: z.boolean().default(false),
     input_usd_per_million: z.number().nonnegative().max(10000).optional(),
     output_usd_per_million: z.number().nonnegative().max(10000).optional(),
   })
-  .strict();
+  .strict()
+  .transform((spec) => ({
+    ...spec,
+    api_key_env: spec.api_key_env ?? providerDefinition(spec.provider).apiKeyEnv,
+  }));
 const rule = z
   .object({
     levels: z.array(severity).min(1),
@@ -34,6 +46,7 @@ export const configSchema = z
     inventory: z.string().min(1).default('./systems.yaml'),
     database: z.string().min(1).default('./data/watch.db'),
     poll_interval_minutes: z.number().int().min(1).max(1440).default(15),
+    news_lookback_minutes: z.number().int().min(1).max(10080).default(60),
     inventory_stale_days: z.number().min(1).max(365).default(7),
     digest_interval_hours: z.number().int().min(1).max(168).default(24),
     sources: z
@@ -122,12 +135,25 @@ export const configSchema = z
       verification: config.models.verification,
     })) {
       if (!spec) continue;
-      if (spec.provider === 'openai-compatible' && !spec.endpoint)
+      const definition = providerDefinition(spec.provider);
+      if (!definition.endpoint && !spec.endpoint)
         ctx.addIssue({
           code: 'custom',
-          message: 'Compatible provider requires an endpoint',
+          message: 'This provider requires an endpoint',
           path: ['models', name, 'endpoint'],
         });
+      if (definition.local && !spec.allow_private_endpoint)
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Local provider requires allow_private_endpoint: true',
+          path: ['models', name, 'allow_private_endpoint'],
+        });
+      try {
+        modelOutputFormat(spec);
+        if (spec.endpoint || definition.endpoint) modelEndpoint(spec);
+      } catch (error) {
+        ctx.addIssue({ code: 'custom', message: (error as Error).message, path: ['models', name] });
+      }
       if (
         config.models.daily_budget_usd !== undefined &&
         (spec.input_usd_per_million === undefined || spec.output_usd_per_million === undefined)
@@ -186,12 +212,7 @@ export function missingCredentials(config: Config): string[] {
   const missing: string[] = [];
   if (config.models.enabled)
     for (const spec of [config.models.analysis, config.models.verification]) {
-      if (
-        spec &&
-        !process.env[spec.api_key_env] &&
-        !(spec.provider === 'openai-compatible' && spec.allow_private_endpoint)
-      )
-        missing.push(spec.api_key_env);
+      if (spec && !process.env[spec.api_key_env] && !allowsMissingKey(spec)) missing.push(spec.api_key_env);
     }
   const destinations = new Set([
     ...config.policy.library.channels,

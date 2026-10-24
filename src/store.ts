@@ -90,7 +90,7 @@ function fingerprint(a: Assessment, decision: Decision): string {
   });
 }
 
-/** Local, single-instance durable state. No credentials are persisted here. */
+/** Durable state for one local worker. Stores evidence and results, never provider credentials. */
 export class Store {
   readonly #db: DatabaseSync;
   readonly #path: string;

@@ -4,6 +4,8 @@ export { loadInventory } from './inventory.js';
 export { assess, decide } from './assessment.js';
 export { collectSources } from './sources.js';
 export { ModelAnalyzer, validateAnalysis } from './models.js';
+export { PROVIDERS, PROVIDER_IDS, providerDefinition } from './providers.js';
+export type { ProviderDefinition, ProviderProtocol, ModelProvider, OutputFormat } from './providers.js';
 export { Store } from './store.js';
 export { deliverPending } from './delivery.js';
 export { runScan, readFixture } from './engine.js';

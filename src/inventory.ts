@@ -74,7 +74,7 @@ function importLockfile(path: string): Component[] {
   return components;
 }
 
-/** Load an explicitly selected local YAML/JSON inventory with strict, bounded validation. */
+/** Load a local YAML/JSON inventory, checking its size and schema. */
 export function loadInventory(path: string): Inventory {
   const absolute = resolve(path);
   const document = parseDocument(readBounded(absolute, 2 * 1024 * 1024), { uniqueKeys: true });

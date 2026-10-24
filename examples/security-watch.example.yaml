@@ -1,7 +1,8 @@
 version: 1
 inventory: ./systems.example.yaml
 database: ./data/watch.db
-poll_interval_minutes: 15
+poll_interval_minutes: 30
+news_lookback_minutes: 40
 inventory_stale_days: 7
 digest_interval_hours: 24
 
@@ -31,8 +32,8 @@ models:
   #   provider: anthropic
   #   model: YOUR_REVIEW_MODEL_ID
   #   api_key_env: ANTHROPIC_API_KEY
-  # A daily_budget_usd additionally requires input_usd_per_million and
-  # output_usd_per_million on every model. No pricing means UNKNOWN cost.
+  # daily_budget_usd requires input_usd_per_million and output_usd_per_million
+  # on each model. Without prices, only request and token limits are enforced.
 
 policy:
   library:

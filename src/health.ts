@@ -24,7 +24,7 @@ function object(value: string | undefined): Record<string, unknown> | undefined 
 function time(value: unknown): number {
   return typeof value === 'string' ? Date.parse(value) : NaN;
 }
-/** Monitoring health, never a statement that monitored systems are secure. No network or writes. */
+/** Read-only monitoring health check; does not assess system security or make network requests. */
 export function checkHealth(
   store: Store,
   config: Config,

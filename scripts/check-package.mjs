@@ -45,6 +45,31 @@ try {
   const cli = join(consumer, 'node_modules/@shieldaai/security-watch/dist/cli.js');
   if (run([cli, '--version'], consumer).trim() !== packed.version)
     throw new Error('CLI version does not match the packed package');
+  const providers = JSON.parse(run([cli, 'providers'], consumer));
+  if (providers.length !== 22 || !providers.some((provider) => provider.id === 'anthropic'))
+    throw new Error('Packed CLI provider catalog is incomplete');
+  const templates = JSON.parse(run([cli, 'templates'], consumer));
+  if (templates.length !== 24 || !templates.some((template) => template.id === 'python'))
+    throw new Error('Packed CLI system templates are incomplete');
+  const configured = join(consumer, 'configured');
+  run([cli, 'init', '--yes', '--directory', configured, '--systems', 'nodejs,python'], consumer);
+  const credentials = join(configured, '.env');
+  writeFileSync(credentials, '# Credentials are optional with models and routes disabled.\n', {
+    mode: 0o600,
+  });
+  const doctor = JSON.parse(
+    run(
+      [cli, 'doctor', '--config', join(configured, 'security-watch.yaml'), '--credentials-file', credentials],
+      consumer,
+    ),
+  );
+  if (
+    !doctor.ok ||
+    doctor.systems !== 2 ||
+    doctor.poll_interval_minutes !== 30 ||
+    doctor.news_lookback_minutes !== 40
+  )
+    throw new Error('Packed setup and credential loading failed');
   run([cli, 'init', '--yes'], consumer);
   const report = JSON.parse(
     run(
@@ -62,7 +87,16 @@ try {
     throw new Error('Packed CLI did not match the fixture');
   writeFileSync(
     join(consumer, 'consumer.mts'),
-    `import { parseConfig, Store, type Assessment } from '@shieldaai/security-watch';\nconst config = parseConfig({version: 1});\nconst store = new Store(':memory:');\nconst findings: Assessment[] = store.findings();\nif (config.version !== 1 || findings.length) throw new Error('Unexpected exports');\nstore.close();\n`,
+    `import { parseConfig, Store, PROVIDERS, providerDefinition, type Assessment, type ModelProvider } from '@shieldaai/security-watch';
+const provider: ModelProvider = 'anthropic';
+const config = parseConfig({version: 1, poll_interval_minutes: 30, news_lookback_minutes: 40});
+const store = new Store(':memory:');
+const findings: Assessment[] = store.findings();
+if (config.version !== 1 || findings.length) throw new Error('Unexpected exports');
+if (config.news_lookback_minutes !== 40 || config.poll_interval_minutes !== 30) throw new Error('Unexpected timing configuration');
+if (PROVIDERS.length !== 22 || providerDefinition(provider).apiKeyEnv !== 'ANTHROPIC_API_KEY') throw new Error('Unexpected provider exports');
+store.close();
+`,
   );
   run(
     [

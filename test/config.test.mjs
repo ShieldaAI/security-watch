@@ -23,6 +23,17 @@ function model(extra = {}) {
   return { provider: 'openai', model: 'fixture-model', api_key_env: 'WATCH_CONFIG_MODEL_KEY', ...extra };
 }
 
+test('scan cadence and news lookback are separate bounded minute settings', () => {
+  const defaults = parseConfig({ version: 1 });
+  assert.equal(defaults.poll_interval_minutes, 15);
+  assert.equal(defaults.news_lookback_minutes, 60);
+  const config = parseConfig({ version: 1, poll_interval_minutes: 30, news_lookback_minutes: 40 });
+  assert.equal(config.poll_interval_minutes, 30);
+  assert.equal(config.news_lookback_minutes, 40);
+  for (const value of [0, -1, 1.5, 10081, Infinity, NaN, '40'])
+    assert.throws(() => parseConfig({ version: 1, news_lookback_minutes: value }));
+});
+
 test('source defaults use cve.now and The Hacker News with legacy sources as explicit opt-ins', () => {
   for (const input of [{ version: 1 }, { version: 1, sources: {} }]) {
     assert.deepEqual(parseConfig(input).sources, {

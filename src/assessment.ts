@@ -91,7 +91,7 @@ function groupEvidence(input: Evidence[]): Group[] {
     );
     for (const group of matches) group.evidence.push(item);
     if (item.kind === 'news') {
-      // A matched subject must not consume other, still-unstructured subjects in a roundup.
+      // Keep unmatched CVEs in a roundup as separate candidates for review.
       // News mentions cannot establish that two CVEs/GHSAs are aliases of the same event.
       const advisoryIds = identifiers(item).filter(advisoryIdentifier);
       const residual = advisoryIds.filter((id) => !aliasGroups.has(id));
@@ -184,7 +184,7 @@ function base(
   };
 }
 
-/** Assess each deployment independently using positive identity/version evidence. AI cannot establish safety. */
+/** Assess each deployment independently against package identity and version evidence. */
 export function assess(
   inventory: Inventory,
   evidence: Evidence[],
@@ -287,7 +287,7 @@ export function assess(
         output.push(result);
       }
 
-      // News linked to an advisory enriches the component finding and cannot evade its category policy.
+      // Apply the component's policy to linked news as well as the advisory itself.
       if (componentMatched && !isNews) continue;
       let productMatched = false;
       for (const product of system.products) {

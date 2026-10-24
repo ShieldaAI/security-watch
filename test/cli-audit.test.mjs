@@ -138,3 +138,36 @@ test('SIGTERM cancels a pending source request and records stopped worker state 
   assert.equal(health.status, 2);
   assert.match(health.stdout, /stopped or stale/);
 });
+
+test('SIGTERM cancels a pending notification and preserves uncertain receipt without retrying', async (t) => {
+  const { dir } = setup(t);
+  assert.equal(run(dir, ['scan', '--fixture', 'evidence.json']).status, 0);
+  const child = spawn(
+    process.execPath,
+    ['--import', 'data:text/javascript,' + encodeURIComponent(fakeTransport('wait')), cli, 'start'],
+    {
+      cwd: dir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AUDIT_SLACK_TOKEN: 'https://hooks.slack.com/services/TEST/ONLY/FIXTURE' },
+    },
+  );
+  let out = '',
+    err = '';
+  child.stdout.on('data', (data) => (out += data));
+  child.stderr.on('data', (data) => (err += data));
+  t.after(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
+  const readyDeadline = Date.now() + 5000;
+  while (!out.includes('MOCK_NETWORK_WAIT') && Date.now() < readyDeadline) await delay(25);
+  assert(out.includes('MOCK_NETWORK_WAIT'), out + err);
+  child.kill('SIGTERM');
+  const exitDeadline = Date.now() + 3000;
+  while (child.exitCode === null && child.signalCode === null && Date.now() < exitDeadline) await delay(25);
+  assert.equal(child.exitCode, 0, out + err);
+  const jobs = JSON.parse(run(dir, ['deliveries']).stdout);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, 'unknown');
+  assert.equal(jobs[0].attempts, 1);
+  assert(!existsSync(join(dir, 'state/watch.db.lock')));
+});

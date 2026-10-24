@@ -39,7 +39,7 @@ function openPrivateFile(path: string): number {
   }
 }
 
-/** An OS-released SQLite lock in a separate file. Process death releases it, including container PID reuse. */
+/** Hold a SQLite lock in a separate file. Process exit releases it, so reused PIDs cannot keep it locked. */
 export function acquireLock(database: string): () => void {
   if (database === ':memory:') return () => {};
   const path = `${database}.worker-lock`;

@@ -29,6 +29,8 @@
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "npm run format:check && npm test && node scripts/check-package.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "check:models": "npm run build && node scripts/check-models.mjs",
     "start": "node dist/cli.js start",
     "prepublishOnly": "node scripts/release-check.mjs",
     "demo": "npm run build && node scripts/demo.mjs",

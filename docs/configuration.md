@@ -1,16 +1,23 @@
 # Configuration
 
-Configuration is strict YAML or JSON: unknown fields and invalid values fail validation. The configuration file is limited to 1 MiB. `${VARIABLE}` substitution is supported in parsed string values; an undefined variable is an error. Credential settings contain the **name** of an environment variable, never its secret value. The CLI does not automatically load `.env` files.
+Configuration is strict YAML or JSON: unknown fields and invalid values fail validation. The configuration file is limited to 1 MiB. `${VARIABLE}` substitution is supported in parsed string values; an undefined variable is an error. Credential settings contain the **name** of an environment variable, never its secret value.
+
+Pass `--credentials-file ./watch/.env` to load credentials and configuration variables from a dotenv file. It is read as data, with no shell commands or variable expansion. Existing environment values take precedence. The file must be a regular file of at most 128 KiB; symlinks are rejected. On Unix, run `chmod 600` first. Shell, Node.js and TLS runtime settings belong in the service manager and are rejected in this file. Without this flag, the CLI uses only its environment and does not search for `.env` files.
 
 `inventory` and `database` resolve relative to the configuration file. Inventory `lockfile` paths resolve relative to the inventory file. Configuration is read once per process; restart the worker after changing it. Inventory is loaded again on each scheduled scan. In the supplied Docker Compose setup, use `inventory: /config/systems.yaml`, `database: /data/watch.db`, and a root-level `.env` file copied from `.env.example`. Set `SECURITY_WATCH_UID`/`SECURITY_WATCH_GID` to your host user/group IDs; this preserves mode-0600 configuration/inventory access without widening host permissions. Compose initializes ownership of its `watch-data` named volume before starting the application. SQLite remains on Docker's native filesystem, while the VM must have access to the read-only configuration/inventory bind mounts. Retain the named volume when recreating containers.
 
 ## Minimal setup
+
+`security-watch init --directory ./watch --systems nodejs,python --yes` creates a starter configuration, private inventory and `.env.example`. It selects a 30-minute polling interval and a 40-minute news window. Add `--provider NAME --model ID` to configure analysis, or use interactive `init` to choose a provider and Slack routing. `--poll-minutes` and `--lookback-minutes` set timing during setup. Run `security-watch templates` for system names and `security-watch providers` for provider IDs. Selected systems have no assumed installed version; edit the inventory before assessing deployment impact.
+
+The following example uses the schema defaults of 15 and 60 minutes and enables Slack explicitly:
 
 ```yaml
 version: 1
 inventory: ./systems.yaml
 database: ./data/watch.db
 poll_interval_minutes: 15
+news_lookback_minutes: 60
 inventory_stale_days: 7
 digest_interval_hours: 24
 
@@ -51,6 +58,23 @@ notifications:
 ```
 
 Set `SLACK_WEBHOOK_URL` through your shell, service manager or secret manager. Its value must be an HTTPS `hooks.slack.com/services/…` incoming webhook. The webhook chooses the channel; the model never chooses it. No credential value is needed in this file. See [Slack incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/).
+
+## Scan schedule and news window
+
+The worker's scan interval and its news discovery window are separate settings. For a scan every 30 minutes covering the last 40 minutes:
+
+```yaml
+poll_interval_minutes: 30
+news_lookback_minutes: 40
+```
+
+Run `security-watch start --config security-watch.yaml` to keep the worker running. `scan` performs one scan and exits. Both commands use the configured news window; restart `start` after changing the configuration. Poll intervals accept 1–1,440 minutes and news windows accept 1–10,080 minutes. The defaults are 15 and 60 minutes respectively.
+
+The 10-minute overlap in this example catches stories that arrive late in a feed. Stable evidence and finding IDs prevent the overlap from creating duplicate notifications. After downtime or a source failure, discovery reaches back to the last successful checkpoint, with up to five minutes of additional overlap. Catch-up can therefore cover more than 40 minutes. Feed history and existing collection limits still constrain what can be recovered.
+
+The window applies to discovery of news in The Hacker News and additional RSS/Atom feeds. Previously tracked relevant stories can still be refreshed, and stored findings and evidence remain available. Older CVEs, exact package matches, withdrawals and tracked advisory updates are checked independently of this news window.
+
+Stories without usable publication/update dates remain reviewable, with a monitoring-health warning because their age cannot be established. Repeated scans retain their stable revision unless the source content changes.
 
 To add email, configure it and add `email` to the desired category or health channel arrays:
 
@@ -128,7 +152,7 @@ Additional `feeds` supply titles and summaries/content present in their RSS/Atom
 
 cve.now's first recent-entry collection looks back seven days; later scans use one hour of checkpoint overlap. Collection is bounded to 200 listing pages and 5,000 advisory records per scan. Historical refreshes are limited to cached records relevant to the current inventory and CVE/GHSA IDs in relevant cached/current news, so unrelated global history does not expand the refresh set forever.
 
-The stack endpoint is queried separately for each deduplicated exact npm package/version pair, at most 1,000 pairs per scan and four requests concurrently. Separate requests preserve matches that cve.now would deduplicate in a multi-package request. Only those pairs are sent, not a lockfile or system/deployment metadata. Limits fail visibly as incomplete collection, retaining the previous checkpoint. Recent-entry pagination cannot guarantee discovery of every update to an older, previously unseen CVE. Structured affected ranges and original advisory descriptions are used as evidence; generated summaries do not establish affectedness. Unsupported statuses, including supersession without verified withdrawal semantics, fail visibly instead of being treated as a resolved vulnerability. This is not exhaustive historical product coverage.
+The stack endpoint is queried separately for each deduplicated exact npm package/version pair, at most 1,000 pairs per scan and four requests concurrently. Separate requests preserve matches that cve.now would deduplicate in a multi-package request. Only those pairs are sent, not a lockfile or system/deployment metadata. Limits and request failures report incomplete collection and retain the previous checkpoint. Valid cve.now records collected before a failure are still assessed, so a failed listing request does not discard successful exact-package matches. Recent-entry pagination cannot guarantee discovery of every update to an older, previously unseen CVE. Structured affected ranges and original advisory descriptions are used as evidence; generated summaries do not establish affectedness. Unsupported statuses, including supersession without verified withdrawal semantics, fail visibly instead of being treated as a resolved vulnerability. This is not exhaustive historical product coverage.
 
 Optional GitHub collection first looks back seven days of modifications; later scans use checkpoint overlap. Optional OSV exact-version queries supply existing advisory matches for the declared npm inventory. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
 
@@ -138,7 +162,7 @@ References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The
 
 ## Model configuration
 
-No model is enabled by default. **Enable a model for system news/impact discrimination**: provide the analysis model ID you want to use and its credentials. Without it, name/keyword matches remain uncertain candidates for review. Set an exact model ID supported by the selected provider; no model names, prices or capabilities are guessed. The model must return the expected structured JSON within the configured limit.
+Models are disabled by default. To classify system news and assess impact, configure an analysis model and its credentials. Without a model, name/keyword matches remain candidates for review. Use an exact model ID supported by the provider. The model must support the structured JSON response and output limit required by this adapter.
 
 ```yaml
 models:
@@ -158,35 +182,93 @@ models:
   timeout_seconds: 45
 ```
 
-The `verification` entry is optional. It runs for every news analysis, source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently. Disagreement is preserved as uncertainty; two agreeing models are not proof of safety. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
+The `verification` entry is optional. It runs for every news analysis, source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently; disagreement leaves the result uncertain. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
 
 For matched system news, analysis records two distinct conclusions:
 
 - News classification: `new_vulnerability`, `known_vulnerability_update`, `general_news` or `unknown`. A report about an existing CVE, exploitation or a patch is distinct from a newly reported vulnerability; a product announcement or a passing mention is general news.
 - Claimed impact on the declared system: `affected`, `not_affected`, `unknown` or `not_applicable`, with cited evidence and an explanation. This is the model's contextual conclusion, separate from authoritative version-range `applicability`; it does not certify the system safe or establish general product-version support.
 
-The model also records affected product names, affected versions and prerequisites from its supporting article quotes. A decisive `affected` or `not_affected` claim requires a known installed target version and source product/version evidence; missing deployment details stay uncertain.
+The model also records affected product names, affected versions and prerequisites from its supporting article quotes. A decisive `affected` or `not_affected` claim requires a known installed target version and source product/version evidence; missing deployment details stay uncertain. The quoted product must match the configured product name. Keywords help find candidate articles but cannot establish product identity, even when two products share a vendor.
 
 For noncritical system news, a validated complete analysis of general news/no applicable vulnerability or no claimed system impact records the article without a vulnerability notification. Generic product findings retain this news analysis even when a cited CVE has been collected; deterministic npm applicability remains separate. A new vulnerability or known-vulnerability update with claimed impact follows the configured news/product severity policy. Unknown, conflicting, disabled or unavailable analysis goes to review. Incomplete article/context evidence and stale inventory cannot support a new confident AI-only dismissal. Initial news candidates are held for analysis before notification routing; source-critical and enabled exploitation safeguards still apply.
 
-A completed `general_news`/`not_applicable` classification can remain a historical record after its article leaves the current RSS window, provided the article and inventory content and analysis/verification model, prompt and input settings have not changed. It is not reclassified as an uncertain vulnerability merely because time passed. This exception applies only to a completed general-news classification; current `affected`/`not_affected` impact claims remain subject to evidence freshness checks. Changed source/inventory/model context triggers reassessment.
+Completed `general_news`/`not_applicable` classifications remain in history after an article leaves RSS. Changes to the article, inventory, models, prompt or input settings trigger reassessment. This retention rule applies only to general news; `affected` and `not_affected` impact claims still require fresh evidence.
 
-| `ModelSpec` field                                 | Meaning                                                                                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `provider`                                        | `openai`, `anthropic`, or `openai-compatible`                                                                      |
-| `model`                                           | Required exact model ID                                                                                            |
-| `api_key_env`                                     | Required environment-variable name; no literal API key                                                             |
-| `endpoint`                                        | Optional full API endpoint override; required for `openai-compatible`                                              |
-| `allow_private_endpoint`                          | `false` by default; explicitly permits an operator-selected private address and HTTP for a local compatible server |
-| `input_usd_per_million`, `output_usd_per_million` | Optional operator-supplied model prices, each between 0 and 10,000                                                 |
+| `ModelSpec` field                                 | Meaning                                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `provider`                                        | One of the profiles below; use the same fields for analysis and verification                        |
+| `model`                                           | Required model ID available to your account, or an Azure deployment name; there is no default       |
+| `api_key_env`                                     | Optional environment-variable name; defaults to the profile's key variable, never a literal API key |
+| `endpoint`                                        | Complete API request URL; required for Azure, generic compatible endpoints and local profiles       |
+| `output_format`                                   | `auto` by default; choose `json_schema`, `json_object` or `prompt` when supported                   |
+| `allow_private_endpoint`                          | `false` by default; permits private destinations and HTTP for the configured model request          |
+| `input_usd_per_million`, `output_usd_per_million` | Optional operator-supplied prices, each between 0 and 10,000                                        |
 
-`openai` uses the Responses API; `anthropic` uses the Messages API; `openai-compatible` expects a Chat Completions endpoint supporting `response_format` JSON schema. Supply the complete endpoint path rather than a base URL. Local compatible endpoints may omit the actual key when `allow_private_endpoint: true`; `api_key_env` still names the optional variable. Private-endpoint permission applies only to the configured model request, not feeds or article links.
+`auto` uses the profile's default format below. Profiles select API protocols and defaults; they do not establish that every model on a service supports those settings.
 
-References: [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses), [Anthropic Messages API](https://docs.anthropic.com/en/api/messages). `doctor` validates configuration; only a real analysis validates the selected model's compatibility. Unsupported structured output is a degraded analysis, not silent success.
+| Provider            | API              | Default key variable   | Default format |
+| ------------------- | ---------------- | ---------------------- | -------------- |
+| `openai`            | Responses        | `OPENAI_API_KEY`       | `json_schema`  |
+| `azure-openai`      | Azure Responses  | `AZURE_OPENAI_API_KEY` | `json_schema`  |
+| `anthropic`         | Messages         | `ANTHROPIC_API_KEY`    | `json_schema`  |
+| `gemini`            | GenerateContent  | `GEMINI_API_KEY`       | `json_schema`  |
+| `cohere`            | Chat v2          | `COHERE_API_KEY`       | `json_schema`  |
+| `groq`              | Chat Completions | `GROQ_API_KEY`         | `json_object`  |
+| `deepseek`          | Chat Completions | `DEEPSEEK_API_KEY`     | `json_object`  |
+| `xai`               | Responses        | `XAI_API_KEY`          | `json_schema`  |
+| `mistral`           | Chat Completions | `MISTRAL_API_KEY`      | `json_schema`  |
+| `together`          | Chat Completions | `TOGETHER_API_KEY`     | `json_object`  |
+| `fireworks`         | Chat Completions | `FIREWORKS_API_KEY`    | `json_object`  |
+| `openrouter`        | Chat Completions | `OPENROUTER_API_KEY`   | `json_object`  |
+| `cerebras`          | Chat Completions | `CEREBRAS_API_KEY`     | `json_object`  |
+| `nvidia`            | Chat Completions | `NVIDIA_API_KEY`       | `prompt`       |
+| `sambanova`         | Chat Completions | `SAMBANOVA_API_KEY`    | `json_object`  |
+| `huggingface`       | Chat Completions | `HF_TOKEN`             | `prompt`       |
+| `perplexity`        | Agent API        | `PERPLEXITY_API_KEY`   | `json_schema`  |
+| `openai-compatible` | Chat Completions | `OPENAI_API_KEY`       | `json_schema`  |
+| `ollama`            | Chat Completions | `OLLAMA_API_KEY`       | `json_schema`  |
+| `lmstudio`          | Chat Completions | `LM_STUDIO_API_KEY`    | `json_schema`  |
+| `vllm`              | Chat Completions | `VLLM_API_KEY`         | `json_schema`  |
+| `litellm`           | Chat Completions | `LITELLM_API_KEY`      | `json_object`  |
+
+Authentication uses `Authorization: Bearer` except Azure (`api-key`), Anthropic (`x-api-key` with an API-version header) and Gemini (`x-goog-api-key`). `api_key_env` changes the variable read, not the authentication protocol. Credentials are sent only to the configured endpoint; choose overrides deliberately. Endpoints must use HTTPS unless private access is enabled, and cannot contain URL credentials, a query string or a fragment. Supply the full request path, not a base URL.
+
+`json_schema` requests provider-side schema constraints. `json_object` requests JSON without schema constraints. `prompt` includes the schema in the instructions without a provider-specific format parameter. Every mode still parses and validates the response locally, including evidence IDs and exact quotes. Refusals, incomplete output and provider format rejections leave analysis unavailable; there is no automatic format fallback. Anthropic defaults to [native structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) through `output_config.format`; choose `prompt` explicitly for a model without that capability. DeepSeek accepts `json_object` or `prompt`; Perplexity accepts `json_schema` or `prompt`. Other profiles expose all three modes, but support still depends on the selected model. OpenRouter requests compatible upstream routing when a JSON mode is selected. Perplexity uses the Agent API with tools disabled, not the legacy Sonar chat endpoint.
+
+For Azure, set the full Responses endpoint and your deployment name in the environment:
+
+```yaml
+models:
+  enabled: true
+  analysis:
+    provider: azure-openai
+    endpoint: '${AZURE_OPENAI_ENDPOINT}'
+    model: '${AZURE_OPENAI_DEPLOYMENT}'
+```
+
+`AZURE_OPENAI_ENDPOINT` must be the complete request URL supported by your Azure deployment. The key is read from `AZURE_OPENAI_API_KEY` unless overridden. Endpoints requiring query parameters are outside this adapter's endpoint rules.
+
+Local profiles require both an explicit endpoint and `allow_private_endpoint: true`. For example, with an Ollama server and a model you have already installed:
+
+```yaml
+models:
+  enabled: true
+  analysis:
+    provider: ollama
+    endpoint: http://127.0.0.1:11434/v1/chat/completions
+    model: '${LOCAL_MODEL}'
+    allow_private_endpoint: true
+    output_format: json_schema
+```
+
+The local profiles and `openai-compatible` may omit the actual key when private access is enabled; all named hosted profiles still require a key. A local model must support the selected format. In a container, `127.0.0.1` refers to that container, so use the reachable server address. Private access applies only to the model endpoint, not feeds or article links.
+
+See the [provider registry](https://github.com/ShieldaAI/security-watch/blob/main/src/providers.ts) for endpoint defaults and official API references. `doctor` validates configuration; a live analysis is needed to check account access and the selected model's compatibility. From a source checkout, `node scripts/check-models.mjs --help` describes a bounded synthetic test with separate passed, failed and skipped results. A missing key or model is a skip, never a successful live test.
 
 Set `daily_budget_usd` only after configuring both prices for **every** selected model. Without prices, dollar cost is unknown; request and token allowances still apply. Model calls reserve conservative input/output allowances before the request. Reservations are not provider invoices, are not refunded after a timeout or malformed response, and include verification calls. Daily counters use UTC days. Adding a dollar cap after unpriced calls prevents further billed requests for that UTC day because the prior spend is unknown. There are no automatic model retries or provider fallbacks. Cache hits reuse validated results without a new request reservation. Provider usage and billing remain authoritative.
 
-The analysis includes relevant components/products/keywords from the matched system and its deployment context, with up to six bounded evidence excerpts. Authoritative and urgent evidence is prioritized, and omitted/truncated context is explicit. Selection is capped at 20 components and 20 products; excess or oversized context fails with an explicit model-context health finding. Partial context or stale inventory cannot support an AI-only irrelevance conclusion; unknown relevance enters review. Models receive no tool definitions or notification credentials. Evidence IDs and verbatim supporting quotes are validated; this verifies attribution, not the truth of model reasoning.
+The analysis includes relevant components/products/keywords from the matched system and its deployment context, with up to six bounded evidence excerpts. Authoritative and urgent evidence is prioritized, and omitted/truncated context is explicit. Selection is capped at 20 components and 20 products; excess or oversized context fails with an explicit model-context health finding. Partial context or stale inventory cannot support an AI dismissal; unknown relevance enters review. Models receive no tools or notification credentials. The adapter checks that evidence IDs exist and quotes match the source text, but these checks cannot establish whether the model interpreted the source correctly.
 
 ## Policy and scheduling
 

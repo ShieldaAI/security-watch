@@ -9,6 +9,7 @@ const NOW_ISO = new Date(NOW).toISOString();
 const OLD = '2026-10-24T10:00:00.000Z';
 function config(sources = {}) {
   return {
+    news_lookback_minutes: 1440,
     sources: {
       cve_now: false,
       hacker_news: false,

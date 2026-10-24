@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
 import { Store } from '../dist/store.js';
-import { deliverPending, notificationText } from '../dist/delivery.js';
+import { deliverPending, notificationText, sendEmail } from '../dist/delivery.js';
 
 const assessment = (id = 'finding-1') => ({
   id,
@@ -57,6 +58,120 @@ function setup(t, channels = ['slack']) {
 const noHttp = async () => {
   throw new Error('Unexpected HTTP call');
 };
+
+test('aborted delivery does not claim queued work or charge attempts', async (t) => {
+  const store = setup(t, ['slack', 'email']);
+  const controller = new AbortController();
+  controller.abort();
+  assert.deepEqual(await deliverPending(store, config, noHttp, 1000, noHttp, controller.signal), {
+    accepted: 0,
+    failed: 0,
+    unknown: 0,
+  });
+  assert(store.jobs().every((job) => job.status === 'pending' && job.attempts === 0));
+});
+
+test('cancelling SMTP closes its socket and leaves later deliveries queued', { timeout: 3000 }, async (t) => {
+  const store = setup(t, ['email']);
+  store.saveAssessment(
+    assessment('finding-2'),
+    { action: 'notify', channels: ['email'], reason: 'critical' },
+    1000,
+  );
+  const sockets = new Set();
+  let connected;
+  const ready = new Promise((resolve) => {
+    connected = resolve;
+  });
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    connected();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  process.env.WATCH_TEST_SMTP = `smtp://127.0.0.1:${server.address().port}`;
+  const controller = new AbortController();
+  const pending = deliverPending(store, config, noHttp, 1000, sendEmail, controller.signal);
+  await ready;
+  const closed = new Promise((resolve) => [...sockets][0].once('close', resolve));
+  controller.abort();
+  assert.deepEqual(await pending, { accepted: 0, failed: 0, unknown: 1 });
+  await closed;
+  assert.equal(sockets.size, 0);
+  assert.equal(store.jobs().filter((job) => job.status === 'unknown' && job.attempts === 1).length, 1);
+  assert.equal(store.jobs().filter((job) => job.status === 'pending' && job.attempts === 0).length, 1);
+});
+
+test('SMTP refuses plaintext authentication when STARTTLS is unavailable', { timeout: 3000 }, async (t) => {
+  const commands = [];
+  const sockets = new Set();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.write('220 fixture ESMTP\r\n');
+    socket.on('data', (data) => {
+      commands.push(data.toString());
+      if (data.toString().startsWith('EHLO')) socket.write('250-fixture\r\n250 AUTH PLAIN\r\n');
+      else socket.write('504 TLS unavailable\r\n');
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  await assert.rejects(
+    sendEmail({
+      url: `smtp://user:password@127.0.0.1:${server.address().port}`,
+      from: 'watch@example.com',
+      to: ['security@example.com'],
+      subject: 'Fixture',
+      text: 'Fixture',
+    }),
+    /TLS|STARTTLS/i,
+  );
+  assert(commands.some((line) => line.startsWith('STARTTLS')));
+  assert(!commands.some((line) => /^(AUTH|MAIL|DATA)/.test(line)));
+});
+
+test(
+  'SMTPS starts with a TLS handshake and cancellation closes that socket',
+  { timeout: 3000 },
+  async (t) => {
+    const controller = new AbortController();
+    const sockets = new Set();
+    let firstByte;
+    const server = createServer((socket) => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+      socket.once('data', (data) => {
+        firstByte = data[0];
+        controller.abort();
+      });
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    });
+    await assert.rejects(
+      sendEmail({
+        url: `smtps://user:password@127.0.0.1:${server.address().port}`,
+        from: 'watch@example.com',
+        to: ['security@example.com'],
+        subject: 'Fixture',
+        text: 'Fixture',
+        signal: controller.signal,
+      }),
+      /aborted/i,
+    );
+    assert.equal(firstByte, 22, 'The first record must be a TLS handshake, before SMTP or authentication');
+  },
+);
 
 test('Slack uses plain text, stable IDs, no mentions/unfurls and no credentials in durable payload', async (t) => {
   const store = setup(t);

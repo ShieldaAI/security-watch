@@ -16,11 +16,17 @@ import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
 import { checkHealth } from './health.js';
 import type { Assessment } from './types.js';
+import { PROVIDERS, providerDefinition } from './providers.js';
+import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
 
 const help = `Shielda Security Watch (experimental alpha)
 
-  security-watch init [--directory PATH] [--yes]
-  security-watch doctor [--config PATH]
+  security-watch init [--directory PATH] [--yes] [--systems nodejs,python]
+    [--provider NAME --model ID] [--endpoint URL] [--allow-private-endpoint]
+    [--poll-minutes 30] [--lookback-minutes 40]
+  security-watch doctor [--config PATH] [--credentials-file PATH]
+  security-watch providers
+  security-watch templates
   security-watch scan [--dry-run] [--notify] [--fixture PATH] [--no-ai]
   security-watch start [--config PATH]
   security-watch findings | status | deliveries | budget
@@ -38,6 +44,7 @@ Default config: ./security-watch.yaml. scan records findings; --dry-run writes n
 disables models and sends nothing. --notify sends due jobs. start runs the foreground scheduler and
 configured notification routes. Model/feed requests can leave this machine; fixture
 mode performs no source or model requests. No packages are installed or patched.
+Commands using a config accept --credentials-file PATH. Existing environment values take precedence.
 `;
 function argumentsFromCommandLine() {
   return parseArgs({
@@ -45,6 +52,14 @@ function argumentsFromCommandLine() {
     options: {
       config: { type: 'string' },
       directory: { type: 'string' },
+      systems: { type: 'string' },
+      provider: { type: 'string' },
+      model: { type: 'string' },
+      endpoint: { type: 'string' },
+      'allow-private-endpoint': { type: 'boolean' },
+      'poll-minutes': { type: 'string' },
+      'lookback-minutes': { type: 'string' },
+      'credentials-file': { type: 'string' },
       yes: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
       notify: { type: 'boolean' },
@@ -72,27 +87,56 @@ const [command = 'help', id] = positionals;
 function output(value: unknown) {
   console.log(JSON.stringify(value, null, 2));
 }
+function shellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
 async function initialize(): Promise<void> {
   const directory = resolve(values.directory ?? '.');
-  mkdirSync(directory, { recursive: true });
   const configPath = resolve(directory, 'security-watch.yaml'),
     inventoryPath = resolve(directory, 'systems.yaml');
   if (existsSync(configPath) || existsSync(inventoryPath))
     throw new Error('Configuration or inventory already exists; init never overwrites it.');
-  let provider = 'none',
-    model = '',
+  let provider = values.provider ?? 'none',
+    model = values.model ?? '',
+    endpoint = values.endpoint,
+    allowPrivate = values['allow-private-endpoint'] ?? false,
+    pollMinutes = values['poll-minutes'] ?? '30',
+    lookbackMinutes = values['lookback-minutes'] ?? '40',
     slack = false;
+  const systems = values.systems === undefined ? undefined : starterSystems(values.systems);
+  if (provider === 'none' && (model || endpoint || allowPrivate))
+    throw new Error('--model, --endpoint and --allow-private-endpoint require --provider.');
+  if (provider !== 'none' && !PROVIDERS.some((entry) => entry.id === provider))
+    throw new Error('Unknown provider. Run security-watch providers for the available names.');
   if (!values.yes && process.stdin.isTTY) {
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     try {
-      provider =
-        (await prompt.question('AI provider (none/openai/anthropic; default none): ')).trim() || 'none';
-      if (!['none', 'openai', 'anthropic'].includes(provider))
-        throw new Error('Choose none, openai or anthropic. Compatible endpoints can be configured in YAML.');
+      console.log('AI providers: ' + PROVIDERS.map((entry) => entry.id).join(', '));
+      if (!values.provider)
+        provider = (await prompt.question('AI provider (default none): ')).trim() || 'none';
       if (provider !== 'none') {
-        model = (await prompt.question('Exact model ID (from your provider): ')).trim();
+        if (!PROVIDERS.some((entry) => entry.id === provider))
+          throw new Error('Choose none or a provider from the list.');
+        const definition = providerDefinition(provider);
+        if (!model) model = (await prompt.question('Exact model ID or Azure deployment name: ')).trim();
         if (!model) throw new Error('Model ID is required.');
+        if (!definition.endpoint && !endpoint) {
+          endpoint = (await prompt.question('Full API endpoint URL, including the request path: ')).trim();
+          if (!endpoint) throw new Error('API endpoint is required.');
+        }
+        if ((definition.local || endpoint) && !allowPrivate) {
+          allowPrivate = /^y(es)?$/i.test(
+            (
+              await prompt.question('Permit this model to use a local/private HTTP(S) endpoint? (y/N): ')
+            ).trim(),
+          );
+        }
       }
+      if (!values['poll-minutes'])
+        pollMinutes = (await prompt.question('Minutes between scans (default 30): ')).trim() || '30';
+      if (!values['lookback-minutes'])
+        lookbackMinutes =
+          (await prompt.question('Minutes of recent news to check (default 40): ')).trim() || '40';
       slack = /^y(es)?$/i.test(
         (await prompt.question('Configure Slack routes using SLACK_WEBHOOK_URL? (y/N): ')).trim(),
       );
@@ -105,6 +149,8 @@ async function initialize(): Promise<void> {
     version: 1,
     inventory: './systems.yaml',
     database: './data/watch.db',
+    poll_interval_minutes: Number(pollMinutes),
+    news_lookback_minutes: Number(lookbackMinutes),
     models:
       provider === 'none'
         ? { enabled: false }
@@ -113,7 +159,9 @@ async function initialize(): Promise<void> {
             analysis: {
               provider,
               model,
-              api_key_env: provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY',
+              api_key_env: providerDefinition(provider).apiKeyEnv,
+              ...(endpoint ? { endpoint } : {}),
+              allow_private_endpoint: allowPrivate,
             },
           },
     policy: {
@@ -124,15 +172,16 @@ async function initialize(): Promise<void> {
     },
     notifications: slack ? { slack: { webhook_url_env: 'SLACK_WEBHOOK_URL' } } : {},
   });
+  mkdirSync(directory, { recursive: true });
   writeFileSync(
     configPath,
-    '# Read README.md for privacy, coverage and notification semantics.\n' + stringify(config),
+    '# Run doctor after editing this file. Credentials belong in a private env file.\n' + stringify(config),
     { flag: 'wx', mode: 0o600 },
   );
   writeFileSync(
     inventoryPath,
     stringify({
-      systems: [
+      systems: systems ?? [
         {
           id: 'example-api',
           name: 'Example API',
@@ -148,8 +197,20 @@ async function initialize(): Promise<void> {
     }),
     { flag: 'wx', mode: 0o600 },
   );
+  const envExample = resolve(directory, '.env.example');
+  if (!existsSync(envExample))
+    writeFileSync(
+      envExample,
+      '# Copy this file to .env, set the values you use, then run chmod 600 .env.\n' +
+        '# Load it with security-watch doctor --credentials-file .env.\n' +
+        (provider === 'none'
+          ? '# OPENAI_API_KEY=\n# ANTHROPIC_API_KEY=\n'
+          : `${providerDefinition(provider).apiKeyEnv}=\n`) +
+        (slack ? 'SLACK_WEBHOOK_URL=\n' : '# SLACK_WEBHOOK_URL=\n'),
+      { flag: 'wx', mode: 0o600 },
+    );
   console.log(
-    `Created ${configPath} and ${inventoryPath}. Replace the example inventory, then run doctor and scan --dry-run. Credentials are read from environment variables; init sends no messages.`,
+    `Created ${configPath} and ${inventoryPath}. Add installed versions and deployment details to systems.yaml. Copy .env.example to .env and fill in any required credentials. Then run:\n  security-watch doctor --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))}\n  security-watch scan --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))} --dry-run\nNo messages were sent.`,
   );
 }
 async function main(): Promise<void> {
@@ -162,7 +223,19 @@ async function main(): Promise<void> {
     return;
   }
   const commandFlags: Record<string, string[]> = {
-    init: ['directory', 'yes'],
+    init: [
+      'directory',
+      'yes',
+      'systems',
+      'provider',
+      'model',
+      'endpoint',
+      'allow-private-endpoint',
+      'poll-minutes',
+      'lookback-minutes',
+    ],
+    providers: [],
+    templates: [],
     doctor: ['config', 'no-ai'],
     unlock: ['config'],
     scan: ['config', 'dry-run', 'notify', 'fixture', 'no-ai'],
@@ -180,6 +253,8 @@ async function main(): Promise<void> {
     backup: ['config', 'output'],
     'test-notification': ['config', 'channel'],
   };
+  for (const flags of Object.values(commandFlags))
+    if (flags.includes('config')) flags.push('credentials-file');
   if (!commandFlags[command]) throw new Error(`Unknown command ${command}. Use --help.`);
   for (const flag of Object.keys(values))
     if (!commandFlags[command]!.includes(flag)) throw new Error(`--${flag} is not supported by ${command}.`);
@@ -189,6 +264,15 @@ async function main(): Promise<void> {
     await initialize();
     return;
   }
+  if (command === 'providers') {
+    output(PROVIDERS);
+    return;
+  }
+  if (command === 'templates') {
+    output(SYSTEM_TEMPLATES);
+    return;
+  }
+  if (values['credentials-file']) loadEnvFile(resolve(values['credentials-file']));
   const config = loadConfig(resolve(values.config ?? 'security-watch.yaml'));
   if (values['no-ai']) config.models.enabled = false;
   if (command === 'unlock') {
@@ -206,6 +290,8 @@ async function main(): Promise<void> {
       missing_environment_variables: missing,
       database: config.database,
       models_enabled: config.models.enabled,
+      poll_interval_minutes: config.poll_interval_minutes,
+      news_lookback_minutes: config.news_lookback_minutes,
       sources: config.sources,
       feeds: config.sources.feeds.length + Number(config.sources.hacker_news),
       notices: [
@@ -501,7 +587,14 @@ async function main(): Promise<void> {
               scanning = undefined;
             });
         }
-        const delivery = await deliverPending(store, config, safeHttp);
+        const delivery = await deliverPending(
+          store,
+          config,
+          safeHttp,
+          Date.now(),
+          undefined,
+          controller.signal,
+        );
         if (delivery.failed || delivery.unknown)
           console.error(
             JSON.stringify({ delivery, action: 'Inspect deliveries and destination configuration.' }),

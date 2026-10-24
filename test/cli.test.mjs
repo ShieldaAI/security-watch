@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  statSync,
+  chmodSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { acquireLock } from '../dist/lock.js';
 import { Store } from '../dist/store.js';
+import { parse } from 'yaml';
 
 const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 // Fail closed if an offline fixture accidentally attempts any network request.
@@ -120,6 +131,21 @@ function worker(t, f, env = {}) {
   return { child, logs };
 }
 
+test('providers lists supported protocols without configuration, credentials or network access', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'watch-providers-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = run(['providers'], dir);
+  assert.equal(result.code, 0, result.stderr);
+  const providers = JSON.parse(result.stdout);
+  for (const id of ['openai', 'anthropic', 'gemini', 'cohere', 'azure-openai', 'openai-compatible', 'ollama'])
+    assert(
+      providers.some((provider) => provider.id === id),
+      id,
+    );
+  assert(!existsSync(join(dir, 'data')));
+  assert.equal(run(['providers', '--notify'], dir).code, 1);
+});
+
 test('init --yes creates private config without overwriting existing user files', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'watch-init-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -134,6 +160,152 @@ test('init --yes creates private config without overwriting existing user files'
   assert.match(second.stderr, /never overwrites/);
   assert.equal(readFileSync(path, 'utf8'), initial);
   assert(!existsSync(join(dir, 'data/watch.db')));
+});
+
+test('init creates a usable platform inventory, provider config and independent scan timing', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'watch-setup-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = run(
+    [
+      'init',
+      '--yes',
+      '--systems',
+      'nodejs,python,nodejs',
+      '--provider',
+      'openai',
+      '--model',
+      'test-model',
+      '--poll-minutes',
+      '30',
+      '--lookback-minutes',
+      '40',
+    ],
+    dir,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const config = parse(readFileSync(join(dir, 'security-watch.yaml'), 'utf8'));
+  const inventory = parse(readFileSync(join(dir, 'systems.yaml'), 'utf8'));
+  assert.deepEqual(
+    inventory.systems.map((s) => s.id),
+    ['nodejs', 'python'],
+  );
+  assert(inventory.systems.every((s) => s.products.every((p) => p.version === undefined)));
+  assert.equal(config.poll_interval_minutes, 30);
+  assert.equal(config.news_lookback_minutes, 40);
+  assert.equal(config.models.analysis.provider, 'openai');
+  assert.equal(config.models.analysis.api_key_env, 'OPENAI_API_KEY');
+  assert.deepEqual(config.policy.news.channels, []);
+  assert.match(readFileSync(join(dir, '.env.example'), 'utf8'), /OPENAI_API_KEY=/);
+  assert.equal(statSync(join(dir, '.env.example')).mode & 0o777, 0o600);
+  assert.match(result.stdout, /--credentials-file/);
+  const templates = JSON.parse(run(['templates'], dir).stdout);
+  assert.equal(templates.length, 24);
+  assert(templates.some((s) => s.id === 'python'));
+});
+
+test('invalid setup options fail before creating files', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'watch-invalid-setup-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const args of [
+    ['--systems', 'nodejs,unknown'],
+    ['--systems', ''],
+    ['--model', 'test-model'],
+    ['--provider', 'unknown', '--model', 'test-model'],
+    ['--provider', 'openai'],
+    ['--poll-minutes', '0'],
+    ['--lookback-minutes', '10081'],
+  ]) {
+    assert.equal(run(['init', '--yes', ...args], dir).code, 1, args.join(' '));
+    assert(!existsSync(join(dir, 'security-watch.yaml')));
+    assert(!existsSync(join(dir, 'systems.yaml')));
+  }
+});
+
+test('explicit env files supply credentials as data without exposing values or evaluating shell text', (t) => {
+  const f = fixture(t, {
+    models: {
+      enabled: true,
+      analysis: { provider: 'openai', model: 'test-model', api_key_env: 'WATCH_SETUP_KEY' },
+    },
+  });
+  const secret = 'synthetic-private-token';
+  const envPath = join(f.dir, '.env');
+  const marker = join(f.dir, 'must-not-exist');
+  writeFileSync(
+    envPath,
+    `WATCH_SETUP_KEY=${secret}\nWATCH_CLI_SLACK_TOKEN=synthetic-webhook\nIGNORED_SHELL=$(touch ${marker})\n`,
+    { mode: 0o600 },
+  );
+  const result = run(['doctor', '--credentials-file', envPath], f.dir, {
+    WATCH_SETUP_KEY: undefined,
+    WATCH_CLI_SLACK_TOKEN: undefined,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).ok, true);
+  assert(!result.stdout.includes(secret));
+  assert(!result.stderr.includes(secret));
+  assert(!existsSync(marker));
+  assert(!existsSync(f.db));
+  assert.equal(run(['providers', '--credentials-file', envPath], f.dir).code, 1);
+});
+
+test('env file access rejects shared permissions and symlinks, and preserves exported values', (t) => {
+  const f = fixture(t, {
+    models: {
+      enabled: true,
+      analysis: { provider: 'openai', model: 'test-model', api_key_env: 'WATCH_SETUP_KEY' },
+    },
+  });
+  const envPath = join(f.dir, '.env');
+  writeFileSync(envPath, 'WATCH_SETUP_KEY=\nWATCH_CLI_SLACK_TOKEN=\n', { mode: 0o600 });
+  const inherited = {
+    WATCH_SETUP_KEY: 'synthetic-exported-key',
+    WATCH_CLI_SLACK_TOKEN: 'synthetic-exported-webhook',
+  };
+  assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 0);
+  chmodSync(envPath, 0o644);
+  assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 1);
+  chmodSync(envPath, 0o600);
+  const link = join(f.dir, 'linked.env');
+  symlinkSync(envPath, link);
+  assert.equal(run(['doctor', '--credentials-file', link], f.dir, inherited).code, 1);
+  writeFileSync(envPath, 'NODE_TLS_REJECT_UNAUTHORIZED=0\n', { mode: 0o600 });
+  assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 1);
+  writeFileSync(envPath, 'node_tls_reject_unauthorized=0\n', { mode: 0o600 });
+  assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 1);
+  assert(!existsSync(f.db));
+});
+
+test(
+  'env file loading rejects a named pipe without waiting for a writer',
+  { skip: process.platform === 'win32' },
+  (t) => {
+    const f = fixture(t);
+    const path = join(f.dir, 'credentials.pipe');
+    const created = spawnSync('mkfifo', [path], { encoding: 'utf8', timeout: 2000 });
+    assert.equal(created.status, 0, created.stderr);
+    const result = run(['doctor', '--credentials-file', path], f.dir);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /regular private file/);
+    assert(!existsSync(f.db));
+  },
+);
+
+test('credential files cannot run Node preload code before validation', (t) => {
+  const f = fixture(t);
+  const envPath = join(f.dir, '.env');
+  const marker = join(f.dir, 'preload-ran');
+  const preload = join(f.dir, 'preload.mjs');
+  writeFileSync(
+    preload,
+    `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'ran');`,
+  );
+  writeFileSync(envPath, `NODE_OPTIONS=--import=${preload}\n`, { mode: 0o600 });
+  const result = run(['doctor', '--credentials-file', envPath], f.dir, { NODE_OPTIONS: undefined });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /runtime settings/);
+  assert(!existsSync(marker));
+  assert(!existsSync(f.db));
 });
 
 test('offline fixture dry-run previews findings without database, outbox or worker lock', (t) => {
