@@ -46,6 +46,12 @@ function disk(t) {
   t.after(() => rmSync(dir, { force: true, recursive: true }));
   return { dir, path: join(dir, 'watch.db') };
 }
+function removeRetentionSchema(database) {
+  database.exec(`DROP INDEX IF EXISTS metadata_age; DROP INDEX IF EXISTS evidence_age; DROP INDEX IF EXISTS findings_age;
+    DROP INDEX IF EXISTS evidence_revisions_age; DROP INDEX IF EXISTS finding_revisions_age;
+    ALTER TABLE metadata DROP COLUMN updated_at; ALTER TABLE evidence DROP COLUMN content_hash;
+    ALTER TABLE evidence DROP COLUMN fetched_at; ALTER TABLE findings DROP COLUMN updated_at;`);
+}
 
 test('assessment and per-channel delivery jobs commit atomically', (t) => {
   const store = memory(t);
@@ -291,6 +297,7 @@ test('schema 1 databases migrate existing findings into initial history', (t) =>
   original.saveAssessment(base(), notify, 1000);
   original.close();
   const old = new DatabaseSync(path);
+  removeRetentionSchema(old);
   old.exec('DROP TABLE evidence_revisions; DROP TABLE finding_revisions; PRAGMA user_version=1');
   old.close();
   const migrated = new Store(path);
@@ -383,6 +390,7 @@ test('schema 2 databases import current evidence into revision history', (t) => 
   );
   original.close();
   const old = new DatabaseSync(path);
+  removeRetentionSchema(old);
   old.exec('DROP TABLE evidence_revisions; PRAGMA user_version=2');
   old.close();
   const migrated = new Store(path);
@@ -667,6 +675,7 @@ test('schema 3 gains indexed evidence lookup preserving all sources and filterin
   );
   old.close();
   const before = new DatabaseSync(path);
+  removeRetentionSchema(before);
   before.exec('DROP INDEX evidence_by_id; PRAGMA user_version=3');
   before.close();
   assert.throws(() => new Store(path, { readOnly: true }), /migration required/);

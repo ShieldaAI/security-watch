@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
+import { exactLibraryVersion, normalizeEcosystem, normalizePackageName, parseLibrary } from './ecosystems.js';
+import { hash } from './util.js';
 
 const shortText = z.string().trim().min(1).max(500);
 const npmName = z
@@ -10,12 +12,24 @@ const npmName = z
   .max(214)
   .regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/, 'Expected a canonical npm package name');
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
-const componentSchema = z.strictObject({
-  id: shortText,
-  ecosystem: z.literal('npm'),
-  name: npmName,
-  version: shortText.optional(),
-});
+const componentSchema = z
+  .strictObject({
+    id: shortText,
+    ecosystem: shortText,
+    name: shortText,
+    version: shortText.optional(),
+  })
+  .transform((component) => {
+    const ecosystem = normalizeEcosystem(component.ecosystem);
+    return {
+      ...component,
+      ecosystem,
+      name: normalizePackageName(ecosystem, component.name),
+      ...(component.version === undefined
+        ? {}
+        : { version: exactLibraryVersion(component.version, ecosystem) }),
+    };
+  });
 const productSchema = z.strictObject({
   name: shortText,
   version: shortText.optional(),
@@ -30,6 +44,9 @@ const systemSchema = z.strictObject({
   criticality: severity.default('unknown'),
   updated_at: z.iso.datetime({ offset: true }),
   components: z.array(componentSchema).max(20_000).default([]),
+  libraries: z
+    .union([z.array(z.unknown()).max(20_000), z.record(z.string(), z.array(z.unknown()).max(20_000))])
+    .optional(),
   products: z.array(productSchema).max(1000).default([]),
   keywords: z.array(shortText).max(100).default([]),
   lockfile: z.string().trim().min(1).max(4096).optional(),
@@ -81,9 +98,29 @@ export function loadInventory(path: string): Inventory {
   if (document.errors.length) throw new Error(`Invalid inventory YAML: ${document.errors[0]!.message}`);
   const parsed = inventorySchema.parse(document.toJS({ maxAliasCount: 0 }));
   const systemIds = new Set<string>();
-  const systems = parsed.systems.map(({ lockfile, ...system }) => {
+  const systems = parsed.systems.map(({ lockfile, libraries, ...system }) => {
     if (systemIds.has(system.id)) throw new Error(`Duplicate system ID: ${system.id}`);
     systemIds.add(system.id);
+    if (libraries) {
+      const groups = Array.isArray(libraries) ? [[undefined, libraries] as const] : Object.entries(libraries);
+      const added = new Set(
+        system.components.map((component) =>
+          JSON.stringify([component.ecosystem, component.name, component.version ?? null]),
+        ),
+      );
+      let count = 0;
+      for (const [ecosystem, entries] of groups) {
+        if (ecosystem !== undefined) normalizeEcosystem(ecosystem);
+        for (const entry of entries) {
+          if (++count > 20_000) throw new Error(`System ${system.id} exceeds 20000 library entries`);
+          const library = parseLibrary(entry, ecosystem);
+          const key = JSON.stringify([library.ecosystem, library.name, library.version ?? null]);
+          if (added.has(key)) continue;
+          added.add(key);
+          system.components.push({ id: `library:${hash(key).slice(0, 24)}`, ...library });
+        }
+      }
+    }
     if (lockfile) system.components.push(...importLockfile(resolve(dirname(absolute), lockfile)));
     if (system.components.length > 20_000) throw new Error(`System ${system.id} exceeds 20000 components`);
     const componentIds = new Set<string>();

@@ -56,6 +56,19 @@ export function checkHealth(
       issues.push('The last scan reported degraded monitoring; inspect status and findings.');
   }
   const delivery = store.deliveryIssues(now, 300_000, config);
+  if (config.maintenance) {
+    const maintenance = object(store.getMeta('maintenance:last_run'));
+    if (maintenance?.ok === false)
+      issues.push('Scheduled maintenance failed; inspect status and backup storage.');
+    const lastSuccess = time(maintenance?.last_success_at);
+    if (requireWorker && !startupGrace && !Number.isFinite(lastSuccess))
+      issues.push('Scheduled maintenance has not completed successfully.');
+    if (
+      Number.isFinite(lastSuccess) &&
+      (lastSuccess > now + 5000 || now - lastSuccess > config.maintenance.interval_hours * 7_200_000)
+    )
+      issues.push('Scheduled maintenance is overdue.');
+  }
   if (delivery.failed) issues.push('Current notifications have failed; inspect deliveries.');
   if (delivery.unknown)
     issues.push('Current notification receipt is uncertain; verify delivery before retrying.');

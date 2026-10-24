@@ -9,11 +9,12 @@ digest_interval_hours: 24
 sources:
   cve_now: true
   hacker_news: true # The Hacker News security publication, not Hacker News/Y Combinator.
-  osv: false # Optional independent exact npm name/version lookups.
+  osv: false # Enable for library queries across the supported ecosystems.
   github: false
   github_token_env: GITHUB_TOKEN
   kev: false
   feeds: [] # Optional additional public HTTPS RSS/Atom feeds.
+  vendor_feeds: [] # Optional official news: [nodejs, python, php].
 
 models:
   enabled: false
@@ -61,3 +62,25 @@ notifications:
   #   smtp_url_env: SMTP_URL
   #   from: security-watch@example.com
   #   to: [security@example.com]
+
+# Optional external success pings. Configure the receiver to alert on missed pings.
+# monitoring:
+#   heartbeat_url_env: HEARTBEAT_URL
+#   interval_seconds: 60
+#   allow_private_endpoint: false
+
+# Optional automatic maintenance. Preview with `security-watch prune` before starting.
+# maintenance:
+#   interval_hours: 24
+#   retention:
+#     analysis_cache_days: 30
+#     evidence_history_days: 180
+#     finding_history_days: 180
+#     accepted_delivery_days: 180
+#     inactive_findings_days: 365
+#     unreferenced_evidence_days: 365
+#     batch_size: 1000
+#   backup:
+#     directory: ./backups
+#     keep: 7
+#     max_bytes: 536870912

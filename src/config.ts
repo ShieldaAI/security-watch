@@ -17,6 +17,7 @@ const channels = z
   .array(z.enum(['slack', 'email']))
   .max(2)
   .refine((a) => new Set(a).size === a.length, 'Duplicate channel');
+const retentionDays = z.number().int().min(1).max(3650).optional();
 const model = z
   .object({
     provider: z.enum(PROVIDER_IDS),
@@ -58,6 +59,11 @@ export const configSchema = z
         github_token_env: envName.default('GITHUB_TOKEN'),
         kev: z.boolean().default(false),
         feeds: z.array(z.url()).max(30).default([]),
+        vendor_feeds: z
+          .array(z.enum(['nodejs', 'python', 'php']))
+          .max(3)
+          .refine((values) => new Set(values).size === values.length, 'Duplicate vendor feed')
+          .default([]),
       })
       .strict()
       .default({
@@ -68,6 +74,7 @@ export const configSchema = z
         github_token_env: 'GITHUB_TOKEN',
         kev: false,
         feeds: [],
+        vendor_feeds: [],
       }),
     models: z
       .object({
@@ -121,6 +128,54 @@ export const configSchema = z
       })
       .strict()
       .default({ max_attempts: 3 }),
+    monitoring: z
+      .object({
+        heartbeat_url_env: envName,
+        interval_seconds: z.number().int().min(30).max(3600).default(60),
+        allow_private_endpoint: z.boolean().default(false),
+      })
+      .strict()
+      .optional(),
+    maintenance: z
+      .object({
+        interval_hours: z.number().int().min(1).max(168).default(24),
+        retention: z
+          .object({
+            analysis_cache_days: retentionDays,
+            evidence_history_days: retentionDays,
+            finding_history_days: retentionDays,
+            accepted_delivery_days: retentionDays,
+            inactive_findings_days: retentionDays,
+            unreferenced_evidence_days: retentionDays,
+            batch_size: z.number().int().min(1).max(10000).default(1000),
+          })
+          .strict()
+          .refine(
+            (value) =>
+              Object.entries(value).some(([key, days]) => key !== 'batch_size' && days !== undefined),
+            'Choose at least one retention period',
+          )
+          .optional(),
+        backup: z
+          .object({
+            directory: z.string().trim().min(1).max(4096),
+            keep: z.number().int().min(1).max(365).default(7),
+            max_bytes: z
+              .number()
+              .int()
+              .min(1)
+              .max(20 * 1024 ** 3)
+              .default(512 * 1024 ** 2),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .refine(
+        (value) => value.retention !== undefined || value.backup !== undefined,
+        'Configure retention or backups',
+      )
+      .optional(),
   })
   .strict()
   .superRefine((config, ctx) => {
@@ -210,6 +265,8 @@ export function parseConfig(value: unknown): Config {
 }
 export function missingCredentials(config: Config): string[] {
   const missing: string[] = [];
+  if (config.monitoring && !process.env[config.monitoring.heartbeat_url_env])
+    missing.push(config.monitoring.heartbeat_url_env);
   if (config.models.enabled)
     for (const spec of [config.models.analysis, config.models.verification]) {
       if (spec && !process.env[spec.api_key_env] && !allowsMissingKey(spec)) missing.push(spec.api_key_env);
@@ -248,5 +305,10 @@ export function loadConfig(path: string): Config {
   const config = parseConfig(substitute(parse(raw, { maxAliasCount: 0 })));
   config.inventory = resolve(dirname(resolve(path)), config.inventory);
   config.database = resolve(dirname(resolve(path)), config.database);
+  if (config.maintenance?.backup)
+    config.maintenance.backup.directory = resolve(
+      dirname(resolve(path)),
+      config.maintenance.backup.directory,
+    );
   return config;
 }

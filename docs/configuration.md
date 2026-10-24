@@ -128,9 +128,9 @@ Replace the example names and timestamp with verified deployment information. `u
 | `exposure`                            | `internet`, `internal` or `unknown`                                                                    |
 | `criticality`                         | `unknown`, `low`, `medium`, `high` or `critical`; business importance, separate from advisory severity |
 | Component `id`                        | Unique within its system; keep stable across upgrades                                                  |
-| Component `ecosystem`                 | Only `npm` is supported for precise matching                                                           |
-| Component `name`                      | Canonical exact npm name, including scope when present                                                 |
-| Component `version`                   | Optional exact version; missing/unparseable versions remain uncertain                                  |
+| Component `ecosystem`                 | One of the 12 supported ecosystems or a recognized alias                                               |
+| Component `name`                      | Registry package identity; npm scopes and Maven coordinates are significant                            |
+| Component `version`                   | Optional exact installed version; omit unknown versions rather than supplying constraints              |
 | Product `name`, `version`, `keywords` | Product context and matching terms; not a supported vendor version/backport decision                   |
 | System `keywords`                     | Explicit terms for news matching                                                                       |
 
@@ -138,19 +138,55 @@ Lockfiles must be package-lock v2/v3 with a `packages` map. Imports include tran
 
 Use longer explicit keywords for short product names: matching ignores terms shorter than three characters. Whole-name matching reduces substring/scope collisions but cannot disambiguate every product name. Inventory changes trigger reassessment of stored evidence. A removed finding becomes inactive; disappearance is not proof of remediation.
 
+### Library lists and ecosystem groups
+
+Library matching does not require AI. Enable `sources.osv` to query the supported registry ecosystems: npm, PyPI, Packagist, Go, Maven, crates.io, RubyGems, NuGet, Hex, Pub, Hackage and SwiftURL. `security-watch ecosystems` lists these names. Aliases include `nodejs`, `python`, `php`, `java`, `rust`, `ruby`, `dotnet`, `elixir`, `dart`, `haskell` and `swift`.
+
+A system can have a grouped `libraries` field instead of manually assigned component IDs:
+
+```yaml
+libraries:
+  npm:
+    - express
+    - '@types/node'
+  python:
+    - requests
+    - name: urllib3
+      version: '2.2.3'
+  php:
+    - symfony/http-foundation
+  maven:
+    - org.apache.logging.log4j:log4j-core
+```
+
+The versions above illustrate syntax; use your installed versions. Arrays also accept explicit prefixes, such as `libraries: [python:requests, npm:express]`. Empty lines and `#` comment lines are ignored in text lists. Entries can be `python:requests`, `python:requests==2.32.3`, `npm:express@4.21.2`, or a package name followed by one exact version separated by whitespace. `latest`, wildcards and dependency constraints are rejected. Names without versions still produce advisory candidates, with applicability unknown.
+
+```sh
+security-watch normalize-libraries --input examples/libraries.example.txt
+security-watch normalize-libraries --input php-libraries.txt --ecosystem php --output components.json
+security-watch init --directory ./watch --yes --libraries examples/libraries.example.txt
+```
+
+Normalization is local and does not install packages, call providers or overwrite an existing output file. Its output is a component array suitable for an inventory's `components` field. Setup creates one application system and enables OSV; it cannot combine `--libraries` with `--systems`. Lists are capped at 2 MiB and 20,000 entries. Generated library IDs include ecosystem, package and version; use explicit component IDs when you need the same identity across upgrades. See the [grouped example](../examples/libraries.example.yaml) and [library-only configuration](../examples/library-watch.example.yaml).
+
+Only npm affected ranges are evaluated locally. For other ecosystems, an exact positive OSV query or an explicitly listed affected version establishes a match; unsupported ranges and empty search results do not establish exclusion. OSV receives the ecosystem, name and optional version. Use the registry's published package spelling, especially for NuGet; arbitrary casing is not a discovery guarantee. A language/runtime product name is not a library package.
+
 ## Sources and coverage
 
 | Setting                    | Default and behavior                                                                                                                                             |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sources.cve_now`          | `true`; collect recent CVE entries, revisit inventory-relevant tracked/news-cited IDs and query exact npm package/version pairs through cve.now's stack endpoint |
 | `sources.hacker_news`      | `true`; collect The Hacker News security feed and bounded article text for system news analysis                                                                  |
-| `sources.osv`              | `false`; optional exact npm name/version queries, full advisory records and tracked-advisory refreshes                                                           |
-| `sources.github`           | `false`; optional reviewed and malware npm advisories, tracking modifications and withdrawals                                                                    |
+| `sources.osv`              | `false`; optional package queries across supported ecosystems, with or without versions, full advisory records and tracked-advisory refreshes                    |
+| `sources.github`           | `false`; optional reviewed and malware advisories, tracking modifications and withdrawals; local range evaluation remains npm-only                               |
 | `sources.github_token_env` | `GITHUB_TOKEN`; optional authentication for the GitHub API                                                                                                       |
 | `sources.kev`              | `false`; optional matching-CVE enrichment with CISA known-exploitation evidence; KEV alone does not invent a product finding                                     |
+| `sources.vendor_feeds`     | `[]`; opt-in official Node.js, Python and PHP feeds with bounded article extraction                                                                              |
 | `sources.feeds`            | `[]`; up to 30 selected public HTTPS RSS 2.0/Atom URLs, without URL credentials                                                                                  |
 
 `hacker_news` means **The Hacker News** at `thehackernews.com`, the cybersecurity publication, not Y Combinator's Hacker News. Its feed is [The Hacker News RSS](https://feeds.feedburner.com/TheHackersNews). The bot fetches bounded article text only from allowed The Hacker News hosts, without executing scripts: at most 50 articles per scan, four concurrently, with a 2 MB HTML response cap and 16,000 characters of extracted text per article. Evidence records whether full article content, a feed excerpt or unavailable content was used. A failed or capped article fetch retains the feed excerpt and cannot support a new confident AI-only dismissal. Incomplete articles relevant to the inventory create a `hacker_news:articles` monitoring-health finding; the successful RSS collection and its checkpoint are still retained.
+
+Set `sources.vendor_feeds: [nodejs, python, php]`, or choose those names with `init --vendor-feeds`, to enable the official Node.js vulnerability feed, Python release blog and PHP announcements. Each adapter fetches at most 20 eligible articles per scan from its fixed vendor origin, with bounded HTML parsing and 16,000-character text limits. Unsupported links or failed extraction retain an excerpt; relevant incomplete articles produce a health warning. PHP announcements are extracted by their feed anchor so unrelated releases do not become one article. Vendor release dates and later advisory-index publication dates do not prove first vulnerability disclosure.
 
 Additional `feeds` supply titles and summaries/content present in their RSS/Atom response; their article links are not fetched. The bot does not search the web or obtain paywalled content. Choose feed URLs deliberately. Public destinations, DNS results, redirects, response sizes and request durations are checked; a failing source retains its previous checkpoint and cached evidence and produces degraded status.
 
@@ -160,9 +196,9 @@ cve.now's first recent-entry collection looks back seven days; later scans use o
 
 The stack endpoint is queried separately for each deduplicated exact npm package/version pair, at most 1,000 pairs per scan and four requests concurrently. Separate requests preserve matches that cve.now would deduplicate in a multi-package request. Only those pairs are sent, not a lockfile or system/deployment metadata. Limits and request failures report incomplete collection and retain the previous checkpoint. Valid cve.now records collected before a failure are still assessed, so a failed listing request does not discard successful exact-package matches. Recent-entry pagination cannot guarantee discovery of every update to an older, previously unseen CVE. Structured affected ranges and original advisory descriptions are used as evidence; generated summaries do not establish affectedness. Unsupported statuses, including supersession without verified withdrawal semantics, fail visibly instead of being treated as a resolved vulnerability. This is not exhaustive historical product coverage.
 
-Optional GitHub collection first looks back seven days of modifications; later scans use checkpoint overlap. Optional OSV exact-version queries supply existing advisory matches for the declared npm inventory. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
+Optional GitHub collection first looks back seven days of modifications; later scans use checkpoint overlap. Optional OSV queries supply existing advisory matches for the declared library inventory. Versionless queries discover candidates but cannot establish installed-version impact. The per-scan limit is 10,000 unique ecosystem/package/version queries. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
 
-For an existing installation, configuration fields set to `true` stay enabled. To switch to cve.now and The Hacker News only, add the two new fields as shown above, explicitly set `osv`, `github` and `kev` to `false`, clear any unneeded additional feeds, and restart the worker. Omitting the old fields now defaults them to `false`; omitting the new fields defaults them to `true`. To run without any network sources, explicitly disable all five source switches and keep `feeds: []`. Existing cached evidence and history are retained.
+For an existing installation, configuration fields set to `true` stay enabled. To switch to cve.now and The Hacker News only, add the two new fields as shown above, explicitly set `osv`, `github` and `kev` to `false`, clear any unneeded additional feeds, and restart the worker. Omitting the old fields now defaults them to `false`; omitting the new fields defaults them to `true`. To run without any network sources, explicitly disable all five source switches and keep both `feeds: []` and `vendor_feeds: []`. Existing cached evidence and history are retained.
 
 References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The Hacker News](https://thehackernews.com/), [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
 
@@ -197,7 +233,7 @@ For matched system news, analysis records two distinct conclusions:
 
 The model also records affected product names, affected versions and prerequisites from its supporting article quotes. A decisive `affected` or `not_affected` claim requires a known installed target version and source product/version evidence; missing deployment details stay uncertain. The quoted product must match the configured product name. Keywords help find candidate articles but cannot establish product identity, even when two products share a vendor.
 
-For noncritical system news, a validated complete analysis of general news/no applicable vulnerability or no claimed system impact records the article without a vulnerability notification. Generic product findings retain this news analysis even when a cited CVE has been collected; deterministic npm applicability remains separate. A new vulnerability or known-vulnerability update with claimed impact follows the configured news/product severity policy. Unknown, conflicting, disabled or unavailable analysis goes to review. Incomplete article/context evidence and stale inventory cannot support a new confident AI-only dismissal. Initial news candidates are held for analysis before notification routing; source-critical and enabled exploitation safeguards still apply.
+For noncritical system news, a validated complete analysis of general news/no applicable vulnerability or no claimed system impact records the article without a vulnerability notification. Generic product findings retain this news analysis even when a cited CVE has been collected; deterministic library applicability remains separate. A new vulnerability or known-vulnerability update with claimed impact follows the configured news/product severity policy. Unknown, conflicting, disabled or unavailable analysis goes to review. Incomplete article/context evidence and stale inventory cannot support a new confident AI-only dismissal. Initial news candidates are held for analysis before notification routing; source-critical and enabled exploitation safeguards still apply.
 
 Completed `general_news`/`not_applicable` classifications remain in history after an article leaves RSS. Changes to the article, inventory, models, prompt or input settings trigger reassessment. This retention rule applies only to general news; `affected` and `not_affected` impact claims still require fresh evidence.
 
@@ -298,14 +334,73 @@ Acknowledgement applies to the current finding revision. Material changes create
 
 ## Persistence and recovery
 
-Use one local SQLite database per worker. A worker lock prevents concurrent scans; inspection and control commands can run alongside it. The database contains source evidence/checkpoints, assessment history, model caches and reservations, and notification state. It is operationally sensitive and has no automatic retention pruning in this alpha.
+Use one local SQLite database per worker. A worker lock prevents concurrent scans; inspection and control commands can run alongside it. The database contains source evidence/checkpoints, assessment history, model caches and reservations, and notification state. It is operationally sensitive. Retention and scheduled backups are disabled until configured.
 
 Keep the database in a trusted local data directory. Database, SQLite sidecar and worker-lock database files must be regular files without links. On Unix systems, they must have no group or other permissions. New files are created privately. If a permission check fails, stop the worker and correct the named file’s permissions before restarting; the application does not change permissions on an active SQLite file.
 
-Database schema 4 adds indexed evidence lookup without discarding history. Stop an older worker and run `scan` or `start` to migrate before using read-only commands from this version. Back up before upgrading operational databases.
+Database schema 5 adds timestamps and current-evidence hashes for retention without deleting existing data. Legacy cache ages begin at migration time because their original write times are unknown. Stop an older worker and run `scan` or `start` to migrate before using read-only commands from this version. Back up before upgrading operational databases.
 
 `health` checks a worker heartbeat no older than 90 seconds, a completed scan no older than twice the polling interval (at least two minutes), and actionable failed, uncertain or more-than-five-minutes-overdue delivery. A new worker has a two-minute first-scan grace period. Suppressed/acknowledged findings, canceled routes and a valid Slack retry timer are excluded from actionable delivery health. `health --scan-only` omits the worker requirement for externally scheduled scans. Neither command writes data or calls external services; unhealthy monitoring returns exit code 2. A healthy monitor can still have critical affected systems.
 
 `explain` includes each cited source's modification and fetch timestamps. Cached conclusions during a source outage reflect historical evidence; degraded health does not imply those sources were refreshed. Source revisions more than five minutes in the future are rejected without advancing their checkpoint.
 
-Use `backup --output PATH` for a consistent backup, rather than copying a live SQLite file without its write-ahead log. To restore, stop the worker, preserve the old database and its sidecars, put the verified backup at the configured database path with private permissions, and restart. An interrupted in-flight delivery becomes `unknown` on worker recovery. `unlock` removes stale informational metadata only after acquiring the SQLite worker lock; it never deletes the lock database or interrupts a running worker.
+Use `backup --output PATH` for a consistent backup at a new destination; the command also verifies a temporary restored copy. Use `verify-backup --input PATH` to inspect an existing standalone snapshot without loading monitor configuration. Do not copy a live SQLite file without its write-ahead log. To restore, stop the worker, preserve the old database and its sidecars, put the verified backup at the configured database path with private permissions, and restart. An interrupted in-flight delivery becomes `unknown` on worker recovery. `unlock` removes stale informational metadata only after acquiring the SQLite worker lock; it never deletes the lock database or interrupts a running worker.
+
+## External heartbeat
+
+```yaml
+monitoring:
+  heartbeat_url_env: HEARTBEAT_URL
+  interval_seconds: 60
+  allow_private_endpoint: false
+```
+
+This is optional; `init --heartbeat` adds the default environment-variable name to the configuration. Store the endpoint URL in the private credentials file, and configure its service to alert on missed pings. The worker sends a bodyless GET only after a completed scan and while local monitoring health is healthy. Unhealthy scans, delivery problems and maintenance failures withhold success pings; a startup grace period is not a successful scan. The receiver gets request metadata, but no inventory, findings or logs.
+
+Intervals may be 30–3,600 seconds. Requests have a five-second timeout, no redirects and a 4 KiB response cap. Public HTTPS is required unless `allow_private_endpoint: true` explicitly permits a trusted private/local HTTP(S) destination. The URL is not included in recorded status or errors. `status` exposes the last external-heartbeat outcome independently of the local worker heartbeat. An external ping cannot itself notify you that it was never sent; the receiving service must detect that absence.
+
+## Retention and verified backups
+
+Nothing is pruned or backed up automatically unless `maintenance` is configured. For example:
+
+```yaml
+maintenance:
+  interval_hours: 24
+  retention:
+    analysis_cache_days: 30
+    evidence_history_days: 180
+    finding_history_days: 180
+    accepted_delivery_days: 180
+    inactive_findings_days: 365
+    unreferenced_evidence_days: 365
+    batch_size: 1000
+  backup:
+    directory: ./backups
+    keep: 7
+    max_bytes: 536870912
+```
+
+Choose periods for your deployment rather than copying this policy blindly. Omit individual retention fields to leave that category untouched; omit `retention` or `backup` to disable it. Retention periods are 1–3,650 days. `interval_hours` is 1–168, default 24. Once configured, `start` performs scheduled maintenance, including retention; preview the policy before restarting the worker:
+
+```sh
+security-watch prune --config ./watch/security-watch.yaml
+security-watch prune --config ./watch/security-watch.yaml --apply
+```
+
+The first command opens the database read-only and reports a plan. `--apply` recomputes eligibility and deletes one batch atomically. Every deleted row, including dependent history and assessment-basis metadata, counts toward `batch_size` (1–10,000, default 1,000). `more_available` indicates further eligible work. Pruning does not compact the database file; freed pages remain available for SQLite reuse.
+
+Analysis-cache age is measured from its last write. Current evidence revisions are retained unless old evidence is explicitly eligible for unreferenced-evidence cleanup. Active findings, affected or uncertain inactive findings, and pending, sending, unknown or failed delivery records protect their associated history and evidence. Source checkpoints and budget records are never pruned. An inactive finding expires only after supported exclusion, withdrawal or confirmed general-news classification, and only when its audit dependencies are also eligible. Removing a component from inventory alone does not make its finding resolved. These protections can leave data older than the configured periods.
+
+Backup paths are relative to the configuration file. The destination directory must be private. Scheduled backups are verified before older managed snapshots are rotated, and before retention runs when both are enabled. `keep` defaults to 7 and allows 1–365 snapshots. Rotation leaves files outside the application's backup filename pattern untouched. A failed backup or verification prevents cleanup during that maintenance attempt and is recorded as a monitoring problem.
+
+Verification copies a standalone snapshot into a private temporary directory in a separate process. It checks SQLite integrity, supported schema and migrations, foreign-key relationships, saved JSON and scan metadata, then deletes the temporary copy. It never overwrites the source or restores over a live database. It rejects live sidecars, links, oversized inputs and unsupported schemas. This checks structural restorability, not the truth or semantic correctness of saved vulnerability assessments.
+
+The default verification size limit is 512 MiB. Configured backup verification permits up to 20 GiB through `max_bytes`; standalone `verify-backup` uses the default. Verification has a 60-second process limit and needs writable temporary space as well as room for the new backup. For a container with a read-only root filesystem, provide a writable `/tmp` tmpfs with enough capacity. Protect backups as carefully as the live database. Before an actual restore, stop the worker, retain the old database and sidecars, and place a verified snapshot at the configured path with private permissions.
+
+## Model evaluation
+
+From a source checkout, `npm run evaluate:models -- --help` lists the available options. Without `--live`, the script makes no network requests and reports skipped cases; exit code 3 means no cases were attempted. A live run requires provider credentials and exact `SECURITY_WATCH_EVAL_<PROVIDER>_MODEL` environment variables. EVAL settings can fall back to matching SMOKE settings; there is no default model.
+
+The default cap is 20 total requests, 45 seconds per request and 2,048 output tokens. Select cases/providers to fit the cap. Optional verification uses up to two requests per case. Provider charges may apply; a token/request cap is not a dollar budget. Evaluation sends no notifications and uses fictional inventory against source-derived synthetic text.
+
+The versioned corpus includes source references, but its labels remain `pending_human_review`. Reports separate accepted output, attempted coverage, reference-label agreement, false exclusions, rejected outputs and conflicting results. Acceptance measures the production schema/evidence checks, not accuracy. Treat label agreement as a comparison with provisional references; it does not establish production performance. Rejected, skipped and conflicting cases remain visible rather than disappearing from the report.

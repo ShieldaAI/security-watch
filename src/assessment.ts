@@ -1,4 +1,4 @@
-import { satisfies, valid, validRange } from 'semver';
+import { satisfies, validRange } from 'semver';
 import type {
   Applicability,
   Assessment,
@@ -11,6 +11,7 @@ import type {
   System,
 } from './types.js';
 import { hash, highest, severityRank, timestamp } from './util.js';
+import { exactLibraryVersion, normalizeEcosystem, samePackage } from './ecosystems.js';
 
 function identity(id: string): string {
   return /^(?:CVE-|GHSA-)/i.test(id) ? id.toUpperCase() : id;
@@ -121,8 +122,17 @@ function stale(system: System, config: Config, now: number): boolean {
 }
 
 function claimStatus(claim: PackageClaim, version: string | undefined): Applicability {
-  if (!version || !valid(version)) return 'unknown';
+  if (!version) return 'unknown';
+  const ecosystem = normalizeEcosystem(claim.ecosystem);
+  try {
+    version = exactLibraryVersion(version, ecosystem);
+  } catch {
+    return 'unknown';
+  }
   if (claim.matched_versions?.includes(version) || claim.versions?.includes(version)) return 'affected';
+  // Other registries have their own ordering, epochs and prerelease rules.
+  // Exact positive queries/listed versions are evidence; a missing match is not an exclusion.
+  if (ecosystem !== 'npm') return 'unknown';
   if (!claim.range) return 'unknown';
   // GitHub renders some npm range intersections with commas; semver uses spaces.
   const range = claim.range.replace(/,\s*/g, ' ');
@@ -207,10 +217,7 @@ export function assess(
         const matching = advisories
           .map((item) => ({
             item,
-            claims: item.packages.filter(
-              (claim) =>
-                claim.ecosystem.toLowerCase() === component.ecosystem && claim.name === component.name,
-            ),
+            claims: item.packages.filter((claim) => samePackage(claim, component)),
           }))
           .filter((item) => item.claims.length);
         if (!matching.length) {
@@ -218,7 +225,7 @@ export function assess(
             componentMatched = true;
             const result = base(group, system, now, 'library', component.id);
             result.reasons.push(
-              `News identifies an advisory and mentions the exact npm name ${component.name}; no structured affected-version evidence is available yet.`,
+              `News identifies an advisory and mentions the ${component.ecosystem} package name ${component.name}; no structured affected-version evidence is available yet.`,
             );
             if (stale(system, config, now))
               result.reasons.push(
@@ -257,7 +264,7 @@ export function assess(
         } else if (states.includes('affected')) {
           result.applicability = 'affected';
           result.reasons.push(
-            `The exact npm identity ${component.name} and installed version ${component.version} match affected advisory evidence.`,
+            `The exact ${component.ecosystem} identity ${component.name} and installed version ${component.version} match affected advisory evidence.`,
           );
         } else if (states.every((state) => state === 'not_affected')) {
           result.applicability = 'not_affected';
@@ -266,7 +273,7 @@ export function assess(
           );
         } else {
           result.reasons.push(
-            `The npm identity ${component.name} matches, but a missing version or unsupported affected-version constraint prevents a conclusion.`,
+            `The ${component.ecosystem} identity ${component.name} matches, but a missing version or unsupported affected-version constraint prevents a conclusion.`,
           );
         }
         if (!result.withdrawn && stale(system, config, now)) {

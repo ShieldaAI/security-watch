@@ -15,9 +15,15 @@ import { randomUUID } from 'node:crypto';
 import type { Assessment, Config, Decision, Evidence, Notification } from './types.js';
 import { hash } from './util.js';
 import { decide } from './assessment.js';
+import {
+  validateRetentionPolicy,
+  type PruneCounts,
+  type PruneReport,
+  type RetentionPolicy,
+} from './maintenance.js';
 
 type Row = Record<string, unknown>;
-const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 function verifyFile(path: string): void {
   // Closing any descriptor for a live SQLite inode releases this process's POSIX locks.
   // Inspect existing files without opening them, including when another Store is already open.
@@ -164,6 +170,41 @@ export class Store {
             'CREATE INDEX IF NOT EXISTS evidence_by_id ON evidence(id); PRAGMA user_version = 4;',
           );
         });
+      if (version < 5)
+        this.#transaction(() => {
+          this.#db.exec(`
+            ALTER TABLE metadata ADD COLUMN updated_at INTEGER;
+            ALTER TABLE evidence ADD COLUMN content_hash TEXT;
+            ALTER TABLE evidence ADD COLUMN fetched_at INTEGER;
+            ALTER TABLE findings ADD COLUMN updated_at INTEGER;
+            CREATE INDEX metadata_age ON metadata(updated_at);
+            CREATE INDEX evidence_age ON evidence(fetched_at);
+            CREATE INDEX findings_age ON findings(updated_at);
+            CREATE INDEX evidence_revisions_age ON evidence_revisions(recorded_at);
+            CREATE INDEX finding_revisions_age ON finding_revisions(recorded_at);
+          `);
+          // Existing cache ages are unknown. Start their retention clock at migration.
+          this.#db.prepare('UPDATE metadata SET updated_at=?').run(Date.now());
+          for (const row of this.#db.prepare('SELECT source,id,payload FROM evidence').iterate()) {
+            const value = JSON.parse(String(row.payload)) as Evidence;
+            const fetched = Date.parse(value.fetched_at);
+            this.#db
+              .prepare('UPDATE evidence SET content_hash=?,fetched_at=? WHERE source=? AND id=?')
+              .run(
+                evidenceFingerprint(value),
+                Number.isFinite(fetched) ? fetched : null,
+                row.source!,
+                row.id!,
+              );
+          }
+          for (const row of this.#db.prepare('SELECT id,payload FROM findings').iterate()) {
+            const updated = Date.parse((JSON.parse(String(row.payload)) as Assessment).updated_at);
+            this.#db
+              .prepare('UPDATE findings SET updated_at=? WHERE id=?')
+              .run(Number.isFinite(updated) ? updated : null, row.id!);
+          }
+          this.#db.exec('PRAGMA user_version = 5');
+        });
       if (!options.readOnly) this.#privateSidecars();
     } catch (error) {
       this.#db.close();
@@ -193,7 +234,7 @@ export class Store {
   saveEvidence(evidence: Evidence[], checkpoints: Record<string, string>): void {
     this.#transaction(() => {
       const put = this.#db.prepare(
-        'INSERT INTO evidence(source,id,payload) VALUES(?,?,?) ON CONFLICT(source,id) DO UPDATE SET payload=excluded.payload',
+        'INSERT INTO evidence(source,id,payload,content_hash,fetched_at) VALUES(?,?,?,?,?) ON CONFLICT(source,id) DO UPDATE SET payload=excluded.payload,content_hash=excluded.content_hash,fetched_at=excluded.fetched_at',
       );
       const get = this.#db.prepare('SELECT payload FROM evidence WHERE source=? AND id=?');
       for (const e of evidence) {
@@ -216,7 +257,7 @@ export class Store {
             'INSERT INTO evidence_revisions(source,id,content_hash,payload,recorded_at) VALUES(?,?,?,?,?) ON CONFLICT(source,id,content_hash) DO NOTHING',
           )
           .run(e.source, e.id, evidenceFingerprint(e), JSON.stringify(e), fetched);
-        put.run(e.source, e.id, JSON.stringify(e));
+        put.run(e.source, e.id, JSON.stringify(e), evidenceFingerprint(e), fetched);
       }
       for (const [key, value] of Object.entries(checkpoints)) this.setMeta(`checkpoint:${key}`, value);
     });
@@ -273,10 +314,16 @@ export class Store {
       const revision = old ? Number(old.revision) + (changed ? 1 : 0) : 1;
       this.#db
         .prepare(
-          `INSERT INTO findings(id,payload,fingerprint,revision) VALUES(?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,fingerprint=excluded.fingerprint,revision=excluded.revision`,
+          `INSERT INTO findings(id,payload,fingerprint,revision,updated_at) VALUES(?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,fingerprint=excluded.fingerprint,revision=excluded.revision,updated_at=excluded.updated_at`,
         )
-        .run(assessment.id, JSON.stringify(assessment), signature, revision);
+        .run(
+          assessment.id,
+          JSON.stringify(assessment),
+          signature,
+          revision,
+          Number.isFinite(Date.parse(assessment.updated_at)) ? Date.parse(assessment.updated_at) : null,
+        );
       if (changed)
         this.#db
           .prepare(
@@ -576,12 +623,132 @@ export class Store {
   getMeta(key: string): string | undefined {
     return this.#db.prepare('SELECT value FROM metadata WHERE key=?').get(key)?.value as string | undefined;
   }
-  setMeta(key: string, value: string): void {
+  setMeta(key: string, value: string, now = Date.now()): void {
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid metadata timestamp');
     this.#db
       .prepare(
-        'INSERT INTO metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        'INSERT INTO metadata(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',
       )
-      .run(key, value);
+      .run(key, value, now);
+  }
+  prune(policy: RetentionPolicy, now = Date.now(), apply = false): PruneReport {
+    const limits = validateRetentionPolicy(policy);
+    if (typeof apply !== 'boolean') throw new Error('Retention apply must be a boolean');
+    if (!Number.isSafeInteger(now) || now < 0 || !Number.isFinite(new Date(now).getTime()))
+      throw new Error('Invalid retention timestamp');
+    const cutoff = (days: number | undefined) =>
+      days === undefined ? 'NULL' : String(now - days * 86_400_000);
+    const counts: PruneCounts = {
+      analysis_cache: 0,
+      evidence_history: 0,
+      finding_history: 0,
+      accepted_deliveries: 0,
+      inactive_findings: 0,
+      unreferenced_evidence: 0,
+      assessment_bases: 0,
+    };
+    const deletions: { table: string; rows: number[] }[] = [];
+    let remaining = limits.batch_size;
+    let moreAvailable = false;
+    const take = (
+      table: string,
+      select: string,
+      parameters: string[],
+      category: keyof PruneCounts,
+    ): number[] => {
+      const found = this.#db.prepare(`${select} LIMIT ?`).all(...parameters, remaining + 1);
+      moreAvailable ||= found.length > remaining;
+      const rows = found.slice(0, remaining).map((row) => Number(row.rowid));
+      remaining -= rows.length;
+      counts[category] += rows.length;
+      deletions.push({ table, rows });
+      return rows;
+    };
+    // Inactive means absent from the current assessment, not remediated. Uncertain or affected
+    // findings stay protected until authoritative exclusion, withdrawal, or confirmed general news.
+    const resolved = `COALESCE((json_type(f.payload,'$.active')='false' AND (
+      json_extract(f.payload,'$.applicability')='not_affected' OR json_type(f.payload,'$.withdrawn')='true' OR
+      (json_extract(f.payload,'$.ai.status')='complete' AND json_extract(f.payload,'$.news_analysis.classification')='general_news' AND json_extract(f.payload,'$.news_analysis.impact')='not_applicable')
+    ) AND NOT EXISTS (SELECT 1 FROM notifications pending WHERE pending.finding_id=f.id AND pending.status<>'accepted')),0)`;
+    const inactive = `(${resolved}) AND f.updated_at < ${cutoff(limits.inactive_findings_days)}`;
+    const protectedEvidence = `EXISTS(SELECT 1 FROM findings f JOIN json_each(f.payload,'$.evidence_ids') ids WHERE ids.value=r.id AND NOT (${resolved})) OR
+      EXISTS(SELECT 1 FROM finding_revisions history JOIN findings f ON f.id=history.finding_id JOIN json_each(history.payload,'$.evidence_ids') ids WHERE ids.value=r.id AND NOT (${resolved}))`;
+    this.#db.exec(apply ? 'BEGIN IMMEDIATE' : 'BEGIN');
+    try {
+      take(
+        'metadata',
+        `SELECT rowid FROM metadata WHERE key GLOB 'analysis:*' AND updated_at < ${cutoff(limits.analysis_cache_days)} ORDER BY updated_at,rowid`,
+        [],
+        'analysis_cache',
+      );
+      const accepted = take(
+        'notifications',
+        `SELECT n.rowid FROM notifications n JOIN findings f ON f.id=n.finding_id WHERE n.status='accepted' AND (${resolved}) AND
+        (n.available_at < ${cutoff(limits.accepted_delivery_days)} OR ((${inactive}) AND n.available_at < ${cutoff(limits.inactive_findings_days)})) ORDER BY n.available_at,n.rowid`,
+        [],
+        'accepted_deliveries',
+      );
+      const revisions = take(
+        'finding_revisions',
+        `SELECT r.rowid FROM finding_revisions r JOIN findings f ON f.id=r.finding_id WHERE (${resolved}) AND
+        (r.recorded_at < ${cutoff(limits.finding_history_days)} OR ((${inactive}) AND r.recorded_at < ${cutoff(limits.inactive_findings_days)})) AND
+        NOT EXISTS(SELECT 1 FROM notifications n WHERE n.finding_id=r.finding_id AND n.revision=r.revision AND n.rowid NOT IN(SELECT value FROM json_each(?))) ORDER BY r.recorded_at,r.rowid`,
+        [JSON.stringify(accepted)],
+        'finding_history',
+      );
+      const noRemainingAudit = `NOT EXISTS(SELECT 1 FROM notifications n WHERE n.finding_id=f.id AND n.rowid NOT IN(SELECT value FROM json_each(?))) AND
+        NOT EXISTS(SELECT 1 FROM finding_revisions r WHERE r.finding_id=f.id AND r.rowid NOT IN(SELECT value FROM json_each(?)))`;
+      const bases = take(
+        'metadata',
+        `SELECT m.rowid FROM metadata m JOIN findings f ON m.key='assessment-basis:'||f.id WHERE (${inactive}) AND ${noRemainingAudit} ORDER BY f.updated_at,m.rowid`,
+        [JSON.stringify(accepted), JSON.stringify(revisions)],
+        'assessment_bases',
+      );
+      const findings = take(
+        'findings',
+        `SELECT f.rowid FROM findings f WHERE (${inactive}) AND ${noRemainingAudit} AND
+        NOT EXISTS(SELECT 1 FROM metadata m WHERE m.key='assessment-basis:'||f.id AND m.rowid NOT IN(SELECT value FROM json_each(?))) ORDER BY f.updated_at,f.rowid`,
+        [JSON.stringify(accepted), JSON.stringify(revisions), JSON.stringify(bases)],
+        'inactive_findings',
+      );
+      const unreferenced = `e.fetched_at < ${cutoff(limits.unreferenced_evidence_days)} AND
+        NOT EXISTS(SELECT 1 FROM findings f JOIN json_each(f.payload,'$.evidence_ids') ids WHERE ids.value=e.id AND f.rowid NOT IN(SELECT value FROM json_each(?))) AND
+        NOT EXISTS(SELECT 1 FROM finding_revisions r JOIN json_each(r.payload,'$.evidence_ids') ids WHERE ids.value=e.id AND r.rowid NOT IN(SELECT value FROM json_each(?)))`;
+      const history = take(
+        'evidence_revisions',
+        `SELECT r.rowid FROM evidence_revisions r LEFT JOIN evidence e ON e.source=r.source AND e.id=r.id WHERE
+        NOT (${protectedEvidence}) AND (
+          (r.recorded_at < ${cutoff(limits.evidence_history_days)} AND (e.id IS NULL OR (e.content_hash IS NOT NULL AND e.content_hash<>r.content_hash))) OR
+          (r.recorded_at < ${cutoff(limits.unreferenced_evidence_days)} AND (${unreferenced}))
+        ) ORDER BY r.recorded_at,r.rowid`,
+        [JSON.stringify(findings), JSON.stringify(revisions)],
+        'evidence_history',
+      );
+      take(
+        'evidence',
+        `SELECT e.rowid FROM evidence e WHERE (${unreferenced}) AND
+        NOT EXISTS(SELECT 1 FROM evidence_revisions r WHERE r.source=e.source AND r.id=e.id AND r.rowid NOT IN(SELECT value FROM json_each(?))) ORDER BY e.fetched_at,e.rowid`,
+        [JSON.stringify(findings), JSON.stringify(revisions), JSON.stringify(history)],
+        'unreferenced_evidence',
+      );
+      if (apply)
+        for (const { table, rows } of deletions)
+          if (rows.length)
+            this.#db
+              .prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT value FROM json_each(?))`)
+              .run(JSON.stringify(rows));
+      this.#db.exec('COMMIT');
+      return {
+        applied: apply,
+        planned_at: new Date(now).toISOString(),
+        counts,
+        total: limits.batch_size - remaining,
+        more_available: moreAvailable,
+      };
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
   }
   reserveBudget(
     day: string,

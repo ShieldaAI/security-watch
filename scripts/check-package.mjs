@@ -51,6 +51,16 @@ try {
   const templates = JSON.parse(run([cli, 'templates'], consumer));
   if (templates.length !== 24 || !templates.some((template) => template.id === 'python'))
     throw new Error('Packed CLI system templates are incomplete');
+  const libraries = join(consumer, 'libraries.txt');
+  writeFileSync(libraries, 'php:symfony/http-foundation@7.1.0\npython:Requests\n');
+  const normalized = JSON.parse(run([cli, 'normalize-libraries', '--input', libraries], consumer));
+  if (
+    normalized.length !== 2 ||
+    normalized[0].ecosystem !== 'Packagist' ||
+    normalized[1].name !== 'requests' ||
+    normalized[1].version !== undefined
+  )
+    throw new Error('Packed library normalization failed');
   const configured = join(consumer, 'configured');
   run(
     [
@@ -101,7 +111,9 @@ try {
     throw new Error('Packed CLI did not match the fixture');
   writeFileSync(
     join(consumer, 'consumer.mts'),
-    `import { parseConfig, Store, PROVIDERS, providerDefinition, type Assessment, type ModelProvider } from '@shieldaai/security-watch';
+    `import { parseConfig, Store, PROVIDERS, providerDefinition, parseLibraryList, type Ecosystem, type Assessment, type ModelProvider } from '@shieldaai/security-watch';
+const ecosystem: Ecosystem = 'Packagist';
+if (parseLibraryList('symfony/http-foundation', ecosystem)[0]?.ecosystem !== ecosystem) throw new Error('Unexpected ecosystem exports');
 const provider: ModelProvider = 'anthropic';
 const config = parseConfig({version: 1, poll_interval_minutes: 30, news_lookback_minutes: 40});
 const store = new Store(':memory:');

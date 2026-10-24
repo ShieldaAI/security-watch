@@ -83,13 +83,14 @@ test('OSV batches deduplicated exact versions and follows each query pagination 
       calls.push([url, options]);
       if (url.endsWith('/querybatch')) {
         const queries = JSON.parse(options.body).queries;
-        if (queries.length === 2) {
+        if (queries.length === 3) {
           assert.deepEqual(
             queries.map((q) => q.package.name),
-            ['alpha', 'beta'],
+            ['alpha', 'beta', 'unknown'],
           );
+          assert.equal('version' in queries[2], false);
           return response({
-            results: [{ vulns: [{ id: 'GHSA-aaaa-aaaa-aaaa' }], next_page_token: 'alpha-page-2' }, {}],
+            results: [{ vulns: [{ id: 'GHSA-aaaa-aaaa-aaaa' }], next_page_token: 'alpha-page-2' }, {}, {}],
           });
         }
         assert.equal(queries.length, 1);

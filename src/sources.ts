@@ -12,6 +12,15 @@ import type {
 } from './types.js';
 import { cleanText, hash, highest, timestamp } from './util.js';
 import { collectCveNow, evidenceRelevant } from './cve-now.js';
+import { VENDOR_FEEDS, vendorArticleBody, vendorArticleTarget, type VendorFeed } from './vendor-sources.js';
+import {
+  exactLibraryVersion,
+  normalizeEcosystem,
+  normalizePackageName,
+  osvPackageNames,
+  samePackage,
+  type Ecosystem,
+} from './ecosystems.js';
 import {
   PartialSourceError,
   SourceError,
@@ -159,10 +168,24 @@ async function json(
 }
 
 interface OsvQuery {
+  ecosystem: Ecosystem;
   name: string;
-  version: string;
+  version?: string;
   page_token?: string;
   seen: Set<string>;
+}
+function sourcePackage(ecosystem: string, name: string): { ecosystem: string; name: string } {
+  let normalized: Ecosystem;
+  try {
+    normalized = normalizeEcosystem(ecosystem);
+  } catch {
+    return { ecosystem, name };
+  }
+  try {
+    return { ecosystem: normalized, name: normalizePackageName(normalized, name) };
+  } catch {
+    throw new SourceError('Source returned an invalid package identity.');
+  }
 }
 function osvRanges(value: unknown): string | undefined {
   const ranges = array(value, true);
@@ -231,14 +254,29 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     severities.push(vectorSeverity(record(rawSeverity).score));
   for (const rawAffected of array(data.affected, true)) {
     const affected = record(rawAffected);
+    // OSV can include a separate Git-only entry beside registry package entries.
+    if (affected.package === undefined) {
+      const ranges = array(affected.ranges);
+      if (
+        !ranges.length ||
+        !ranges.every((rawRange) => {
+          const range = record(rawRange);
+          return range.type === 'GIT' && typeof range.repo === 'string' && range.repo.length > 0;
+        })
+      )
+        throw new SourceError('OSV returned an affected entry without a package identity.');
+      continue;
+    }
     const pkg = record(affected.package);
-    const ecosystem = string(pkg.ecosystem);
-    const name = string(pkg.name);
-    const range = osvRanges(affected.ranges);
+    const { ecosystem, name } = sourcePackage(string(pkg.ecosystem), string(pkg.name));
+    const range = ecosystem === 'npm' ? osvRanges(affected.ranges) : undefined;
     const versions = array(affected.versions, true).map(string);
     const matched_versions = [
       ...new Set(
-        matches.filter((query) => ecosystem === 'npm' && query.name === name).map((query) => query.version),
+        matches
+          .filter((query) => samePackage(query, { ecosystem, name }))
+          .map((query) => query.version)
+          .filter((version): version is string => version !== undefined),
       ),
     ];
     const fixed = array(affected.ranges, true)
@@ -257,16 +295,23 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     for (const rawSeverity of array(affected.severity, true))
       severities.push(vectorSeverity(record(rawSeverity).score));
   }
-  // A query match is independent positive evidence, even if upstream omits an affected entry.
-  for (const name of new Set(matches.map((query) => query.name)))
-    if (!packageClaims.some((p) => p.ecosystem === 'npm' && p.name === name))
+  // Queries identify the package even when details omit it. Only a versioned query proves impact.
+  for (const query of matches)
+    if (!packageClaims.some((claim) => samePackage(claim, query))) {
+      const versions = [
+        ...new Set(
+          matches
+            .filter((match) => samePackage(match, query))
+            .map((match) => match.version)
+            .filter((version): version is string => version !== undefined),
+        ),
+      ];
       packageClaims.push({
-        ecosystem: 'npm',
-        name,
-        matched_versions: [
-          ...new Set(matches.filter((query) => query.name === name).map((query) => query.version)),
-        ],
+        ecosystem: query.ecosystem,
+        name: query.name,
+        ...(versions.length ? { matched_versions: versions } : {}),
       });
+    }
   const canonical = `https://osv.dev/vulnerability/${encodeURIComponent(expectedId)}`;
   return {
     id: `osv:${expectedId}`,
@@ -296,14 +341,31 @@ async function osv(
 ): Promise<Evidence[]> {
   const unique = new Map<string, OsvQuery>();
   for (const system of inventory.systems)
-    for (const component of system.components)
-      if (component.ecosystem === 'npm' && component.version) {
-        const key = JSON.stringify([component.name, component.version]);
-        unique.set(key, { name: component.name, version: component.version, seen: new Set() });
+    for (const component of system.components) {
+      const ecosystem = normalizeEcosystem(component.ecosystem);
+      let version: string | undefined;
+      // Imported lockfiles may describe an unresolved Git/URL dependency instead of a registry version.
+      // Query its package name conservatively without turning that text into an exact-version match.
+      if (component.version) {
+        try {
+          version = exactLibraryVersion(component.version, ecosystem);
+        } catch {
+          /* Applicability remains unknown. */
+        }
       }
+      for (const name of osvPackageNames(ecosystem, component.name)) {
+        const key = JSON.stringify([ecosystem, name, version ?? null]);
+        unique.set(key, {
+          ecosystem,
+          name,
+          ...(version ? { version } : {}),
+          seen: new Set(),
+        });
+      }
+    }
   const queries = [...unique.values()];
   if (queries.length > 10_000)
-    throw new SourceError('OSV inventory exceeds the 10,000 unique package-version limit.');
+    throw new SourceError('OSV inventory exceeds the 10,000 unique package queries limit.');
   const results: Evidence[] = [];
   const invalid = new SourceItemFailures();
   try {
@@ -315,8 +377,8 @@ async function osv(
           throw new SourceError('OSV pagination limit reached; collection is incomplete.');
         const body = JSON.stringify({
           queries: pending.map((query) => ({
-            package: { ecosystem: 'npm', name: query.name },
-            version: query.version,
+            package: { ecosystem: query.ecosystem, name: query.name },
+            ...(query.version ? { version: query.version } : {}),
             ...(query.page_token ? { page_token: query.page_token } : {}),
           })),
         });
@@ -345,7 +407,7 @@ async function osv(
             if (!id) continue;
             if (!matched.has(id)) matched.set(id, []);
             if (
-              !matched.get(id)!.some((match) => match.name === query.name && match.version === query.version)
+              !matched.get(id)!.some((match) => samePackage(match, query) && match.version === query.version)
             )
               matched.get(id)!.push(query);
             if (matched.size > MAX_ADVISORIES)
@@ -432,8 +494,7 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
         ? optionalString(record(patched).identifier)
         : optionalString(patched);
     return {
-      ecosystem: string(pkg.ecosystem),
-      name: string(pkg.name),
+      ...sourcePackage(string(pkg.ecosystem), string(pkg.name)),
       ...(range ? { range } : {}),
       ...(fixed ? { fixed } : {}),
     };
@@ -749,6 +810,7 @@ async function feed(
   http: HttpClient,
   now: number,
   window: NewsWindow,
+  entryLimit = MAX_FEED_ENTRIES,
 ): Promise<FeedResult> {
   const response = await http(url, { maxBytes: 2_000_000 });
   if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
@@ -773,7 +835,7 @@ async function feed(
   if (parsed.rss !== undefined) entries = list(record(record(parsed.rss).channel).item);
   else if (parsed.feed !== undefined) entries = list(record(parsed.feed).entry);
   else throw new SourceError('Unsupported feed format; RSS 2.0 or Atom is required.');
-  if (entries.length > MAX_FEED_ENTRIES)
+  if (entries.length > entryLimit)
     throw new SourceError('Feed entry limit reached; collection is incomplete.');
   const fallback = new URL(url);
   fallback.username = '';
@@ -930,6 +992,68 @@ async function hackerNews(http: HttpClient, now: number, window: NewsWindow): Pr
   return result;
 }
 
+async function vendorFeed(
+  vendor: VendorFeed,
+  http: HttpClient,
+  now: number,
+  window: NewsWindow,
+): Promise<FeedResult> {
+  const profile = VENDOR_FEEDS[vendor];
+  // PHP's feed includes years of release history.
+  // Keep its larger item allowance separate from generic feeds and the shared 2 MB cap.
+  const result = await feed(
+    profile.feed,
+    `vendor:${vendor}`,
+    http,
+    now,
+    window,
+    vendor === 'php' ? 2000 : MAX_FEED_ENTRIES,
+  );
+  const entries = result.evidence.slice(0, 20);
+  for (let offset = 0; offset < entries.length; offset += 4)
+    await Promise.all(
+      entries.slice(offset, offset + 4).map(async (entry) => {
+        const target = vendorArticleTarget(vendor, entry.url);
+        if (!target) return;
+        try {
+          const response = await http(target.url, {
+            maxBytes: MAX_HTML_BYTES,
+            timeoutMs: 15_000,
+            minIntervalMs: 500,
+            redirects: 3,
+            allowedRedirectOrigins: [profile.origin],
+            headers: { accept: 'text/html' },
+          });
+          if (response.status !== 200) return;
+          const body = vendorArticleBody(
+            vendor,
+            visibleHtmlNodes(parseHtml(response.body, true)),
+            target.anchor,
+          );
+          if (!body) return;
+          const text = htmlText(body, 16_001);
+          const normalize = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
+          // A complete wrapper on an unrelated redirect/error page is not the requested article.
+          const visible = normalize(text);
+          const title = normalize(entry.title);
+          if (!visible.includes(title) || visible.replaceAll(title, '').trim().length < 40) return;
+          entry.description = text.slice(0, 16_000);
+          entry.content_status = text.length <= 16_000 ? 'full' : 'excerpt';
+          entry.aliases = aliases(
+            `${entry.title}\n${entry.description}`.match(
+              /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
+            ) ?? [],
+          );
+        } catch (error) {
+          if (sourceCanceled(error)) throw error;
+          // Keep the validated feed excerpt when the vendor page cannot be read safely.
+        }
+      }),
+    );
+  stabilizeUndated(result, window.previous);
+  return result;
+}
+
 /** Collect source evidence and report failures without advancing failed sources' checkpoints. */
 export async function collectSources(
   inventory: Inventory,
@@ -961,6 +1085,10 @@ export async function collectSources(
         run: () => github(type, checkpoints[`github:${type}`], config, http, now),
       });
   if (config.sources.kev) jobs.push({ source: 'kev', run: () => kev(http, now, previousEvidence) });
+  for (const vendor of new Set(config.sources.vendor_feeds ?? [])) {
+    const source = `vendor:${vendor}`;
+    jobs.push({ source, run: () => vendorFeed(vendor, http, now, window(source)) });
+  }
   for (const url of new Set(config.sources.feeds)) {
     const source = `feed:${hash(url).slice(0, 16)}`;
     jobs.push({
@@ -1018,6 +1146,16 @@ export async function collectSources(
         result.errors.push({
           source: 'hacker_news:articles',
           message: `${missing} relevant The Hacker News article(s) could not be read in full; excerpts remain available for cautious review.`,
+        });
+    }
+    if (job.source.startsWith('vendor:')) {
+      const missing = evidence.filter(
+        (item) => item.content_status !== 'full' && evidenceRelevant(item, inventory),
+      ).length;
+      if (missing)
+        result.errors.push({
+          source: `${job.source}:articles`,
+          message: `${missing} relevant vendor article(s) could not be read in full; excerpts remain available for cautious review.`,
         });
     }
     if (incomplete)

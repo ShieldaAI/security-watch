@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -18,16 +18,23 @@ import { checkHealth } from './health.js';
 import type { Assessment } from './types.js';
 import { PROVIDERS, providerDefinition } from './providers.js';
 import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
+import { ECOSYSTEMS, parseLibraryList } from './ecosystems.js';
+import { HeartbeatMonitor } from './heartbeat.js';
+import { MaintenanceScheduler } from './operations.js';
+import { verifyBackup } from './maintenance.js';
 
 const help = `Shielda Security Watch (experimental alpha)
 
   security-watch init [--directory PATH] [--yes] [--systems nodejs,python]
+    [--libraries PATH --ecosystem php] [--vendor-feeds nodejs,python,php] [--heartbeat]
     [--provider NAME --model ID] [--endpoint URL] [--allow-private-endpoint]
     [--poll-minutes 30] [--lookback-minutes 40]
     [--notifications slack,email] [--email-from ADDRESS] [--email-to ADDRESS,ADDRESS]
   security-watch doctor [--config PATH] [--credentials-file PATH]
   security-watch providers
   security-watch templates
+  security-watch ecosystems
+  security-watch normalize-libraries --input PATH [--ecosystem php] [--output PATH]
   security-watch scan [--dry-run] [--notify] [--fixture PATH] [--no-ai]
   security-watch start [--config PATH]
   security-watch findings | status | deliveries | budget
@@ -38,6 +45,8 @@ const help = `Shielda Security Watch (experimental alpha)
   security-watch suppress FINDING_ID --hours 24 --reason TEXT
   security-watch retry DELIVERY_ID   (verify receipt before retrying unknown delivery)
   security-watch backup --output PATH
+  security-watch verify-backup --input PATH
+  security-watch prune [--apply]    (shows the retention plan unless --apply is given)
   security-watch unlock             (only removes a stopped worker's lock)
   security-watch test-notification --channel slack|email
 
@@ -54,6 +63,12 @@ function argumentsFromCommandLine() {
       config: { type: 'string' },
       directory: { type: 'string' },
       systems: { type: 'string' },
+      libraries: { type: 'string' },
+      ecosystem: { type: 'string' },
+      input: { type: 'string' },
+      'vendor-feeds': { type: 'string' },
+      heartbeat: { type: 'boolean' },
+      apply: { type: 'boolean' },
       provider: { type: 'string' },
       model: { type: 'string' },
       endpoint: { type: 'string' },
@@ -94,6 +109,18 @@ function output(value: unknown) {
 function shellArgument(value: string): string {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
+function libraryInput(path: string, ecosystem?: string) {
+  const absolute = resolve(path);
+  const stat = statSync(absolute);
+  if (!stat.isFile() || stat.size > 2 * 1024 * 1024)
+    throw new Error('Library input must be a regular file no larger than 2 MiB.');
+  const data = readFileSync(absolute);
+  if (data.byteLength > 2 * 1024 * 1024) throw new Error('Library input exceeds 2 MiB.');
+  const components = parseLibraryList(data.toString('utf8'), ecosystem);
+  if (!components.length || components.length > 20_000)
+    throw new Error('Provide between 1 and 20000 libraries.');
+  return components;
+}
 async function initialize(): Promise<void> {
   const directory = resolve(values.directory ?? '.');
   const configPath = resolve(directory, 'security-watch.yaml'),
@@ -110,6 +137,10 @@ async function initialize(): Promise<void> {
     emailFrom = values['email-from'],
     emailTo = values['email-to'];
   const systems = values.systems === undefined ? undefined : starterSystems(values.systems);
+  if (values.libraries && values.systems)
+    throw new Error('--libraries creates one application inventory; choose --systems separately.');
+  if (values.ecosystem && !values.libraries) throw new Error('--ecosystem requires --libraries.');
+  const libraries = values.libraries ? libraryInput(values.libraries, values.ecosystem) : undefined;
   if (provider === 'none' && (model || endpoint || allowPrivate))
     throw new Error('--model, --endpoint and --allow-private-endpoint require --provider.');
   if (provider !== 'none' && !PROVIDERS.some((entry) => entry.id === provider))
@@ -179,6 +210,11 @@ async function initialize(): Promise<void> {
     database: './data/watch.db',
     poll_interval_minutes: Number(pollMinutes),
     news_lookback_minutes: Number(lookbackMinutes),
+    sources: {
+      ...(libraries ? { osv: true } : {}),
+      vendor_feeds: values['vendor-feeds']?.split(',').map((name) => name.trim()) ?? [],
+    },
+    ...(values.heartbeat ? { monitoring: { heartbeat_url_env: 'HEARTBEAT_URL' } } : {}),
     models:
       provider === 'none'
         ? { enabled: false }
@@ -222,13 +258,15 @@ async function initialize(): Promise<void> {
     stringify({
       systems: systems ?? [
         {
-          id: 'example-api',
-          name: 'Example API',
-          environment: 'development',
+          id: libraries ? 'application' : 'example-api',
+          name: libraries ? 'Application' : 'Example API',
+          environment: libraries ? 'unknown' : 'development',
           exposure: 'unknown',
           criticality: 'unknown',
           updated_at: new Date().toISOString(),
-          components: [{ id: 'example-parser', ecosystem: 'npm', name: 'example-parser', version: '1.2.0' }],
+          components: libraries ?? [
+            { id: 'example-parser', ecosystem: 'npm', name: 'example-parser', version: '1.2.0' },
+          ],
           products: [],
           keywords: [],
         },
@@ -246,7 +284,8 @@ async function initialize(): Promise<void> {
           ? '# OPENAI_API_KEY=\n# ANTHROPIC_API_KEY=\n'
           : `${providerDefinition(provider).apiKeyEnv}=\n`) +
         (channels.includes('slack') ? 'SLACK_WEBHOOK_URL=\n' : '# SLACK_WEBHOOK_URL=\n') +
-        (channels.includes('email') ? 'SMTP_URL=\n' : '# SMTP_URL=\n'),
+        (channels.includes('email') ? 'SMTP_URL=\n' : '# SMTP_URL=\n') +
+        (values.heartbeat ? 'HEARTBEAT_URL=\n' : '# HEARTBEAT_URL=\n'),
       { flag: 'wx', mode: 0o600 },
     );
   console.log(
@@ -267,6 +306,10 @@ async function main(): Promise<void> {
       'directory',
       'yes',
       'systems',
+      'libraries',
+      'ecosystem',
+      'vendor-feeds',
+      'heartbeat',
       'provider',
       'model',
       'endpoint',
@@ -279,6 +322,8 @@ async function main(): Promise<void> {
     ],
     providers: [],
     templates: [],
+    ecosystems: [],
+    'normalize-libraries': ['input', 'ecosystem', 'output'],
     doctor: ['config', 'no-ai'],
     unlock: ['config'],
     scan: ['config', 'dry-run', 'notify', 'fixture', 'no-ai'],
@@ -294,6 +339,8 @@ async function main(): Promise<void> {
     suppress: ['config', 'hours', 'reason'],
     retry: ['config'],
     backup: ['config', 'output'],
+    'verify-backup': ['input'],
+    prune: ['config', 'apply'],
     'test-notification': ['config', 'channel'],
   };
   for (const flags of Object.values(commandFlags))
@@ -315,8 +362,31 @@ async function main(): Promise<void> {
     output(SYSTEM_TEMPLATES);
     return;
   }
+  if (command === 'ecosystems') {
+    output(ECOSYSTEMS);
+    return;
+  }
+  if (command === 'normalize-libraries') {
+    if (!values.input) throw new Error('--input PATH required');
+    const components = libraryInput(values.input, values.ecosystem);
+    if (values.output) {
+      writeFileSync(resolve(values.output), JSON.stringify(components, null, 2) + '\n', {
+        flag: 'wx',
+        mode: 0o600,
+      });
+      console.log('Normalized library list saved.');
+    } else output(components);
+    return;
+  }
+  if (command === 'verify-backup') {
+    if (!values.input) throw new Error('--input PATH required');
+    output(await verifyBackup(resolve(values.input)));
+    return;
+  }
   if (values['credentials-file']) loadEnvFile(resolve(values['credentials-file']));
   const config = loadConfig(resolve(values.config ?? 'security-watch.yaml'));
+  if (command === 'prune' && !config.maintenance?.retention)
+    throw new Error('Configure maintenance.retention before planning or applying pruning.');
   if (values['no-ai']) config.models.enabled = false;
   if (command === 'unlock') {
     unlockStoppedWorker(config.database);
@@ -346,10 +416,39 @@ async function main(): Promise<void> {
       feeds: config.sources.feeds.length + Number(config.sources.hacker_news),
       notification_routes: routes,
       notification_channels: enabledChannels,
+      ecosystems: [
+        ...new Set(
+          inventory.systems.flatMap((system) => system.components.map((component) => component.ecosystem)),
+        ),
+      ],
+      external_heartbeat: config.monitoring
+        ? {
+            configured: true,
+            interval_seconds: config.monitoring.interval_seconds,
+            credential: config.monitoring.heartbeat_url_env,
+          }
+        : { configured: false },
+      maintenance: config.maintenance ?? null,
       notices: [
         'Model compatibility is verified only by a real analysis request; doctor does not spend tokens or send notifications.',
         'Public advisory queries disclose package names/versions. Models receive relevant inventory context.',
         'System news impact is an AI assessment with citations; structured CVE version matching remains separate.',
+        ...(!config.sources.osv &&
+        inventory.systems.some((system) =>
+          system.components.some((component) => component.ecosystem !== 'npm'),
+        )
+          ? [
+              'Enable sources.osv for exact library queries outside npm. Other configured sources may not cover those libraries.',
+            ]
+          : []),
+        ...(!config.monitoring
+          ? [
+              'External outage monitoring is not configured. A stopped host cannot send its own failure alert.',
+            ]
+          : []),
+        ...(config.monitoring
+          ? ['Configure the external service to alert when healthy pings stop. doctor does not send a ping.']
+          : []),
         ...(enabledChannels.length
           ? [
               'Notification routes are enabled. Use test-notification to verify delivery; start sends queued notifications continuously.',
@@ -379,15 +478,16 @@ async function main(): Promise<void> {
     'suppress',
     'retry',
     'backup',
+    'prune',
     'test-notification',
   ]);
   if (!allowed.has(command)) throw new Error(`Unknown command ${command}. Use --help.`);
   const dry = command === 'scan' && Boolean(values['dry-run']);
   if (dry && values.notify) throw new Error('--dry-run and --notify cannot be combined.');
   if (dry) config.models.enabled = false;
-  const readonly = ['findings', 'status', 'deliveries', 'budget', 'health', 'explain', 'history'].includes(
-    command,
-  );
+  const readonly =
+    (command === 'prune' && !values.apply) ||
+    ['findings', 'status', 'deliveries', 'budget', 'health', 'explain', 'history'].includes(command);
   if (readonly && !existsSync(config.database)) {
     output({ status: 'not_started', message: 'No database exists yet. Run scan or start.' });
     if (command === 'health') process.exitCode = 2;
@@ -437,6 +537,8 @@ async function main(): Promise<void> {
         worker_lock: existsSync(`${config.database}.lock`),
         worker_lock_note:
           'Informational metadata can remain after a crash; exclusive SQLite ownership prevents concurrent workers.',
+        external_heartbeat: JSON.parse(store.getMeta('external_heartbeat') ?? 'null'),
+        maintenance: JSON.parse(store.getMeta('maintenance:last_run') ?? 'null'),
       });
       return;
     }
@@ -487,7 +589,15 @@ async function main(): Promise<void> {
     if (command === 'backup') {
       if (!values.output) throw new Error('--output PATH required');
       await store.backup(resolve(values.output));
-      console.log('Consistent backup created.');
+      const verification = await verifyBackup(
+        resolve(values.output),
+        config.maintenance?.backup ? { max_bytes: config.maintenance.backup.max_bytes } : undefined,
+      );
+      output({ backup_created: true, verification });
+      return;
+    }
+    if (command === 'prune') {
+      output(store.prune(config.maintenance!.retention!, Date.now(), Boolean(values.apply)));
       return;
     }
     if (command === 'test-notification') {
@@ -601,6 +711,10 @@ async function main(): Promise<void> {
     let stop = false,
       nextScan = 0;
     let scanning: Promise<void> | undefined;
+    let maintaining: Promise<void> | undefined;
+    const monitor = new HeartbeatMonitor();
+    const maintenance = new MaintenanceScheduler();
+    let monitorStatus: string | undefined;
     const shutdown = () => {
       stop = true;
       controller.abort();
@@ -611,7 +725,7 @@ async function main(): Promise<void> {
     try {
       while (!stop) {
         if (Date.now() - lastHeartbeat >= 15_000) heartbeat('running');
-        if (!scanning && Date.now() >= nextScan) {
+        if (!scanning && !maintaining && Date.now() >= nextScan) {
           nextScan = Date.now() + config.poll_interval_minutes * 60_000;
           scanning = (async () => {
             try {
@@ -668,12 +782,33 @@ async function main(): Promise<void> {
           console.error(
             JSON.stringify({ delivery, action: 'Inspect deliveries and destination configuration.' }),
           );
+        if (!scanning && !maintaining && config.maintenance && !stop)
+          maintaining = maintenance
+            .tick(store, config)
+            .then((report) => {
+              if (report) console.log(JSON.stringify({ maintenance: report }));
+            })
+            .catch(() => {
+              console.error('Worker cannot persist maintenance state; stopping.');
+              process.exitCode = 1;
+              stop = true;
+            })
+            .finally(() => {
+              maintaining = undefined;
+            });
+        const ping = await monitor.tick(store, config, safeHttp, Date.now(), controller.signal);
+        if (ping && ping.status !== monitorStatus) {
+          monitorStatus = ping.status;
+          console.log(JSON.stringify({ external_heartbeat: ping }));
+        }
         await delay(1000);
       }
       if (scanning) await scanning;
+      if (maintaining) await maintaining;
     } finally {
       controller.abort();
       if (scanning) await scanning;
+      if (maintaining) await maintaining;
       heartbeat('stopped');
       process.off('SIGINT', shutdown);
       process.off('SIGTERM', shutdown);

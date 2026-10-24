@@ -1,11 +1,12 @@
 import type { ModelProvider, OutputFormat } from './providers.js';
+import type { Ecosystem } from './ecosystems.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
 export type Channel = 'slack' | 'email';
 export interface Component {
   id: string;
-  ecosystem: 'npm';
+  ecosystem: Ecosystem;
   name: string;
   version?: string;
 }
@@ -82,6 +83,7 @@ export interface Config {
     github_token_env: string;
     kev: boolean;
     feeds: string[];
+    vendor_feeds?: ('nodejs' | 'python' | 'php')[];
   };
   models: {
     enabled: boolean;
@@ -107,6 +109,28 @@ export interface Config {
     slack?: { webhook_url_env: string };
     email?: { smtp_url_env: string; from: string; to: string[] };
     max_attempts: number;
+  };
+  monitoring?: {
+    heartbeat_url_env: string;
+    interval_seconds: number;
+    allow_private_endpoint: boolean;
+  };
+  maintenance?: {
+    interval_hours: number;
+    retention?: {
+      analysis_cache_days?: number;
+      evidence_history_days?: number;
+      finding_history_days?: number;
+      accepted_delivery_days?: number;
+      inactive_findings_days?: number;
+      unreferenced_evidence_days?: number;
+      batch_size?: number;
+    };
+    backup?: {
+      directory: string;
+      keep: number;
+      max_bytes: number;
+    };
   };
 }
 export interface Rule {

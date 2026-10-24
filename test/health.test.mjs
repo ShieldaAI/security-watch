@@ -51,6 +51,29 @@ test('startup is bounded and stale, future, corrupt and degraded scan records fa
   assert.equal(checkHealth(store, config, NOW).ok, false);
 });
 
+test('maintenance health expires its initial grace and requires a recent successful run', (t) => {
+  const store = storeFor(t);
+  const cfg = parseConfig({
+    version: 1,
+    maintenance: { interval_hours: 1, retention: { analysis_cache_days: 7 } },
+  });
+  running(store);
+  scanned(store);
+  assert.equal(checkHealth(store, cfg, NOW).ok, true);
+  running(store, { started_at: time(-121_000) });
+  assert.equal(checkHealth(store, cfg, NOW).ok, false);
+  store.setMeta('maintenance:last_run', 'invalid JSON');
+  assert.equal(checkHealth(store, cfg, NOW).ok, false);
+  for (const last_success_at of [time(-7_200_001), time(6000)]) {
+    store.setMeta('maintenance:last_run', JSON.stringify({ ok: true, last_success_at }));
+    assert.equal(checkHealth(store, cfg, NOW).ok, false);
+  }
+  store.setMeta('maintenance:last_run', JSON.stringify({ ok: true, last_success_at: time(-1000) }));
+  assert.equal(checkHealth(store, cfg, NOW).ok, true);
+  store.setMeta('maintenance:last_run', JSON.stringify({ ok: false, last_success_at: time(-1000) }));
+  assert.equal(checkHealth(store, cfg, NOW).ok, false);
+});
+
 test('delivery health includes unresolved current transport outcomes and does not mistake findings for monitor failure', (t) => {
   const store = storeFor(t);
   running(store);

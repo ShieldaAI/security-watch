@@ -53,6 +53,8 @@ try {
       'no-new-privileges',
       '--tmpfs',
       '/config:rw,noexec,nosuid,uid=1000,gid=1000,mode=0700',
+      '--tmpfs',
+      '/tmp:rw,noexec,nosuid,mode=1777',
       '--entrypoint',
       'node',
       image,

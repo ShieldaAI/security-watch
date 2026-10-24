@@ -6,21 +6,23 @@ An experimental TypeScript bot that compares security advisories and news with y
 
 ## Features
 
-- Manual YAML/JSON inventories and npm package-lock v2/v3 imports, with separate assessments for each deployment/component.
-- cve.now CVE updates and npm stack checks, plus The Hacker News security articles for system monitoring. OSV, GitHub, CISA KEV and other RSS/Atom feeds remain optional.
-- npm package and version checks, with optional AI analysis to distinguish new vulnerabilities, updates to known vulnerabilities and general system news. Each finding records source severity, applicability and contextual priority separately.
+- YAML/JSON inventories, library lists across 12 ecosystems, and npm package-lock v2/v3 imports. Names alone are accepted; exact installed versions improve applicability checks.
+- cve.now CVE updates and npm stack checks, plus The Hacker News security articles. Optional sources include OSV, GitHub, CISA KEV, official Node.js/Python/PHP feeds and other RSS/Atom feeds.
+- Structured library checks without AI, with optional AI analysis to distinguish new vulnerabilities, updates to known vulnerabilities and general system news. Each finding records source severity, applicability and contextual priority separately.
 - Separate alert thresholds for libraries, products and news, plus review digests and configurable overrides for potentially critical findings, known exploitation and malware.
 - Slack incoming webhooks and SMTP email, backed by a SQLite delivery queue. Uncertain delivery is recorded for manual review and retry.
-- Finding history, acknowledgement, suppression with an expiry, source checkpoints, model budgets, backups and monitoring health checks.
+- Finding history, acknowledgement, suppression with an expiry, source checkpoints and model budgets. Optional external heartbeats, bounded retention and verified backups support ongoing operation.
 
-| Inventory item                     | Alpha coverage                                                                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| npm package with an exact version  | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources                                 |
-| npm package-lock v2/v3             | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts                              |
-| Product, OS, database or SaaS name | Whole-name/keyword candidates plus AI news/impact assessment; **no general product-version, vendor-backport or SaaS configuration adapter** |
-| Unknown or stale version           | Review required; never infer safety from missing evidence                                                                                   |
+| Inventory item                         | Alpha coverage                                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| npm package with an exact version      | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources                                 |
+| Library in another supported ecosystem | Exact positive OSV query or explicitly listed affected version; unsupported version ranges remain unknown                                   |
+| Library without an installed version   | Discover advisory candidates by package identity; applicability remains unknown                                                             |
+| npm package-lock v2/v3                 | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts                              |
+| Product, OS, database or SaaS name     | Whole-name/keyword candidates plus AI news/impact assessment; **no general product-version, vendor-backport or SaaS configuration adapter** |
+| Unknown or stale version               | Review required; never infer safety from missing evidence                                                                                   |
 
-`affected` means the declared npm package and version match an advisory. `not_affected` requires a supported version-range exclusion. An empty search establishes neither result. Lockfiles describe dependencies; you still need to verify what is deployed and reachable.
+`affected` means the declared package and installed version match supported advisory evidence. Only npm has version-range exclusion support; other ecosystems use exact positive OSV query results or explicitly listed affected versions. A missing version or empty search establishes neither affectedness nor safety. Lockfiles describe dependencies; you still need to verify what is deployed and reachable.
 
 ## Install and preview
 
@@ -97,6 +99,31 @@ security-watch scan --config examples/security-watch.example.yaml --fixture exam
 
 Fixture mode makes no source or AI requests. Do not combine a fixture with `--notify` unless you intend to send its synthetic findings. To test model analysis, run `security-watch scan --config ./watch/security-watch.yaml --credentials-file ./watch/.env` without `--dry-run` or `--notify`. This saves findings and budget reservations and may incur provider charges; it does not deliver notifications. The checkout also includes an opt-in [synthetic provider check](CONTRIBUTING.md#live-provider-checks).
 
+## Library inventories
+
+The supported ecosystems are npm, PyPI, Packagist, Go, Maven, crates.io, RubyGems, NuGet, Hex, Pub, Hackage and SwiftURL. Common language names such as `python`, `php` and `rust` are accepted as aliases. Run `security-watch ecosystems` for the canonical names.
+
+Start from a file with one library per line:
+
+```text
+npm:express
+python:requests
+python:urllib3==2.2.3
+php:symfony/http-foundation@6.4.0
+maven:org.apache.logging.log4j:log4j-core
+```
+
+These are examples, not version recommendations. Use the registry's published package spelling, especially for NuGet. Omit a version you have not verified; do not substitute `latest`, a version constraint or a guessed release.
+
+```sh
+security-watch normalize-libraries --input ./libraries.txt
+security-watch init --directory ./watch --yes --libraries ./libraries.txt
+```
+
+For a list containing only one ecosystem, use names without prefixes and add `--ecosystem php` or another supported alias. `init --libraries` creates one application inventory and enables OSV. It cannot be combined with `--systems`. Structured library matching needs no AI or model credentials. For a library-only monitor, disable news sources; see the [library configuration](examples/library-watch.example.yaml), [grouped inventory](examples/libraries.example.yaml) and [mixed library list](examples/libraries.example.txt).
+
+To include official release/security news, add `--vendor-feeds nodejs,python,php` during setup or set `sources.vendor_feeds` in the configuration. These adapters extract bounded article text from fixed vendor hosts. A release announcement or database publication date alone does not establish a new vulnerability.
+
 ## LLM providers
 
 There are 22 provider profiles:
@@ -145,14 +172,14 @@ Edit the copied inventory, notification routes and credentials, and apply the sa
 ## How decisions work
 
 1. Collect cve.now responses and The Hacker News articles within configured size and request limits. Preserve source revisions and group advisories that share verified aliases. News mentioning several existing advisories adds context to each finding separately.
-2. Compare each deployment's npm identity and version. Generic product matches remain uncertain. Stale inventory cannot support a safe conclusion.
+2. Compare each deployment's library identity and declared version. npm supports range checks; other ecosystems require exact positive evidence. Generic product matches remain uncertain. Stale inventory cannot support a safe conclusion.
 3. Ask the configured model to classify matched system news and assess the claimed impact on the declared deployment, using article evidence and version context. General news about a system is distinguished from a new vulnerability or an update to a known one. If configured, a second model reviews every news analysis and any critical, exploited, uncertain or conflicting finding. Disagreements remain visible.
 4. Apply the category's notification policy. AI cannot reduce priority below the source severity or suppress a critical library/product finding. News with an advisory identifier and an exact installed package mention uses library policy even before structured advisory data arrives.
 5. Commit finding changes and notification jobs together. Deliver meaningful changes without treating cosmetic article wording or AI phrasing as new events.
 
 With the default rules, libraries select critical severity and products/news select high or critical; routes are empty until configured. Unknown/conflicting potentially critical findings notify immediately when `urgent_unknown` is enabled. Lower-priority uncertainty goes to a review digest. Known-exploitation and malicious-package overrides are separately configurable. A category with no channels sends nothing, including overrides.
 
-For system news, the model records `new_vulnerability`, `known_vulnerability_update`, `general_news` or `unknown`, alongside its assessment of system impact. General coverage and supported exclusions are recorded without a vulnerability alert; uncertain analysis goes to review. A vulnerability that the model believes affects the system follows your severity policy. These rules also cover product articles linked to collected CVEs. Critical-source severity, configured exploitation overrides and deterministic npm matches still take precedence. See [model configuration](docs/configuration.md#model-configuration) for evidence and version requirements.
+For system news, the model records `new_vulnerability`, `known_vulnerability_update`, `general_news` or `unknown`, alongside its assessment of system impact. General coverage and supported exclusions are recorded without a vulnerability alert; uncertain analysis goes to review. A vulnerability that the model believes affects the system follows your severity policy. These rules also cover product articles linked to collected CVEs. Critical-source severity, configured exploitation overrides and deterministic library matches still take precedence. See [model configuration](docs/configuration.md#model-configuration) for evidence and version requirements.
 
 General-news classifications remain in history after a story leaves RSS. Changes to the article, inventory or model settings trigger reassessment. Affected or excluded impact claims require fresh evidence.
 
@@ -162,27 +189,32 @@ Models cannot run tools, change recipients, edit version ranges or establish tha
 
 Commands that operate on a configured monitor accept `--config PATH`; the default is `./security-watch.yaml`. Add `--credentials-file PATH` to load a private dotenv file, or export variables through your service manager. Existing environment values take precedence. Files are parsed as data, without shell evaluation; they are never loaded implicitly. `init` uses `--directory` instead. Unsupported flag/command combinations are rejected before activity.
 
-| Command                                        | Behavior                                                                                                     |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `providers`                                    | List supported provider profiles without configuration, credentials or network access                        |
-| `templates`                                    | List common system IDs available to `init --systems`                                                         |
-| `scan`                                         | Run once, save evidence/findings and queue notifications; does not deliver by default                        |
-| `scan --dry-run`                               | Use in-memory state, disable model calls and send no notifications; source requests still occur              |
-| `scan --notify`                                | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending |
-| `scan --fixture PATH`                          | Use local evidence instead of network sources and AI                                                         |
-| `scan --no-ai`                                 | Keep structured matching and disable model calls for this invocation                                         |
-| `start`                                        | Run the scheduler and delivery worker in the foreground                                                      |
-| `findings`, `status`, `deliveries`, `budget`   | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations                       |
-| `health`                                       | Check worker heartbeat, completed-scan freshness and actionable delivery problems; exits 2 when unhealthy    |
-| `health --scan-only`                           | Check completed scans and delivery without requiring a foreground worker, for external cron schedules        |
-| `explain FINDING_ID`                           | Show a finding, its current policy decision and acknowledgement/suppression controls                         |
-| `history FINDING_ID`                           | Show saved finding revisions                                                                                 |
-| `acknowledge FINDING_ID`                       | Acknowledge the current revision; a material change creates a new revision                                   |
-| `suppress FINDING_ID --hours 24 --reason TEXT` | Suppress until an explicit expiry                                                                            |
-| `retry DELIVERY_ID`                            | Requeue a failed/uncertain delivery after checking receipt; does not send immediately                        |
-| `backup --output PATH`                         | Create a consistent SQLite backup at a new destination                                                       |
-| `unlock`                                       | Remove stale lock metadata only when no worker owns the SQLite lock                                          |
-| `test-notification --channel slack`            | Send an explicit test message; `email` is also supported                                                     |
+| Command                                        | Behavior                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `providers`                                    | List supported provider profiles without configuration, credentials or network access                                     |
+| `templates`                                    | List common system IDs available to `init --systems`                                                                      |
+| `ecosystems`                                   | List supported library ecosystems                                                                                         |
+| `normalize-libraries --input PATH`             | Parse a library list without network requests; optional `--ecosystem` sets the group and `--output` saves a new JSON file |
+| `scan`                                         | Run once, save evidence/findings and queue notifications; does not deliver by default                                     |
+| `scan --dry-run`                               | Use in-memory state, disable model calls and send no notifications; source requests still occur                           |
+| `scan --notify`                                | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending              |
+| `scan --fixture PATH`                          | Use local evidence instead of network sources and AI                                                                      |
+| `scan --no-ai`                                 | Keep structured matching and disable model calls for this invocation                                                      |
+| `start`                                        | Run the scheduler and delivery worker in the foreground                                                                   |
+| `findings`, `status`, `deliveries`, `budget`   | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations                                    |
+| `health`                                       | Check worker heartbeat, completed-scan freshness and actionable delivery problems; exits 2 when unhealthy                 |
+| `health --scan-only`                           | Check completed scans and delivery without requiring a foreground worker, for external cron schedules                     |
+| `explain FINDING_ID`                           | Show a finding, its current policy decision and acknowledgement/suppression controls                                      |
+| `history FINDING_ID`                           | Show saved finding revisions                                                                                              |
+| `acknowledge FINDING_ID`                       | Acknowledge the current revision; a material change creates a new revision                                                |
+| `suppress FINDING_ID --hours 24 --reason TEXT` | Suppress until an explicit expiry                                                                                         |
+| `retry DELIVERY_ID`                            | Requeue a failed/uncertain delivery after checking receipt; does not send immediately                                     |
+| `backup --output PATH`                         | Create a consistent SQLite backup at a new destination and verify a temporary restored copy                               |
+| `verify-backup --input PATH`                   | Verify a standalone backup without monitor configuration or replacing a live database                                     |
+| `prune`                                        | Show a read-only plan using configured retention periods                                                                  |
+| `prune --apply`                                | Apply one bounded retention batch atomically                                                                              |
+| `unlock`                                       | Remove stale lock metadata only when no worker owns the SQLite lock                                                       |
+| `test-notification --channel slack`            | Send an explicit test message; `email` is also supported                                                                  |
 
 Only one scan/scheduler instance may write a given database. Inspection and acknowledgement use SQLite safely alongside the worker. Do not share a database between containers or hosts or put it on a network filesystem. Stop the worker before replacing a database with a backup; retain permissions and move aside stale SQLite sidecar files with the old database.
 
@@ -196,14 +228,37 @@ One failed source item, model response or notification does not stop unrelated w
 
 SIGTERM/SIGINT cancels source/model requests and active delivery attempts, then stops further work. Interrupted or ambiguous receipt remains explicit. Before urgent sends, inventory exclusions, withdrawals and removals are reconciled. Every delivery rechecks current routing policy.
 
+### Heartbeats, retention and backups
+
+All three are opt-in. `init --heartbeat` adds an external success-ping route using the `HEARTBEAT_URL` environment variable. Configure the receiving service to alert when pings stop. The worker sends a bodyless request only while monitoring health is healthy; failed scans or delivery problems withhold success pings. This is separate from the local `health` command and sends no inventory or logs.
+
+Configure `maintenance.retention`, inspect `security-watch prune --config PATH`, then use `--apply` for one cleanup batch. Once configured, `start` also applies retention on the maintenance schedule. Active or uncertain findings, unresolved deliveries, source checkpoints and budget records remain protected. Expiring an inactive finding requires a supported exclusion, withdrawal or confirmed general-news result; removing a system from inventory is not enough.
+
+`maintenance.backup` schedules private snapshots, verifies them before rotation, and keeps the configured number. When both are enabled, a verified backup precedes pruning. `verify-backup` tests schema migration and structural restoration in a temporary copy; it does not prove that stored security claims are correct. See [maintenance configuration](docs/configuration.md#retention-and-verified-backups) before enabling either policy.
+
+### Model evaluation from a checkout
+
+```sh
+npm run evaluate:models -- --help
+npm run evaluate:models
+```
+
+Without `--live`, the script makes no provider calls and reports skipped cases. To run it, supply provider credentials and exact `SECURITY_WATCH_EVAL_<PROVIDER>_MODEL` values in the environment, then choose providers and a request cap:
+
+```sh
+npm run evaluate:models -- --live --providers openai,anthropic --max-requests 20
+```
+
+The corpus contains source-derived synthetic scenarios with fictional inventories. Its reference labels are marked `pending_human_review`. Reports distinguish output acceptance, coverage, label agreement, false exclusions, rejected outputs and model disagreements. Label agreement is not measured production accuracy. Live runs may incur charges, use a total request cap, and send no notifications; full options are in the script help.
+
 ## Boundaries and privacy
 
 cve.now stack queries disclose deduplicated npm package names and versions; lockfiles and deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives relevant components/products/keywords and deployment context from the matched system, plus selected evidence. Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
 
-Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no application telemetry. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
+Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no automatic application telemetry. An explicitly configured heartbeat service receives success pings and normal request metadata. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
 
 This alpha has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, general SBOM import, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported; there is no CVSS v4 calculator. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
 
-Current evidence and findings are loaded into memory during each scan; audit history and model caches have no automatic retention pruning. This alpha targets small installations. Plan storage, pagination and retention before using it for a large fleet.
+Current evidence and findings are loaded into memory during each scan. Retention is disabled until configured, and protected unresolved records may continue growing even after cleanup is enabled. This alpha targets small installations. Plan storage and review retention dry runs before increasing scale.
 
 See the [configuration guide](docs/configuration.md), [security policy](SECURITY.md) and [contributing guide](CONTRIBUTING.md). Licensed under Apache-2.0.
