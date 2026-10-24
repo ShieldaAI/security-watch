@@ -559,6 +559,8 @@ test('database and sidecar links are rejected before changing or opening their t
   const { path, dir } = disk(t);
   const victim = join(dir, 'keep');
   writeFileSync(victim, 'keep', { mode: 0o644 });
+  // Keep the fixture permissive even when the release shell uses umask 077.
+  chmodSync(victim, 0o644);
   symlinkSync(victim, path);
   assert.throws(() => new Store(path), /ELOOP|symbolic|link/);
   assert.equal(readFileSync(victim, 'utf8'), 'keep');
