@@ -459,7 +459,7 @@ export class Store {
         AND (f.suppressed_until IS NULL OR f.suppressed_until<=?)
         AND (f.acknowledged_revision IS NULL OR f.acknowledged_revision<>n.revision)
         ${excludedChannels.length ? `AND n.channel NOT IN (${excludedChannels.map(() => '?').join(',')})` : ''}
-        ORDER BY CASE WHEN json_extract(n.payload,'$.mode')='digest' THEN 1 ELSE 0 END,n.available_at,n.id LIMIT 1`,
+        ORDER BY CASE WHEN json_valid(n.payload) THEN CASE WHEN json_extract(n.payload,'$.mode')='digest' THEN 1 ELSE 0 END ELSE 0 END,n.available_at,n.id LIMIT 1`,
         )
         .get(now, now, ...excludedChannels) as Row | undefined;
       if (!row) return undefined;
@@ -477,7 +477,7 @@ export class Store {
         .prepare(
           `SELECT n.* FROM notifications n JOIN findings f ON f.id=n.finding_id
         WHERE n.status='pending' AND n.channel=? AND n.available_at<=? AND n.revision=f.revision
-        AND json_extract(n.payload,'$.mode')='digest'
+        AND CASE WHEN json_valid(n.payload) THEN json_extract(n.payload,'$.mode')='digest' ELSE 0 END
         AND (f.suppressed_until IS NULL OR f.suppressed_until<=?)
         AND (f.acknowledged_revision IS NULL OR f.acknowledged_revision<>n.revision)
         ORDER BY n.available_at,n.id LIMIT ?`,
@@ -507,12 +507,12 @@ export class Store {
       .run(status, nextAt, error ?? null, id);
     if (Number(changed.changes) !== 1) throw new Error('Notification is not in flight');
   }
-  deferJob(id: string, nextAt: number): void {
+  deferJob(id: string, nextAt: number, reason = 'Waiting for destination rate limit'): void {
     const changed = this.#db
       .prepare(
-        "UPDATE notifications SET status='pending',available_at=?,attempts=MAX(0,attempts-1),last_error='Waiting for destination rate limit' WHERE id=? AND status='sending'",
+        "UPDATE notifications SET status='pending',available_at=?,attempts=MAX(0,attempts-1),last_error=? WHERE id=? AND status='sending'",
       )
-      .run(nextAt, id);
+      .run(nextAt, reason, id);
     if (Number(changed.changes) !== 1) throw new Error('Notification is not in flight');
   }
   retryJob(id: string, now = Date.now()): void {

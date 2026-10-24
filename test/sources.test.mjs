@@ -321,7 +321,7 @@ test('GitHub collects reviewed and malware separately and follows trusted cursor
   assert.equal(result.evidence[0].packages[0].range, '<1.2.4');
 });
 
-test('GitHub failure midway does not advance a source or return its partial records, while other sources complete', async () => {
+test('GitHub failure midway retains valid records without advancing its checkpoint while other sources complete', async () => {
   const result = await collectSources(
     inventory(),
     config({ github: true }),
@@ -338,8 +338,13 @@ test('GitHub failure midway does not advance a source or return its partial reco
   );
   assert.equal(result.checkpoints['github:reviewed'], OLD);
   assert.equal(result.checkpoints['github:malware'], NOW_ISO);
-  assert.deepEqual(result.evidence, []);
-  assert.deepEqual(result.errors, [{ source: 'github:reviewed', message: 'Source returned HTTP 429.' }]);
+  assert.deepEqual(
+    result.evidence.map((item) => item.id),
+    ['github:GHSA-abcd-2345-efgh'],
+  );
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].source, 'github:reviewed');
+  assert.match(result.errors[0].message, /HTTP 429.*Valid records were retained/);
 });
 
 test('GitHub pagination cannot send authentication to an attacker or loop indefinitely', async (t) => {

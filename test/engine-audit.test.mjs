@@ -45,6 +45,29 @@ function memory(t) {
   return store;
 }
 
+test('an urgent delivery callback failure does not discard later findings or scan completion', async (t) => {
+  const store = memory(t);
+  let called = 0;
+  const report = await runScan({
+    config,
+    inventory: inventory(),
+    store,
+    now,
+    fixture: [advisory(), advisory({ id: 'second-advisory', aliases: ['CVE-2026-12345'] })],
+    onUrgent: async () => {
+      called++;
+      throw new Error('private-transport-error');
+    },
+  });
+  assert.equal(called, 1);
+  assert.equal(report.degraded, true);
+  assert.equal(report.findings.filter((finding) => finding.category === 'library').length, 2);
+  assert(report.errors.some((error) => error.source === 'delivery'));
+  assert(!JSON.stringify(report).includes('private-transport-error'));
+  assert.equal(JSON.parse(store.getMeta('last_scan')).degraded, true);
+  assert.equal(store.jobs().filter((job) => job.status === 'pending').length, 2);
+});
+
 test('fixed, withdrawn and removed findings are canceled before an urgent delivery callback', async (t) => {
   for (const mode of ['fixed', 'withdrawn', 'removed'])
     await t.test(mode, async (t) => {

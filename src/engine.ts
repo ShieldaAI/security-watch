@@ -268,7 +268,17 @@ export async function runScan(options: {
   for (const previous of store.findings())
     if (previous.category !== 'health' && previous.active !== false && !currentIds.has(previous.id))
       retire(previous);
-  if (options.onUrgent) await options.onUrgent();
+  if (options.onUrgent) {
+    try {
+      await options.onUrgent();
+    } catch {
+      checkCancellation(signal);
+      errors.push({
+        source: 'delivery',
+        message: 'Urgent delivery did not complete. The scan continued; inspect deliveries before retrying.',
+      });
+    }
+  }
   checkCancellation(signal);
   const analyzer = new ModelAnalyzer(
     config,

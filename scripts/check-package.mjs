@@ -52,9 +52,22 @@ try {
   if (templates.length !== 24 || !templates.some((template) => template.id === 'python'))
     throw new Error('Packed CLI system templates are incomplete');
   const configured = join(consumer, 'configured');
-  run([cli, 'init', '--yes', '--directory', configured, '--systems', 'nodejs,python'], consumer);
+  run(
+    [
+      cli,
+      'init',
+      '--yes',
+      '--directory',
+      configured,
+      '--systems',
+      'nodejs,python',
+      '--notifications',
+      'slack',
+    ],
+    consumer,
+  );
   const credentials = join(configured, '.env');
-  writeFileSync(credentials, '# Credentials are optional with models and routes disabled.\n', {
+  writeFileSync(credentials, 'SLACK_WEBHOOK_URL=https://hooks.slack.com/services/PACKAGE_TEST_ONLY\n', {
     mode: 0o600,
   });
   const doctor = JSON.parse(
@@ -66,6 +79,7 @@ try {
   if (
     !doctor.ok ||
     doctor.systems !== 2 ||
+    doctor.notification_channels.join(',') !== 'slack' ||
     doctor.poll_interval_minutes !== 30 ||
     doctor.news_lookback_minutes !== 40
   )

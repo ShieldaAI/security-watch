@@ -39,7 +39,7 @@ Choose one setup command below. For a fictional example with AI disabled:
 security-watch init --directory ./watch --yes
 ```
 
-`init --yes` creates a private configuration, an example inventory and `.env.example`. It checks cve.now and The Hacker News every 30 minutes, with a 40-minute news window. AI and notification routes start disabled. Interactive `init` also asks for a provider, model, timing and Slack preference. Existing files are never replaced.
+`init --yes` creates a private configuration, an example inventory and `.env.example`. It checks cve.now and The Hacker News every 30 minutes, with a 40-minute news window. AI and notification routes start disabled. Interactive `init` also asks for a provider, model, timing and notification channels. Existing files are never replaced.
 
 Or start with Node.js, Python and OpenAI analysis:
 
@@ -58,6 +58,8 @@ chmod 600 ./watch/.env
 
 If you enabled OpenAI, edit `watch/.env` to set `OPENAI_API_KEY`. Use an exact model ID available to your account; `security-watch providers` lists the supported providers and their credential names. Omit `--provider` and `--model` to start without AI. Local services also need `--endpoint` and `--allow-private-endpoint`.
 
+To configure notifications during setup, add `--notifications slack` to `init`, or use `--notifications email --email-from alerts@example.com --email-to security@example.com`. `--notifications slack,email` configures both. Fill in `SLACK_WEBHOOK_URL` or `SMTP_URL` in the private credentials file. `doctor` lists the active routes and warns when notifications are disabled.
+
 Replace the example inventory in `watch/systems.yaml`, then edit `watch/security-watch.yaml`. For system news analysis, enable `models`, set your exact analysis model ID and provide its credential through the named environment variable. Configure notification routes separately. Without AI, matching system names remain candidates requiring review; a mention alone does not prove impact. See the [configuration guide](docs/configuration.md).
 
 [Common systems](examples/common-systems.yaml) provides a sample list of 24 runtimes, operating systems, databases and infrastructure products, including Node.js and Python. It leaves installed versions unspecified. Add your versions and deployment context before using it to assess impact; broad language names also match applications and incidental mentions.
@@ -69,6 +71,8 @@ security-watch start --config ./watch/security-watch.yaml --credentials-file ./w
 ```
 
 `start` activates configured routes and stays in the foreground. Run it under your service manager or Docker for continuous operation.
+
+Verify a destination with `security-watch test-notification --channel slack --config ./watch/security-watch.yaml --credentials-file ./watch/.env`; use `--channel email` for SMTP. Each invocation sends one explicit test, reports acceptance or a safe failure reason, and leaves the monitor database unchanged.
 
 To scan every 30 minutes and discover news from the last 40 minutes, set:
 
@@ -184,11 +188,13 @@ Only one scan/scheduler instance may write a given database. Inspection and ackn
 
 Digests use fixed UTC epoch-aligned time buckets, defaulting to midnight UTC, with at most five findings per delivery. Larger digests produce multiple messages. `scan --notify` does not wait for future digest times, retry timers or Slack rate limits; it prints the remaining backlog. Use `start` to keep draining the queue as jobs become due. Urgent deterministic results are attempted before optional AI work.
 
-A notification marked `accepted` was accepted by the destination, not necessarily read. Interrupted or ambiguous delivery becomes `unknown`: inspect the destination before `retry`, because it may already have arrived. Automatic retry is reserved for explicit retryable rejection. Delivery state remains available even when the notification channel itself fails.
+A notification marked `accepted` was accepted by the destination, not necessarily read. Interrupted or ambiguous delivery becomes `unknown`: inspect the destination before `retry`, because it may already have arrived. Automatic retries cover explicit transient rejections and DNS/connection failures known to occur before sending. Slack digests split to fit the message limit, and one malformed queued message does not block healthy messages. Delivery state remains available even when a destination fails.
 
 `scan` exits with status 2 for degraded monitoring or failed/uncertain delivery, including an early urgent delivery attempt; setup/command failures use status 1. `health` is read-only, makes no network requests, and reports monitoring health rather than whether systems are secure. The Compose service includes this health check. Check `status`, service logs and delivery state rather than treating an empty findings list as an all-clear.
 
-SIGTERM/SIGINT cancels source/model requests and stops further analysis. Delivery already in progress is allowed to finish within its transport timeout; interrupted or ambiguous receipt remains explicit. Before urgent sends, inventory exclusions, withdrawals and removals are reconciled. Every delivery rechecks current routing policy.
+One failed source item, model response or notification does not stop unrelated work. Valid evidence and findings are saved, incomplete sources keep their previous checkpoints, and `start` continues scheduled scans and due deliveries. A one-shot `scan` finishes its work and reports degraded status; it does not stay running. Cancellation and failures that prevent reliable database writes still stop the worker.
+
+SIGTERM/SIGINT cancels source/model requests and active delivery attempts, then stops further work. Interrupted or ambiguous receipt remains explicit. Before urgent sends, inventory exclusions, withdrawals and removals are reconciled. Every delivery rechecks current routing policy.
 
 ## Boundaries and privacy
 

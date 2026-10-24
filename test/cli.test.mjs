@@ -214,11 +214,67 @@ test('invalid setup options fail before creating files', (t) => {
     ['--provider', 'openai'],
     ['--poll-minutes', '0'],
     ['--lookback-minutes', '10081'],
+    ['--notifications', 'unknown'],
+    ['--notifications', 'email'],
+    ['--email-from', 'alerts@example.com'],
+    ['--notifications', 'email', '--email-from', 'invalid', '--email-to', 'test@example.com'],
   ]) {
     assert.equal(run(['init', '--yes', ...args], dir).code, 1, args.join(' '));
     assert(!existsSync(join(dir, 'security-watch.yaml')));
     assert(!existsSync(join(dir, 'systems.yaml')));
   }
+});
+
+test('unattended setup configures notification routes and doctor makes them explicit', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'watch-notification-setup-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = run(
+    [
+      'init',
+      '--yes',
+      '--notifications',
+      'slack,email,slack',
+      '--email-from',
+      'alerts@example.com',
+      '--email-to',
+      'first@example.com,second@example.com',
+    ],
+    dir,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const cfg = parse(readFileSync(join(dir, 'security-watch.yaml'), 'utf8'));
+  for (const category of ['library', 'product', 'news'])
+    assert.deepEqual(cfg.policy[category].channels, ['slack', 'email']);
+  assert.deepEqual(cfg.policy.health_channels, ['slack', 'email']);
+  assert.deepEqual(cfg.notifications.email.to, ['first@example.com', 'second@example.com']);
+  const envExample = readFileSync(join(dir, '.env.example'), 'utf8');
+  assert.match(envExample, /^SLACK_WEBHOOK_URL=$/m);
+  assert.match(envExample, /^SMTP_URL=$/m);
+  const doctor = run(['doctor'], dir, { SLACK_WEBHOOK_URL: '', SMTP_URL: '' });
+  assert.equal(doctor.code, 2);
+  const report = JSON.parse(doctor.stdout);
+  assert.deepEqual(report.notification_channels, ['slack', 'email']);
+  assert.deepEqual(report.notification_routes.health, ['slack', 'email']);
+  assert(report.missing_environment_variables.includes('SLACK_WEBHOOK_URL'));
+  assert(report.missing_environment_variables.includes('SMTP_URL'));
+  assert(!existsSync(join(dir, 'data/watch.db')));
+});
+
+test('doctor reports disabled notification routes and a failed explicit test explains the destination', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'watch-no-notifications-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.equal(run(['init', '--yes'], dir).code, 0);
+  const doctor = JSON.parse(run(['doctor'], dir).stdout);
+  assert.deepEqual(doctor.notification_channels, []);
+  assert(doctor.notices.some((notice) => notice.startsWith('No notification routes')));
+  const test = run(['test-notification', '--channel', 'slack'], dir);
+  assert.equal(test.code, 2);
+  const report = JSON.parse(test.stdout);
+  assert.equal(report.channel, 'slack');
+  assert.equal(report.status, 'failed');
+  assert.equal(report.failed, 1);
+  assert.match(report.error, /not configured/);
+  assert(!existsSync(join(dir, 'data/watch.db')));
 });
 
 test('explicit env files supply credentials as data without exposing values or evaluating shell text', (t) => {

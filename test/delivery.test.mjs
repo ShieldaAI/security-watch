@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Store } from '../dist/store.js';
 import { deliverPending, notificationText, sendEmail } from '../dist/delivery.js';
+import { NetworkError } from '../dist/http.js';
 
 const assessment = (id = 'finding-1') => ({
   id,
@@ -249,6 +253,113 @@ test('Slack ambiguous timeout is retained as unknown and never automatically ret
   assert(!JSON.stringify(store.jobs()).includes('SECRET'));
 });
 
+test('a failed or uncertain destination does not stop other queued notifications', async (t) => {
+  for (const failure of ['slack-rejected', 'slack-unknown', 'email-rejected']) {
+    await t.test(failure, async (t) => {
+      const store = setup(t, ['slack', 'email']);
+      const http = async () => {
+        if (failure === 'slack-unknown') throw new Error('Receipt lost');
+        return { status: failure === 'slack-rejected' ? 403 : 200, body: 'ok', headers: {} };
+      };
+      const sender = async () => {
+        if (failure === 'email-rejected') throw Object.assign(new Error('Rejected'), { responseCode: 550 });
+        return { accepted: config.notifications.email.to, rejected: [] };
+      };
+      const result = await deliverPending(store, config, http, 1000, sender);
+      assert.equal(result.accepted, 1);
+      assert.equal(result.failed + result.unknown, 1);
+      assert(!store.jobs().some((job) => ['pending', 'sending'].includes(job.status)));
+    });
+  }
+});
+
+test('Slack connection retries survive a restart and leave email delivery independent', async (t) => {
+  setup(t, []);
+  const dir = mkdtempSync(join(tmpdir(), 'watch-delivery-'));
+  const path = join(dir, 'watch.db');
+  let store = new Store(path);
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  store.saveAssessment(
+    assessment(),
+    { action: 'notify', channels: ['slack', 'email'], reason: 'critical' },
+    1000,
+  );
+  let calls = 0;
+  const http = async () => {
+    calls++;
+    if (calls < 3) throw new NetworkError(calls === 1 ? 'DNS_FAILED' : 'CONNECTION_FAILED');
+    return { status: 200, body: 'ok', headers: {} };
+  };
+  let emails = 0;
+  const sender = async () => {
+    emails++;
+    return { accepted: config.notifications.email.to, rejected: [] };
+  };
+  assert.deepEqual(await deliverPending(store, config, http, 1000, sender), {
+    accepted: 1,
+    failed: 0,
+    unknown: 0,
+  });
+  store.close();
+  store = new Store(path);
+  store.recoverSending(2000);
+  assert.equal(store.jobs().find((job) => job.channel === 'slack').available_at, 31000);
+  await deliverPending(store, config, http, 30999, sender);
+  assert.equal(calls, 1);
+  await deliverPending(store, config, http, 31000, sender);
+  assert.equal(store.jobs().find((job) => job.channel === 'slack').available_at, 91000);
+  await deliverPending(store, config, http, 91000, sender);
+  assert.equal(calls, 3);
+  assert.equal(emails, 1);
+  assert(store.jobs().every((job) => job.status === 'accepted'));
+});
+
+test('Slack connection retries stop at the configured attempt limit', async (t) => {
+  const store = setup(t);
+  let calls = 0;
+  const http = async () => {
+    calls++;
+    throw new NetworkError('CONNECTION_FAILED');
+  };
+  for (const now of [1000, 31000, 91000, 999999]) await deliverPending(store, config, http, now);
+  assert.equal(calls, 3);
+  assert.equal(store.jobs()[0].status, 'failed');
+  assert.match(store.jobs()[0].last_error, /retry limit reached/);
+});
+
+test(
+  'a refused SMTP connection is safely retried before any message was sent',
+  { timeout: 3000 },
+  async (t) => {
+    const store = setup(t, ['email']);
+    const server = createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    process.env.WATCH_TEST_SMTP = `smtp://127.0.0.1:${port}`;
+    assert.deepEqual(await deliverPending(store, config, noHttp, 1000, sendEmail), {
+      accepted: 0,
+      failed: 0,
+      unknown: 0,
+    });
+    assert.equal(store.jobs()[0].status, 'pending');
+    assert.equal(store.jobs()[0].available_at, 31000);
+    let calls = 0;
+    const sender = async () => {
+      calls++;
+      return { accepted: config.notifications.email.to, rejected: [] };
+    };
+    await deliverPending(store, config, noHttp, 30999, sender);
+    assert.equal(calls, 0);
+    await deliverPending(store, config, noHttp, 31000, sender);
+    assert.equal(calls, 1);
+    assert.equal(store.jobs()[0].status, 'accepted');
+  },
+);
+
 test('permanent rejection and repeated transient rejection produce visible failure', async (t) => {
   const store = setup(t);
   await deliverPending(
@@ -373,6 +484,125 @@ test('due digests batch up to five findings into one send and retain individual 
   assert.deepEqual(await deliverPending(store, config, http, 3000), { accepted: 2, failed: 0, unknown: 0 });
   assert.equal(calls, 2);
   assert.equal(store.jobs().filter((j) => j.status === 'accepted').length, 7);
+});
+
+test('large Slack digests split without dropping IDs or charging unsent entries', async (t) => {
+  const store = setup(t, []);
+  for (let i = 0; i < 5; i++)
+    store.saveAssessment(
+      {
+        ...assessment(`${i}`.repeat(64)),
+        title: 'Long advisory title '.repeat(10),
+        system_id: 'system'.repeat(20),
+        component_id: 'component'.repeat(20),
+        applicability: 'unknown',
+        source_severity: 'low',
+        priority: 'low',
+        exploited: false,
+        urls: [`https://example.com/${'advisory/'.repeat(30)}`],
+        news_analysis: { classification: 'known_vulnerability_update', impact: 'unknown' },
+      },
+      { action: 'digest', channels: ['slack'], reason: 'review daily' },
+      1000,
+      1000,
+    );
+  const sent = new Set();
+  let calls = 0;
+  const http = async (_url, options) => {
+    calls++;
+    const text = JSON.parse(options.body).blocks[0].text.text;
+    assert(text.length <= 2900);
+    const included = store.jobs().filter((job) => text.includes(`Delivery: ${job.id}`));
+    assert(included.length > 0);
+    for (const job of included) {
+      assert(text.includes(`Finding: ${job.finding_id}`));
+      assert(!sent.has(job.id), 'a digest entry must not be delivered twice');
+      sent.add(job.id);
+    }
+    return { status: 200, body: 'ok', headers: {} };
+  };
+  const first = await deliverPending(store, config, http, 2000);
+  assert(first.accepted > 0 && first.accepted < 5);
+  assert.equal(first.failed, 0);
+  assert.equal(first.unknown, 0);
+  assert(
+    store
+      .jobs()
+      .filter((job) => job.status === 'pending')
+      .every((job) => job.attempts === 0),
+  );
+  for (const now of [3000, 4000, 5000, 6000]) await deliverPending(store, config, http, now);
+  assert.equal(sent.size, 5);
+  assert(calls > 1);
+  assert(store.jobs().every((job) => job.status === 'accepted' && job.attempts === 1));
+});
+
+test('a malformed digest entry does not discard its valid neighbors', async (t) => {
+  const store = setup(t, []);
+  for (const id of ['valid-1', 'malformed', 'valid-2'])
+    store.saveAssessment(
+      {
+        ...assessment(id),
+        applicability: 'unknown',
+        source_severity: 'low',
+        priority: 'low',
+        exploited: false,
+        ...(id === 'malformed' ? { urls: null } : {}),
+      },
+      { action: 'digest', channels: ['slack'], reason: 'review daily' },
+      1000,
+      1000,
+    );
+  const result = await deliverPending(
+    store,
+    config,
+    async (_url, options) => {
+      const text = JSON.parse(options.body).blocks[0].text.text;
+      assert(text.includes('Finding: valid-1'));
+      assert(text.includes('Finding: valid-2'));
+      assert(!text.includes('Finding: malformed'));
+      return { status: 200, body: 'ok', headers: {} };
+    },
+    2000,
+  );
+  assert.deepEqual(result, { accepted: 2, failed: 1, unknown: 0 });
+  assert.equal(store.jobs().find((job) => job.finding_id === 'malformed').status, 'failed');
+});
+
+test('a database failure while claiming a digest propagates without sending or rewriting delivery state', async (t) => {
+  const store = setup(t, []);
+  for (const id of ['digest-1', 'digest-2'])
+    store.saveAssessment(
+      {
+        ...assessment(id),
+        applicability: 'unknown',
+        source_severity: 'low',
+        priority: 'low',
+        exploited: false,
+      },
+      { action: 'digest', channels: ['slack'], reason: 'review daily' },
+      1000,
+      1000,
+    );
+  const databaseError = new Error('Database is unavailable');
+  store.claimAdditionalDigest = () => {
+    throw databaseError;
+  };
+  let sends = 0;
+  const http = async () => {
+    sends++;
+    return { status: 200, body: 'ok', headers: {} };
+  };
+  await assert.rejects(deliverPending(store, config, http, 2000), (error) => error === databaseError);
+  assert.equal(sends, 0);
+  assert.deepEqual(
+    store
+      .jobs()
+      .map((job) => job.status)
+      .sort(),
+    ['pending', 'sending'],
+  );
+  assert(store.jobs().every((job) => job.last_error === undefined));
 });
 
 test('ambiguous digest delivery marks every included finding unknown and never automatically resends', async (t) => {

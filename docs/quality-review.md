@@ -11,6 +11,7 @@ The alpha supports small installations with npm inventory, cve.now advisories, T
 - New configurations use cve.now and The Hacker News. Existing optional OSV, GitHub, CISA KEV and RSS/Atom adapters remain available.
 - cve.now uses original descriptions and structured affected ranges. Its model-generated summaries are excluded from evidence. Separate exact npm queries preserve matches that the provider would deduplicate in a combined request.
 - cve.now requests start at least 1.1 seconds apart. A supplied `Retry-After` on HTTP 403/429 delays later requests, with a one-hour cap. Isolated detail failures preserve other records; batch and failure limits bound collection. An incomplete source keeps its previous checkpoint and reports degraded health.
+- Malformed source items are isolated across feeds, GitHub, KEV, cve.now and OSV. Valid neighboring records survive, incomplete checkpoints stay unchanged, and cancellation still stops collection.
 - Relevant tracked CVEs and identifiers found in news are refreshed. Recent-entry collection does not establish exhaustive historical coverage for every product.
 - Multi-CVE articles keep unmatched subjects as separate review candidates until advisory aliases establish that they describe the same vulnerability.
 - OSV event ordering and independent limit events follow the [OSV schema algorithm](https://ossf.github.io/osv-schema/).
@@ -33,8 +34,8 @@ The alpha supports small installations with npm inventory, cve.now advisories, T
 
 - `init` accepts common-system templates, provider/model selection and independent scan/news timing. The default generated schedule is 30 minutes with a 40-minute news window. Templates do not invent installed versions or deployment details.
 - `--credentials-file` explicitly loads dotenv data with existing environment values taking precedence. Reads are bounded to 128 KiB; Unix permissions, file type and runtime-variable checks happen before environment changes. The flag avoids Node’s startup handling of `--env-file`.
-
 - Inventory exclusions, withdrawals, removed components and changed routes are reconciled before delivery. Dispatch checks the current policy again before sending.
+- Notification setup supports explicit Slack/email routes, and doctor reports disabled routing. Known preconnection failures retry with bounded backoff. Slack digests split within the message limit; malformed queued messages do not block healthy jobs. Genuine database claim failures still stop delivery.
 - Immediate alerts take priority over old digests. Pending messages receive updated wording and citations without resetting their schedule or attempt count.
 - Early delivery failures appear in the final one-shot scan result and return exit code 2. Invalid command/flag combinations fail before activity.
 - Database file checks reject links. Backups are published atomically without replacing an existing destination.
@@ -43,7 +44,7 @@ The alpha supports small installations with npm inventory, cve.now advisories, T
 
 ## Validation
 
-The current checkout passes **514 tests** on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They include news-window and catch-up behavior, partial-collection regressions, exclusions citing unrelated or same-vendor products, worker cancellation during delivery, and real loopback SMTP socket/TLS checks. Provider transport tests exercise every profile through real loopback HTTP with simulated model responses, including authentication, schema/evidence validation, refusals, truncation and secret-bearing errors. `npm run check` also passes formatting, strict compilation and clean-package installation checks. The packed CLI, public types and runtime exports also pass on the minimum supported Node 24.0.0; CI now repeats that consumer check.
+The current checkout passes **554 tests** on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They include news-window and catch-up behavior, partial-collection regressions, exclusions citing unrelated or same-vendor products, worker recovery after invalid inventory, malformed model responses and damaged queued payloads, concurrent CLI status reads, cancellation during delivery, and real loopback SMTP socket/TLS checks. Notification checks cover digest splitting, persisted retries, destination isolation and unknown receipts that must not be resent automatically. Provider transport tests exercise every profile through real loopback HTTP with simulated model responses, including authentication, schema/evidence validation, refusals, truncation and secret-bearing errors. `npm run check` also passes formatting, strict compilation and clean-package installation checks. The packed CLI, public types and runtime exports also pass on the minimum supported Node 24.0.0; CI now repeats that consumer check.
 
 Hosted CI for the release branch must pass at its final commit before merge. The repository requires an independent approval and passing checks.
 
@@ -55,7 +56,7 @@ Live source checks on 2026-10-24 included:
 
 - An exact query for `lodash@4.17.20` returned eight advisories without source errors, including five historical package matches.
 - A broad 24-hour scan initially hit HTTP 403 during detail collection. After pacing was added, a new scan of the 24-system sample completed all 157 public requests successfully: eight complete news articles and 143 advisories (134 published in the window and nine older records cited by news), with no source errors. The window was 2026-10-23 15:55 UTC through 2026-10-24 15:55 UTC. These are records returned by the configured sources, not a claim of exhaustive CVE coverage.
-- After the HTML parser change, a fresh live check completed nine public requests and returned the same eight complete article extracts. All eight text bodies were identical to the model evaluation sample.
+- After the HTML parser change, a fresh live check completed nine public requests and returned the same eight complete article extracts. All eight text bodies were identical to the model evaluation sample. A further check after the recovery changes again completed nine requests and read eight full articles without source errors.
 - Against one live feed snapshot, a 40-minute news window returned zero stories and a one-day window returned eight. All eight fell within that window. Public requests still occur in dry-run mode; models and notifications do not.
 
 Live model checks on 2026-10-24 used a fictional security bulletin through the production analyzer and HTTP client:

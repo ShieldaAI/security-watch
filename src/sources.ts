@@ -12,7 +12,14 @@ import type {
 } from './types.js';
 import { cleanText, hash, highest, timestamp } from './util.js';
 import { collectCveNow, evidenceRelevant } from './cve-now.js';
-import { PartialSourceError, SourceError } from './source-error.js';
+import {
+  PartialSourceError,
+  SourceError,
+  SourceHttpError,
+  SourceItemFailures,
+  sourceCanceled,
+  throwSourceFailure,
+} from './source-error.js';
 
 const OSV = 'https://api.osv.dev/v1';
 const GITHUB = 'https://api.github.com/advisories';
@@ -143,7 +150,7 @@ async function json(
   options: Parameters<HttpClient>[1] = {},
 ): Promise<unknown> {
   const response = await http(url, { maxBytes: 8_000_000, ...options });
-  if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
+  if (response.status !== 200) throw new SourceHttpError('Source', response.status);
   try {
     return JSON.parse(response.body);
   } catch {
@@ -297,65 +304,76 @@ async function osv(
   const queries = [...unique.values()];
   if (queries.length > 10_000)
     throw new SourceError('OSV inventory exceeds the 10,000 unique package-version limit.');
-  const matched = new Map<string, OsvQuery[]>();
-  for (let offset = 0; offset < queries.length; offset += 100) {
-    let pending = queries.slice(offset, offset + 100);
-    for (let page = 0; pending.length; page++) {
-      if (page >= MAX_PAGES) throw new SourceError('OSV pagination limit reached; collection is incomplete.');
-      const body = JSON.stringify({
-        queries: pending.map((query) => ({
-          package: { ecosystem: 'npm', name: query.name },
-          version: query.version,
-          ...(query.page_token ? { page_token: query.page_token } : {}),
-        })),
-      });
-      const data = record(
-        await json(http, `${OSV}/querybatch`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body,
-        }),
-      );
-      const results = array(data.results);
-      if (results.length !== pending.length)
-        throw new SourceError('OSV batch result count did not match the request.');
-      const next: OsvQuery[] = [];
-      for (let index = 0; index < results.length; index++) {
-        const result = record(results[index]);
-        const query = pending[index]!;
-        for (const rawVuln of array(result.vulns, true)) {
-          const vuln = record(rawVuln);
-          const id = string(vuln.id);
-          if (vuln.modified !== undefined) date(vuln.modified);
-          if (!matched.has(id)) matched.set(id, []);
-          if (!matched.get(id)!.some((match) => match.name === query.name && match.version === query.version))
-            matched.get(id)!.push(query);
-          if (matched.size > MAX_ADVISORIES)
-            throw new SourceError('OSV advisory limit reached; collection is incomplete.');
-        }
-        const token = optionalString(result.next_page_token);
-        if (token) {
-          if (query.seen.has(token)) throw new SourceError('OSV returned a repeated pagination token.');
-          query.seen.add(token);
-          next.push({ ...query, page_token: token });
-        }
-      }
-      pending = next;
-    }
-  }
-  const ids = new Set(matched.keys());
-  for (const item of previous)
-    if (item.source === 'osv' && item.id.startsWith('osv:')) ids.add(item.id.slice(4));
-  if (ids.size > MAX_ADVISORIES)
-    throw new SourceError('OSV historical advisory limit reached; collection is incomplete.');
   const results: Evidence[] = [];
-  // Bounded parallelism; historical IDs are refreshed even when they disappear from exact-version queries.
-  const allIds = [...ids];
-  for (let index = 0; index < allIds.length; index += 4) {
-    const part = await Promise.all(
-      allIds
-        .slice(index, index + 4)
-        .map(async (id) =>
+  const invalid = new SourceItemFailures();
+  try {
+    const matched = new Map<string, OsvQuery[]>();
+    for (let offset = 0; offset < queries.length; offset += 100) {
+      let pending = queries.slice(offset, offset + 100);
+      for (let page = 0; pending.length; page++) {
+        if (page >= MAX_PAGES)
+          throw new SourceError('OSV pagination limit reached; collection is incomplete.');
+        const body = JSON.stringify({
+          queries: pending.map((query) => ({
+            package: { ecosystem: 'npm', name: query.name },
+            version: query.version,
+            ...(query.page_token ? { page_token: query.page_token } : {}),
+          })),
+        });
+        const data = record(
+          await json(http, `${OSV}/querybatch`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body,
+          }),
+        );
+        const results = array(data.results);
+        if (results.length !== pending.length)
+          throw new SourceError('OSV batch result count did not match the request.');
+        const next: OsvQuery[] = [];
+        for (let index = 0; index < results.length; index++) {
+          const result = invalid.read(() => record(results[index]));
+          if (!result) continue;
+          const query = pending[index]!;
+          const vulns = invalid.read(() => array(result.vulns, true));
+          for (const rawVuln of vulns ?? []) {
+            const id = invalid.read(() => {
+              const vuln = record(rawVuln);
+              if (vuln.modified !== undefined) date(vuln.modified);
+              return string(vuln.id);
+            });
+            if (!id) continue;
+            if (!matched.has(id)) matched.set(id, []);
+            if (
+              !matched.get(id)!.some((match) => match.name === query.name && match.version === query.version)
+            )
+              matched.get(id)!.push(query);
+            if (matched.size > MAX_ADVISORIES)
+              throw new SourceError('OSV advisory limit reached; collection is incomplete.');
+          }
+          const token = optionalString(result.next_page_token);
+          if (token) {
+            if (query.seen.has(token)) throw new SourceError('OSV returned a repeated pagination token.');
+            query.seen.add(token);
+            next.push({ ...query, page_token: token });
+          }
+        }
+        pending = next;
+      }
+    }
+    const ids = new Set(matched.keys());
+    for (const item of previous)
+      if (item.source === 'osv' && item.id.startsWith('osv:')) ids.add(item.id.slice(4));
+    if (ids.size > MAX_ADVISORIES)
+      throw new SourceError('OSV historical advisory limit reached; collection is incomplete.');
+    // Bounded parallelism; historical IDs are refreshed even when they disappear from exact-version queries.
+    const allIds = [...ids];
+    let failures = 0;
+    let firstFailure: string | undefined;
+    for (let index = 0; index < allIds.length; index += 4) {
+      const batch = allIds.slice(index, index + 4);
+      const settled = await Promise.allSettled(
+        batch.map(async (id) =>
           osvRecord(
             await json(http, `${OSV}/vulns/${encodeURIComponent(id)}`),
             id,
@@ -363,10 +381,35 @@ async function osv(
             now,
           ),
         ),
-    );
-    results.push(...part);
+      );
+      const rejected = settled.filter((item) => item.status === 'rejected');
+      const canceled = rejected.find(({ reason }) => sourceCanceled(reason));
+      if (canceled) throw canceled.reason;
+      for (const item of settled) {
+        if (item.status === 'fulfilled') results.push(item.value);
+        else {
+          failures++;
+          firstFailure ??=
+            item.reason instanceof SourceError ? item.reason.message : 'Source request failed.';
+        }
+      }
+      if (
+        rejected.length === batch.length ||
+        failures >= 8 ||
+        rejected.some(
+          ({ reason }) => reason instanceof SourceHttpError && [401, 403, 429].includes(reason.status),
+        )
+      )
+        break;
+    }
+    if (failures)
+      throw new SourceError(
+        `${failures} OSV advisory detail request(s) failed; collection is incomplete. ${firstFailure}`,
+      );
+    return invalid.finish('OSV', results);
+  } catch (error) {
+    throwSourceFailure(error, results);
   }
-  return results;
 }
 
 function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): Evidence {
@@ -376,6 +419,9 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
     throw new SourceError('Invalid GitHub advisory identifier.');
   if (data.type !== undefined && data.type !== type)
     throw new SourceError('GitHub returned an unexpected advisory type.');
+  const modified = date(data.updated_at);
+  if (Date.parse(modified) > now + 5 * 60_000)
+    throw new SourceError('Source returned a future modification timestamp; collection is incomplete.');
   const packages = array(data.vulnerabilities).map((rawVulnerability) => {
     const vulnerability = record(rawVulnerability);
     const pkg = record(vulnerability.package);
@@ -410,7 +456,7 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
       ...array(data.identifiers, true).map((item) => string(record(item).value)),
     ]),
     severity: highest(...ratings),
-    modified_at: date(data.updated_at),
+    modified_at: modified,
     fetched_at: timestamp(now),
     published_at: date(data.published_at),
     packages,
@@ -471,30 +517,35 @@ async function github(
   let next: string | undefined = url.href;
   const seen = new Set<string>();
   const evidence = new Map<string, Evidence>();
-  for (let page = 0; next; page++) {
-    if (page >= MAX_PAGES)
-      throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
-    if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
-    seen.add(next);
-    const response = await http(next, { headers, maxBytes: 8_000_000, redirects: 0 });
-    if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
-    let data: unknown;
-    try {
-      data = JSON.parse(response.body);
-    } catch {
-      throw new SourceError('Source returned invalid JSON.');
+  const invalid = new SourceItemFailures();
+  try {
+    for (let page = 0; next; page++) {
+      if (page >= MAX_PAGES)
+        throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
+      if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
+      seen.add(next);
+      const response = await http(next, { headers, maxBytes: 8_000_000, redirects: 0 });
+      if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
+      let data: unknown;
+      try {
+        data = JSON.parse(response.body);
+      } catch {
+        throw new SourceError('Source returned invalid JSON.');
+      }
+      const items = array(data);
+      if (items.length > 100)
+        throw new SourceError('GitHub returned more records than the requested page limit.');
+      for (const item of items) {
+        const parsed = invalid.read(() => githubRecord(item, type, now));
+        if (parsed) retainNewest(evidence, parsed);
+      }
+      const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
+      next = nextGithubLink(link);
     }
-    const items = array(data);
-    if (items.length > 100)
-      throw new SourceError('GitHub returned more records than the requested page limit.');
-    for (const item of items) {
-      const parsed = githubRecord(item, type, now);
-      retainNewest(evidence, parsed);
-    }
-    const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
-    next = nextGithubLink(link);
+    return invalid.finish('GitHub', [...evidence.values()]);
+  } catch (error) {
+    throwSourceFailure(error, [...evidence.values()]);
   }
-  return [...evidence.values()];
 }
 
 async function kev(http: HttpClient, now: number, previous: Evidence[]): Promise<Evidence[]> {
@@ -507,36 +558,42 @@ async function kev(http: HttpClient, now: number, previous: Evidence[]): Promise
     throw new SourceError('Source returned a future modification timestamp; collection is incomplete.');
   const old = new Map<string, Evidence>();
   for (const item of previous) if (item.source === 'kev') retainNewest(old, item);
-  return entries.map((raw) => {
-    const item = record(raw);
-    const cve = string(item.cveID);
-    if (!/^CVE-\d{4}-\d{4,}$/i.test(cve)) throw new SourceError('Invalid CISA KEV identifier.');
-    const vendor = string(item.vendorProject);
-    const product = string(item.product);
-    const description = `${vendor} ${product}\n${string(item.shortDescription)}\nRequired action: ${string(item.requiredAction)}`;
-    const evidence: Evidence = {
-      id: `kev:${cve.toUpperCase()}`,
-      source: 'kev',
-      kind: 'kev',
-      title: cleanText(string(item.vulnerabilityName), 500),
-      url: `https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=${encodeURIComponent(cve)}`,
-      description: cleanText(description, 16_000),
-      aliases: aliases([cve]),
-      severity: 'unknown',
-      modified_at: released,
-      fetched_at: timestamp(now),
-      published_at: date(item.dateAdded),
-      packages: [],
-      exploited: true,
-    };
-    // KEV has a catalog release time, not entry modification times. An unchanged
-    // entry retains its content revision while fetched_at records this refresh.
-    const existing = old.get(evidence.id);
-    const content = (item: Evidence) =>
-      hash([item.title, item.description, item.url, item.aliases, item.published_at, item.exploited]);
-    if (existing && content(existing) === content(evidence)) evidence.modified_at = existing.modified_at;
-    return evidence;
-  });
+  const invalid = new SourceItemFailures();
+  const results: Evidence[] = [];
+  for (const raw of entries) {
+    const parsed = invalid.read(() => {
+      const item = record(raw);
+      const cve = string(item.cveID);
+      if (!/^CVE-\d{4}-\d{4,}$/i.test(cve)) throw new SourceError('Invalid CISA KEV identifier.');
+      const vendor = string(item.vendorProject);
+      const product = string(item.product);
+      const description = `${vendor} ${product}\n${string(item.shortDescription)}\nRequired action: ${string(item.requiredAction)}`;
+      const evidence: Evidence = {
+        id: `kev:${cve.toUpperCase()}`,
+        source: 'kev',
+        kind: 'kev',
+        title: cleanText(string(item.vulnerabilityName), 500),
+        url: `https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext=${encodeURIComponent(cve)}`,
+        description: cleanText(description, 16_000),
+        aliases: aliases([cve]),
+        severity: 'unknown',
+        modified_at: released,
+        fetched_at: timestamp(now),
+        published_at: date(item.dateAdded),
+        packages: [],
+        exploited: true,
+      };
+      // KEV has a catalog release time, not entry modification times. An unchanged
+      // entry retains its content revision while fetched_at records this refresh.
+      const existing = old.get(evidence.id);
+      const content = (item: Evidence) =>
+        hash([item.title, item.description, item.url, item.aliases, item.published_at, item.exploited]);
+      if (existing && content(existing) === content(evidence)) evidence.modified_at = existing.modified_at;
+      return evidence;
+    });
+    if (parsed) results.push(parsed);
+  }
+  return invalid.finish('CISA KEV', results);
 }
 
 function xmlText(value: unknown): string {
@@ -644,6 +701,7 @@ interface NewsWindow {
 interface FeedResult {
   evidence: Evidence[];
   undated: Set<string>;
+  failure?: string;
 }
 function newsWindow(
   source: string,
@@ -724,56 +782,67 @@ async function feed(
   fallback.hash = '';
   const results = new Map<string, Evidence>();
   const undated = new Set<string>();
+  const invalid = new SourceItemFailures();
   for (const rawEntry of entries) {
-    const entry = record(rawEntry);
-    const title = plainText(entry.title, 500);
-    if (!title) throw new SourceError('Feed entry is missing its title.');
-    const description = plainText(entry.encoded ?? entry.content ?? entry.description ?? entry.summary ?? '');
-    const links = list(entry.link);
-    const selectedLink = links.find(
-      (link) => typeof link === 'string' || !record(link)['@_rel'] || record(link)['@_rel'] === 'alternate',
-    );
-    const rawLink =
-      typeof selectedLink === 'object' && selectedLink !== null
-        ? (record(selectedLink)['@_href'] ?? xmlText(selectedLink))
-        : selectedLink;
-    const link = publicUrl(rawLink, fallback.href);
-    const externalId = xmlText(entry.id ?? entry.guid).trim() || (link !== fallback.href ? link : '');
-    if (!externalId) throw new SourceError('Feed entry is missing a stable ID or link.');
-    const published = feedDate(entry.published ?? entry.pubDate);
-    const sourceModified = feedDate(entry.updated) ?? published;
-    if ([sourceModified, published].some((value) => value && Date.parse(value) > now + 5 * 60_000))
-      throw new SourceError('Feed returned a future timestamp; collection is incomplete.');
-    const modified = sourceModified ?? timestamp(now);
-    const id = `${source}:entry:${hash(externalId).slice(0, 32)}`;
-    if (sourceModified && Date.parse(sourceModified) < window.cutoff && !window.tracked.has(id)) continue;
-    const foundAliases =
-      `${title}\n${description}\n${link}`.match(
-        /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
-      ) ?? [];
-    const evidence: Evidence = {
-      id,
-      source,
-      kind: 'news',
-      title,
-      url: link,
-      description,
-      aliases: aliases(foundAliases),
-      severity: severity(xmlText(entry.severity)),
-      modified_at: modified,
-      fetched_at: timestamp(now),
-      ...(published ? { published_at: published } : {}),
-      packages: [],
-      content_status: description ? 'excerpt' : 'unavailable',
-    };
+    const parsed = invalid.read(() => {
+      const entry = record(rawEntry);
+      const title = plainText(entry.title, 500);
+      if (!title) throw new SourceError('Feed entry is missing its title.');
+      const description = plainText(
+        entry.encoded ?? entry.content ?? entry.description ?? entry.summary ?? '',
+      );
+      const links = list(entry.link);
+      const selectedLink = links.find(
+        (link) => typeof link === 'string' || !record(link)['@_rel'] || record(link)['@_rel'] === 'alternate',
+      );
+      const rawLink =
+        typeof selectedLink === 'object' && selectedLink !== null
+          ? (record(selectedLink)['@_href'] ?? xmlText(selectedLink))
+          : selectedLink;
+      const link = publicUrl(rawLink, fallback.href);
+      const externalId = xmlText(entry.id ?? entry.guid).trim() || (link !== fallback.href ? link : '');
+      if (!externalId) throw new SourceError('Feed entry is missing a stable ID or link.');
+      const published = feedDate(entry.published ?? entry.pubDate);
+      const sourceModified = feedDate(entry.updated) ?? published;
+      if ([sourceModified, published].some((value) => value && Date.parse(value) > now + 5 * 60_000))
+        throw new SourceError('Feed returned a future timestamp; collection is incomplete.');
+      const modified = sourceModified ?? timestamp(now);
+      const id = `${source}:entry:${hash(externalId).slice(0, 32)}`;
+      if (sourceModified && Date.parse(sourceModified) < window.cutoff && !window.tracked.has(id))
+        return undefined;
+      const foundAliases =
+        `${title}\n${description}\n${link}`.match(
+          /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
+        ) ?? [];
+      const evidence: Evidence = {
+        id,
+        source,
+        kind: 'news',
+        title,
+        url: link,
+        description,
+        aliases: aliases(foundAliases),
+        severity: severity(xmlText(entry.severity)),
+        modified_at: modified,
+        fetched_at: timestamp(now),
+        ...(published ? { published_at: published } : {}),
+        packages: [],
+        content_status: description ? 'excerpt' : 'unavailable',
+      };
+      return { evidence, dated: Boolean(sourceModified) };
+    });
+    if (!parsed) continue;
+    const { evidence, dated } = parsed;
+    const id = evidence.id;
+    const modified = evidence.modified_at;
     const old = results.get(id);
     if (!old || Date.parse(modified) >= Date.parse(old.modified_at)) {
       results.set(id, evidence);
-      if (sourceModified) undated.delete(id);
+      if (dated) undated.delete(id);
       else undated.add(id);
     }
   }
-  return { evidence: [...results.values()], undated };
+  return { evidence: [...results.values()], undated, failure: invalid.message('Feed') };
 }
 
 function hackerNewsUrl(value: string): string | undefined {
@@ -850,7 +919,8 @@ async function hackerNews(http: HttpClient, now: number, window: NewsWindow): Pr
               /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
             ) ?? [],
           );
-        } catch {
+        } catch (error) {
+          if (sourceCanceled(error)) throw error;
           // Fetch/parse failures must not erase the headline and feed excerpt.
           // No transport exception text is persisted or exposed to model prompts.
         }
@@ -909,39 +979,56 @@ export async function collectSources(
       run: () => collectCveNow(inventory, checkpoints.cve_now, previousEvidence, result.evidence, http, now),
     });
   for (const job of jobs) {
+    let collected: Evidence[] | FeedResult = [];
+    let failure: unknown;
+    let incomplete = false;
     try {
-      const collected = await job.run();
-      const evidence = Array.isArray(collected) ? collected : collected.evidence;
-      if (evidence.some((item) => Date.parse(item.modified_at) > now + 5 * 60_000))
-        throw new SourceError('Source returned a future modification timestamp; collection is incomplete.');
-      result.evidence.push(...evidence);
-      result.checkpoints[job.source] = timestamp(now);
-      if (!Array.isArray(collected) && collected.undated.size)
-        result.errors.push({
-          source: `${job.source}:timestamps`,
-          message: `${collected.undated.size} news item(s) have no valid publication or update time; included as first-seen evidence because their age cannot be verified.`,
-        });
-      if (job.source === 'hacker_news') {
-        const incomplete = evidence.filter(
-          (item) => item.content_status !== 'full' && evidenceRelevant(item, inventory),
-        ).length;
-        if (incomplete)
-          result.errors.push({
-            source: 'hacker_news:articles',
-            message: `${incomplete} relevant The Hacker News article(s) could not be read in full; excerpts remain available for cautious review.`,
-          });
+      collected = await job.run();
+      if (!Array.isArray(collected) && collected.failure) {
+        failure = new SourceError(collected.failure);
+        incomplete = true;
       }
     } catch (error) {
-      if (error instanceof PartialSourceError) result.evidence.push(...error.evidence);
-      // Never expose exception text from transports/parsers: it can contain feed tokens or HTTP headers.
+      if (sourceCanceled(error)) throw error;
+      failure = error;
+      incomplete = true;
+      if (error instanceof PartialSourceError) collected = error.evidence;
+    }
+    const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
+      const modified = Date.parse(item.modified_at);
+      if (Number.isFinite(modified) && modified <= now + 5 * 60_000) return true;
+      failure ??= new SourceError(
+        'Source returned an invalid or future modification timestamp; collection is incomplete.',
+      );
+      incomplete = true;
+      return false;
+    });
+    result.evidence.push(...evidence);
+    if (!incomplete) result.checkpoints[job.source] = timestamp(now);
+    if (!Array.isArray(collected) && collected.undated.size)
+      result.errors.push({
+        source: `${job.source}:timestamps`,
+        message: `${collected.undated.size} news item(s) have no valid publication or update time; included as first-seen evidence because their age cannot be verified.`,
+      });
+    if (job.source === 'hacker_news') {
+      const missing = evidence.filter(
+        (item) => item.content_status !== 'full' && evidenceRelevant(item, inventory),
+      ).length;
+      if (missing)
+        result.errors.push({
+          source: 'hacker_news:articles',
+          message: `${missing} relevant The Hacker News article(s) could not be read in full; excerpts remain available for cautious review.`,
+        });
+    }
+    if (incomplete)
       result.errors.push({
         source: job.source,
+        // Transport errors can contain feed tokens or HTTP headers.
         message:
-          error instanceof SourceError
-            ? error.message
+          failure instanceof SourceError
+            ? failure.message
             : 'Source request failed; cached evidence was retained and its checkpoint was not advanced.',
       });
-    }
   }
   return result;
 }

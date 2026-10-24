@@ -24,6 +24,7 @@ const help = `Shielda Security Watch (experimental alpha)
   security-watch init [--directory PATH] [--yes] [--systems nodejs,python]
     [--provider NAME --model ID] [--endpoint URL] [--allow-private-endpoint]
     [--poll-minutes 30] [--lookback-minutes 40]
+    [--notifications slack,email] [--email-from ADDRESS] [--email-to ADDRESS,ADDRESS]
   security-watch doctor [--config PATH] [--credentials-file PATH]
   security-watch providers
   security-watch templates
@@ -59,6 +60,9 @@ function argumentsFromCommandLine() {
       'allow-private-endpoint': { type: 'boolean' },
       'poll-minutes': { type: 'string' },
       'lookback-minutes': { type: 'string' },
+      notifications: { type: 'string' },
+      'email-from': { type: 'string' },
+      'email-to': { type: 'string' },
       'credentials-file': { type: 'string' },
       yes: { type: 'boolean' },
       'dry-run': { type: 'boolean' },
@@ -102,7 +106,9 @@ async function initialize(): Promise<void> {
     allowPrivate = values['allow-private-endpoint'] ?? false,
     pollMinutes = values['poll-minutes'] ?? '30',
     lookbackMinutes = values['lookback-minutes'] ?? '40',
-    slack = false;
+    notificationChoice = values.notifications ?? 'none',
+    emailFrom = values['email-from'],
+    emailTo = values['email-to'];
   const systems = values.systems === undefined ? undefined : starterSystems(values.systems);
   if (provider === 'none' && (model || endpoint || allowPrivate))
     throw new Error('--model, --endpoint and --allow-private-endpoint require --provider.');
@@ -137,14 +143,36 @@ async function initialize(): Promise<void> {
       if (!values['lookback-minutes'])
         lookbackMinutes =
           (await prompt.question('Minutes of recent news to check (default 40): ')).trim() || '40';
-      slack = /^y(es)?$/i.test(
-        (await prompt.question('Configure Slack routes using SLACK_WEBHOOK_URL? (y/N): ')).trim(),
-      );
+      if (!values.notifications)
+        notificationChoice =
+          (
+            await prompt.question(
+              'Notification channels: none, slack, email, or slack,email (default none): ',
+            )
+          ).trim() || 'none';
+      if (
+        notificationChoice
+          .split(',')
+          .map((value) => value.trim())
+          .includes('email')
+      ) {
+        emailFrom ??= (await prompt.question('Email sender address: ')).trim();
+        emailTo ??= (await prompt.question('Email recipient addresses, separated by commas: ')).trim();
+      }
     } finally {
       prompt.close();
     }
   }
-  const channels = slack ? ['slack'] : [];
+  const channels =
+    notificationChoice === 'none'
+      ? []
+      : [...new Set(notificationChoice.split(',').map((value) => value.trim()))];
+  if (channels.some((channel) => !['slack', 'email'].includes(channel)))
+    throw new Error('--notifications must be none, slack, email, or slack,email.');
+  if (channels.includes('email') && (!emailFrom || !emailTo))
+    throw new Error('Email notifications require --email-from and --email-to.');
+  if (!channels.includes('email') && (emailFrom || emailTo))
+    throw new Error('--email-from and --email-to require --notifications email.');
   const config = parseConfig({
     version: 1,
     inventory: './systems.yaml',
@@ -170,7 +198,18 @@ async function initialize(): Promise<void> {
       news: { levels: ['high', 'critical'], channels },
       health_channels: channels,
     },
-    notifications: slack ? { slack: { webhook_url_env: 'SLACK_WEBHOOK_URL' } } : {},
+    notifications: {
+      ...(channels.includes('slack') ? { slack: { webhook_url_env: 'SLACK_WEBHOOK_URL' } } : {}),
+      ...(channels.includes('email')
+        ? {
+            email: {
+              smtp_url_env: 'SMTP_URL',
+              from: emailFrom,
+              to: emailTo!.split(',').map((address) => address.trim()),
+            },
+          }
+        : {}),
+    },
   });
   mkdirSync(directory, { recursive: true });
   writeFileSync(
@@ -206,7 +245,8 @@ async function initialize(): Promise<void> {
         (provider === 'none'
           ? '# OPENAI_API_KEY=\n# ANTHROPIC_API_KEY=\n'
           : `${providerDefinition(provider).apiKeyEnv}=\n`) +
-        (slack ? 'SLACK_WEBHOOK_URL=\n' : '# SLACK_WEBHOOK_URL=\n'),
+        (channels.includes('slack') ? 'SLACK_WEBHOOK_URL=\n' : '# SLACK_WEBHOOK_URL=\n') +
+        (channels.includes('email') ? 'SMTP_URL=\n' : '# SMTP_URL=\n'),
       { flag: 'wx', mode: 0o600 },
     );
   console.log(
@@ -233,6 +273,9 @@ async function main(): Promise<void> {
       'allow-private-endpoint',
       'poll-minutes',
       'lookback-minutes',
+      'notifications',
+      'email-from',
+      'email-to',
     ],
     providers: [],
     templates: [],
@@ -283,6 +326,13 @@ async function main(): Promise<void> {
   if (command === 'doctor') {
     const inventory = loadInventory(config.inventory);
     const missing = missingCredentials(config);
+    const routes = {
+      library: config.policy.library.channels,
+      product: config.policy.product.channels,
+      news: config.policy.news.channels,
+      health: config.policy.health_channels,
+    };
+    const enabledChannels = [...new Set(Object.values(routes).flat())];
     output({
       ok: missing.length === 0,
       systems: inventory.systems.length,
@@ -294,10 +344,19 @@ async function main(): Promise<void> {
       news_lookback_minutes: config.news_lookback_minutes,
       sources: config.sources,
       feeds: config.sources.feeds.length + Number(config.sources.hacker_news),
+      notification_routes: routes,
+      notification_channels: enabledChannels,
       notices: [
         'Model compatibility is verified only by a real analysis request; doctor does not spend tokens or send notifications.',
         'Public advisory queries disclose package names/versions. Models receive relevant inventory context.',
         'System news impact is an AI assessment with citations; structured CVE version matching remains separate.',
+        ...(enabledChannels.length
+          ? [
+              'Notification routes are enabled. Use test-notification to verify delivery; start sends queued notifications continuously.',
+            ]
+          : [
+              'No notification routes are enabled. Scans will record findings without delivering alerts. Configure policy channels and notification destinations.',
+            ]),
         ...((config.sources.hacker_news || config.sources.feeds.length) && !config.models.enabled
           ? ['Enable an analysis model to classify system news and assess deployment impact.']
           : []),
@@ -455,13 +514,23 @@ async function main(): Promise<void> {
         channels: [values.channel],
         reason: 'Explicit notification test',
       });
-      output(
-        await deliverPending(
-          store,
-          { ...config, policy: { ...config.policy, health_channels: [values.channel] } },
-          safeHttp,
-        ),
+      const delivery = await deliverPending(
+        store,
+        {
+          ...config,
+          notifications: { ...config.notifications, max_attempts: 1 },
+          policy: { ...config.policy, health_channels: [values.channel] },
+        },
+        safeHttp,
       );
+      const job = store.jobs()[0];
+      output({
+        ...delivery,
+        channel: values.channel,
+        status: job?.status ?? 'not_sent',
+        error: job?.last_error ?? null,
+        note: 'This sends one test and does not change the monitor database or retry automatically.',
+      });
       if (store.jobs().some((j) => j.status !== 'accepted')) process.exitCode = 2;
       return;
     }

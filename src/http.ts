@@ -166,6 +166,7 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
     if (deadline <= Date.now()) throw new NetworkError('REQUEST_TIMEOUT');
     response = await new Promise<HttpResult>((resolve, reject) => {
       const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+      let connected = false;
       const req = request(
         url,
         {
@@ -211,14 +212,25 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
         () => req.destroy(new NetworkError('REQUEST_TIMEOUT')),
         Math.max(0, deadline - Date.now()),
       );
+      req.on('socket', (socket) => {
+        if (!socket.connecting) connected = true;
+        else socket.once('connect', () => (connected = true));
+      });
       req.on('error', (error) => {
         clearTimeout(timer);
+        const code = 'code' in error ? error.code : undefined;
+        const connectionFailed =
+          !connected &&
+          (['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH'].includes(String(code)) ||
+            (error instanceof NetworkError && error.code === 'REQUEST_TIMEOUT'));
         reject(
           options.signal?.aborted
             ? new NetworkError('REQUEST_ABORTED')
-            : error instanceof NetworkError
-              ? error
-              : new NetworkError('REQUEST_FAILED'),
+            : connectionFailed
+              ? new NetworkError('CONNECTION_FAILED')
+              : error instanceof NetworkError
+                ? error
+                : new NetworkError('REQUEST_FAILED'),
         );
       });
       if (options.body) req.write(options.body);

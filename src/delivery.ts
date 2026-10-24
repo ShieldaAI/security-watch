@@ -4,6 +4,7 @@ import type { Assessment, Config, HttpClient, Notification } from './types.js';
 import { cleanText } from './util.js';
 import { decide } from './assessment.js';
 import { Store } from './store.js';
+import { NetworkError } from './http.js';
 
 export interface EmailMessage {
   url: string;
@@ -18,6 +19,12 @@ export interface EmailReceipt {
   rejected: string[];
 }
 export type EmailSender = (message: EmailMessage) => Promise<EmailReceipt>;
+
+class EmailConnectionError extends Error {
+  constructor() {
+    super('SMTP connection failed before sending');
+  }
+}
 
 export const sendEmail: EmailSender = async (message) => {
   message.signal?.throwIfAborted();
@@ -59,8 +66,8 @@ export const sendEmail: EmailSender = async (message) => {
       });
       const deadline = setTimeout(() => socket?.destroy(new Error('SMTP connection timeout')), 30_000);
       socket.once('close', () => clearTimeout(deadline));
-      socket.once('error', (error) => {
-        if (!connected) callback(error, {});
+      socket.once('error', () => {
+        if (!connected) callback(new EmailConnectionError(), {});
       });
       socket.once('connect', () => {
         connected = true;
@@ -197,12 +204,13 @@ export async function deliverPending(
     (job = store.claimDue(now, Number(store.getMeta('delivery:slack:next_at') ?? 0) > now ? ['slack'] : []))
   ) {
     let batch = [job];
+    let wantsDigest = false;
     try {
-      if (JSON.parse(job.payload).mode === 'digest')
-        batch.push(...store.claimAdditionalDigest(job.channel, now));
+      wantsDigest = JSON.parse(job.payload).mode === 'digest';
     } catch {
       /* Invalid payload is handled below. */
     }
+    if (wantsDigest) batch.push(...store.claimAdditionalDigest(job.channel, now));
     // A worker restart can load a new policy before its first source scan finishes. Do not
     // deliver previously queued routes or urgency blindly under that changed configuration.
     batch = batch.filter((entry) => {
@@ -219,6 +227,9 @@ export async function deliverPending(
       let mode: unknown;
       try {
         mode = JSON.parse(entry.payload).mode;
+        // Validate each saved entry before grouping it with other findings.
+        if (mode === 'digest') digestText([entry]);
+        else notificationText(entry);
       } catch {
         store.completeJob(entry.id, 'failed', now, 'Invalid saved notification payload');
         result.failed++;
@@ -232,6 +243,20 @@ export async function deliverPending(
       return true;
     });
     if (!batch.length) continue;
+    const digest = JSON.parse(batch[0]!.payload).mode === 'digest';
+    if (digest && batch[0]!.channel === 'slack') {
+      const fitting: Notification[] = [];
+      for (const entry of batch) {
+        if (digestText([entry]).text.length > 2900) {
+          store.completeJob(entry.id, 'failed', now, 'Saved finding exceeds the Slack message limit');
+          result.failed++;
+        } else if (digestText([...fitting, entry]).text.length > 2900)
+          store.deferJob(entry.id, now + 1000, 'Waiting for the next digest batch');
+        else fitting.push(entry);
+      }
+      batch = fitting;
+      if (!batch.length) continue;
+    }
     const item = batch[0]!;
     const finish = (status: 'accepted' | 'failed' | 'unknown', message?: string) => {
       for (const entry of batch) {
@@ -249,7 +274,7 @@ export async function deliverPending(
     };
     let text: { subject: string; text: string };
     try {
-      text = batch.length > 1 ? digestText(batch) : notificationText(item);
+      text = digest ? digestText(batch) : notificationText(item);
     } catch {
       finish('failed', 'Invalid saved notification payload');
       continue;
@@ -313,11 +338,18 @@ export async function deliverPending(
         } else if (response.status >= 200 && response.status < 300)
           finish('unknown', 'Unexpected Slack success response; verify receipt before retrying');
         else finish('failed', `Slack rejected request with HTTP ${response.status}`);
-      } catch {
-        finish(
-          'unknown',
-          'Slack delivery interrupted; receipt is unknown. Verify the destination before retrying.',
-        );
+      } catch (error) {
+        if (
+          !signal?.aborted &&
+          error instanceof NetworkError &&
+          ['DNS_FAILED', 'CONNECTION_FAILED'].includes(error.code)
+        )
+          retry('Slack connection failed before sending', retryAt({}, now, item.attempts));
+        else
+          finish(
+            'unknown',
+            'Slack delivery interrupted; receipt is unknown. Verify the destination before retrying.',
+          );
       }
     } else {
       const settings = config.notifications.email;
@@ -366,7 +398,9 @@ export async function deliverPending(
         else finish('failed', 'SMTP did not accept any recipients');
       } catch (error) {
         const code = statusCode(error);
-        if (code && code >= 400 && code < 500)
+        if (!signal?.aborted && error instanceof EmailConnectionError)
+          retry('SMTP connection failed before sending', retryAt({}, now, item.attempts));
+        else if (code && code >= 400 && code < 500)
           retry(`SMTP rejected request with status ${code}`, retryAt({}, now, item.attempts));
         else if (code && code >= 500 && code < 600)
           finish('failed', `SMTP rejected request with status ${code}`);
