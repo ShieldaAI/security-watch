@@ -300,6 +300,8 @@ Acknowledgement applies to the current finding revision. Material changes create
 
 Use one local SQLite database per worker. A worker lock prevents concurrent scans; inspection and control commands can run alongside it. The database contains source evidence/checkpoints, assessment history, model caches and reservations, and notification state. It is operationally sensitive and has no automatic retention pruning in this alpha.
 
+Keep the database in a trusted local data directory. Database, SQLite sidecar and worker-lock database files must be regular files without links. On Unix systems, they must have no group or other permissions. New files are created privately. If a permission check fails, stop the worker and correct the named file’s permissions before restarting; the application does not change permissions on an active SQLite file.
+
 Database schema 4 adds indexed evidence lookup without discarding history. Stop an older worker and run `scan` or `start` to migrate before using read-only commands from this version. Back up before upgrading operational databases.
 
 `health` checks a worker heartbeat no older than 90 seconds, a completed scan no older than twice the polling interval (at least two minutes), and actionable failed, uncertain or more-than-five-minutes-overdue delivery. A new worker has a two-minute first-scan grace period. Suppressed/acknowledged findings, canceled routes and a valid Slack retry timer are excluded from actionable delivery health. `health --scan-only` omits the worker requirement for externally scheduled scans. Neither command writes data or calls external services; unhealthy monitoring returns exit code 2. A healthy monitor can still have critical affected systems.

@@ -471,6 +471,7 @@ test('backup and history CLI retain findings, outbox, and evidence revisions', (
 test('schema initialization failure releases worker lock before returning an error', (t) => {
   const f = fixture(t);
   mkdirSync(join(f.dir, 'state'));
+  writeFileSync(f.db, '', { mode: 0o600 });
   const db = new DatabaseSync(f.db);
   db.exec('PRAGMA user_version=999');
   db.close();

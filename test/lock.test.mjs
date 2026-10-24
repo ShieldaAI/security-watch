@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtempSync,
   rmSync,
@@ -10,6 +10,8 @@ import {
   mkdirSync,
   statSync,
   symlinkSync,
+  linkSync,
+  chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,6 +43,54 @@ test('exclusive worker lock excludes another worker and releases cleanly without
   assert(existsSync(`${path}.worker-lock`));
   const again = acquireLock(path);
   again();
+});
+
+test('failed same-process acquisitions preserve the first worker lock against other processes', (t) => {
+  const path = fixture(t);
+  const release = acquireLock(path);
+  t.after(release);
+  const module = new URL('../dist/lock.js', import.meta.url).href;
+  const code = `import {acquireLock} from ${JSON.stringify(module)};
+    try { const release = acquireLock(process.argv[1]); release(); console.log('acquired'); }
+    catch (error) { if (!/Another scan or worker/.test(error.message)) throw error; console.log('blocked'); }`;
+  const attempt = () => {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', code, path], {
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    assert.equal(child.status, 0, child.stderr || child.error?.message);
+    return child.stdout.trim();
+  };
+  assert.throws(() => acquireLock(path), /Another scan or worker/);
+  assert.equal(attempt(), 'blocked');
+  assert.throws(() => unlockStoppedWorker(path), /Another scan or worker/);
+  assert.equal(attempt(), 'blocked');
+  release();
+  assert.equal(attempt(), 'acquired');
+});
+
+test('existing worker lock database permissions must be private and are not repaired online', (t) => {
+  if (process.platform === 'win32') return t.skip('POSIX file permissions');
+  const path = fixture(t);
+  const release = acquireLock(path);
+  release();
+  chmodSync(`${path}.worker-lock`, 0o644);
+  assert.throws(() => acquireLock(path), /private permissions/);
+  assert.equal(statSync(`${path}.worker-lock`).mode & 0o777, 0o644);
+  chmodSync(`${path}.worker-lock`, 0o600);
+  acquireLock(path)();
+});
+
+test('existing worker lock hard links and nonregular files are rejected', (t) => {
+  const path = fixture(t);
+  const target = `${path}.target`;
+  writeFileSync(target, 'keep', { mode: 0o600 });
+  linkSync(target, `${path}.worker-lock`);
+  assert.throws(() => acquireLock(path), /hard links/);
+  assert.equal(readFileSync(target, 'utf8'), 'keep');
+  rmSync(`${path}.worker-lock`);
+  mkdirSync(`${path}.worker-lock`);
+  assert.throws(() => acquireLock(path), /regular files/);
 });
 
 test('stale metadata with a reused active PID does not block an unowned OS lock', (t) => {

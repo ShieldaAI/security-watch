@@ -3,8 +3,6 @@ import {
   closeSync,
   constants,
   existsSync,
-  fchmodSync,
-  fstatSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -20,38 +18,40 @@ import { decide } from './assessment.js';
 
 type Row = Record<string, unknown>;
 const SCHEMA_VERSION = 4;
-function verifyFile(path: string, writable: boolean, create = false): void {
-  const fd = openSync(
-    path,
-    (writable ? constants.O_RDWR : constants.O_RDONLY) |
-      constants.O_NOFOLLOW |
-      constants.O_NONBLOCK |
-      (create ? constants.O_CREAT : 0),
-    0o600,
-  );
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1)
-      throw new Error('Database paths must be regular files without hard links');
-    if (writable) fchmodSync(fd, 0o600);
-  } finally {
-    closeSync(fd);
-  }
+function verifyFile(path: string): void {
+  // Closing any descriptor for a live SQLite inode releases this process's POSIX locks.
+  // Inspect existing files without opening them, including when another Store is already open.
+  const stat = lstatSync(path);
+  if (!stat.isFile() || stat.nlink !== 1)
+    throw new Error('Database paths must be regular files without symbolic or hard links');
+  if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
+    throw new Error(
+      'Database files must have private permissions. Stop the worker and run chmod 600 on the database and its existing sidecars before retrying.',
+    );
 }
 function privateFile(path: string): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  // Do not follow links when checking or changing permissions, including dangling links.
-  verifyFile(path, true, true);
+  try {
+    // Only a new inode can be opened and closed safely outside SQLite's own file handling.
+    const fd = openSync(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW,
+      0o600,
+    );
+    closeSync(fd);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  verifyFile(path);
 }
-function existingSidecars(path: string, writable: boolean): void {
+function existingSidecars(path: string): void {
   for (const file of [`${path}-wal`, `${path}-shm`, `${path}-journal`]) {
     try {
-      lstatSync(file);
+      verifyFile(file);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
-    verifyFile(file, writable);
   }
 }
 function notification(row: Row): Notification {
@@ -99,9 +99,9 @@ export class Store {
     if (this.#path !== ':memory:') {
       if ((options.readOnly || options.migrate === false) && !existsSync(this.#path))
         throw new Error('Database does not exist; run scan or start first');
-      if (options.readOnly) verifyFile(this.#path, false);
+      if (options.readOnly) verifyFile(this.#path);
       else privateFile(this.#path);
-      existingSidecars(this.#path, !options.readOnly);
+      existingSidecars(this.#path);
     }
     this.#db = new DatabaseSync(this.#path, { readOnly: options.readOnly ?? false });
     try {
@@ -172,8 +172,8 @@ export class Store {
   }
   #privateSidecars(): void {
     if (this.#path !== ':memory:') {
-      verifyFile(this.#path, true);
-      existingSidecars(this.#path, true);
+      verifyFile(this.#path);
+      existingSidecars(this.#path);
     }
   }
   #transaction<T>(fn: () => T): T {

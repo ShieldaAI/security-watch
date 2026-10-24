@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   linkSync,
   mkdtempSync,
   readFileSync,
@@ -211,6 +213,7 @@ test('backup restores complete database state and will not overwrite an existing
 
 test('future database schemas are refused', (t) => {
   const { path } = disk(t);
+  writeFileSync(path, '', { mode: 0o600, flag: 'wx' });
   const db = new DatabaseSync(path);
   db.exec('PRAGMA user_version=99');
   db.close();
@@ -400,6 +403,79 @@ test('read-only connections inspect a live database without permitting writes or
   assert.throws(() => reader.setMeta('test', 'value'), /readonly|read-only/i);
   assert.equal(writer.getMeta('test'), undefined);
 });
+
+test('opening and closing another Store preserves the writer transaction lock across processes', (t) => {
+  const { path } = disk(t);
+  // Isolate the writer: the old descriptor checks can let SQLite truncate its live shared-memory file.
+  const script = `import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+import {Store} from ${JSON.stringify(new URL('../dist/store.js', import.meta.url).href)};
+const path=${JSON.stringify(path)};
+const writer=new Store(path);
+let checked=false;
+const assessment=${JSON.stringify(base())};
+Object.defineProperty(assessment,'summary',{enumerable:true,get(){
+  if(!checked){
+    checked=true;
+    const reader=new Store(path,{readOnly:true});
+    reader.findings();
+    reader.close();
+    const contender=spawnSync(process.execPath,['--input-type=module','-e',
+      "import {DatabaseSync} from 'node:sqlite';const db=new DatabaseSync(process.argv[1]);db.exec('PRAGMA busy_timeout=0');try{db.exec('BEGIN IMMEDIATE');console.log('unlocked');db.exec('ROLLBACK')}catch(error){if(!/locked|busy/i.test(error.message))throw error;console.log('blocked')}finally{db.close()}",path
+    ],{encoding:'utf8',timeout:3000});
+    assert.equal(contender.status,0,JSON.stringify({signal:contender.signal,error:contender.error?.message,stderr:contender.stderr}));
+    assert.equal(contender.stdout.trim(),'blocked','A second Store must not release another connection transaction lock');
+  }
+  return 'Transaction lock fixture';
+}});
+try{writer.saveAssessment(assessment,${JSON.stringify(notify)},1000);assert(checked);console.log('write lock retained')}finally{writer.close()}
+`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    timeout: 8000,
+  });
+  assert.equal(
+    result.status,
+    0,
+    JSON.stringify({
+      signal: result.signal,
+      error: result.error?.message,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    }),
+  );
+  assert.match(result.stdout, /write lock retained/);
+});
+
+test(
+  'existing database permissions are rejected without modifying files or following links',
+  { skip: process.platform === 'win32' },
+  (t) => {
+    const { path } = disk(t);
+    const original = new Store(path);
+    original.close();
+    chmodSync(path, 0o644);
+    for (const options of [{}, { readOnly: true }])
+      assert.throws(() => new Store(path, options), /Stop the worker.*chmod 600/);
+    assert.equal(statSync(path).mode & 0o777, 0o644);
+    chmodSync(path, 0o600);
+    const writer = new Store(path);
+    t.after(() => writer.close());
+    writer.setMeta('private', 'verified');
+    for (const suffix of ['-wal', '-shm']) {
+      assert.equal(
+        statSync(path + suffix).mode & 0o777,
+        0o600,
+        'SQLite sidecars inherit the private database mode',
+      );
+      chmodSync(path + suffix, 0o644);
+      assert.throws(() => new Store(path, { readOnly: true }), /Stop the worker.*chmod 600/);
+      assert.equal(statSync(path + suffix).mode & 0o777, 0o644);
+      chmodSync(path + suffix, 0o600);
+    }
+    assert.equal(writer.getMeta('private'), 'verified');
+  },
+);
 
 test('live control connections require current schema and do not silently migrate or initialize', (t) => {
   const { path, dir } = disk(t);
