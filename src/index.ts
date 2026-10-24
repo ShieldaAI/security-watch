@@ -7,3 +7,4 @@ export { ModelAnalyzer, validateAnalysis } from './models.js';
 export { Store } from './store.js';
 export { deliverPending } from './delivery.js';
 export { runScan, readFixture } from './engine.js';
+export { checkHealth } from './health.js';

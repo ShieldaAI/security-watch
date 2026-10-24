@@ -26,13 +26,16 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
-    "check": "npm test && node scripts/check-package.mjs",
+    "check": "npm run format:check && npm test && node scripts/check-package.mjs",
     "start": "node dist/cli.js start",
     "prepublishOnly": "node scripts/release-check.mjs",
     "demo": "npm run build && node scripts/demo.mjs",
-    "check:docker": "node scripts/check-docker.mjs"
+    "check:docker": "node scripts/check-docker.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "fast-xml-parser": "5.11.2",
@@ -46,6 +49,7 @@
     "@types/node": "24.10.1",
     "@types/nodemailer": "7.0.4",
     "@types/semver": "7.7.1",
+    "prettier": "3.9.10",
     "typescript": "7.0.2"
   },
   "publishConfig": {

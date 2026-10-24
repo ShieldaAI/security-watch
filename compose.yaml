@@ -2,9 +2,13 @@ services:
   data-init:
     build: .
     image: shielda-security-watch:0.1.0-alpha.0
-    user: "0:0"
+    user: '0:0'
     entrypoint: [chown]
-    command: ["${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}", /data]
+    command:
+      [
+        '${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}',
+        /data,
+      ]
     network_mode: none
     read_only: true
     cap_drop: [ALL]
@@ -15,7 +19,7 @@ services:
   security-watch:
     build: .
     image: shielda-security-watch:0.1.0-alpha.0
-    user: "${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}"
+    user: '${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}'
     depends_on:
       data-init:
         condition: service_completed_successfully
@@ -31,5 +35,11 @@ services:
       - ./systems.yaml:/config/systems.yaml:ro
       - watch-data:/data
     stop_grace_period: 2m
+    healthcheck:
+      test: [CMD, node, /app/dist/cli.js, health, --config, /config/security-watch.yaml]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
 volumes:
   watch-data:

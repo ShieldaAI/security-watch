@@ -13,12 +13,12 @@ An experimental TypeScript bot that compares security advisories and news with y
 - Slack incoming webhooks and SMTP email, with a durable SQLite outbox, explicit uncertain delivery status and manual retry.
 - Finding history, acknowledgement, expiring suppression, source checkpoints, model budgets, backup and monitoring-health findings.
 
-| Inventory item | Alpha coverage |
-| --- | --- |
-| npm package with an exact version | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources |
-| npm package-lock v2/v3 | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts |
+| Inventory item                     | Alpha coverage                                                                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| npm package with an exact version  | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources                |
+| npm package-lock v2/v3             | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts             |
 | Product, OS, database or SaaS name | Whole-name/keyword relevance and AI context; **no general product-version, vendor-backport or SaaS configuration adapter** |
-| Unknown or stale version | Review required; never infer safety from missing evidence |
+| Unknown or stale version           | Review required; never infer safety from missing evidence                                                                  |
 
 `affected` means the declared npm identity/version matches affected advisory evidence. A lockfile does not establish what is deployed, which features are enabled or whether vulnerable code is reachable. `not_affected` requires supported version-range exclusions; an empty advisory search is not that conclusion.
 
@@ -110,25 +110,27 @@ Models cannot run tools, change recipients, edit version ranges or establish tha
 
 ## Operate
 
-All commands accept `--config PATH`; the default is `./security-watch.yaml`.
+Commands that operate on a configured monitor accept `--config PATH`; the default is `./security-watch.yaml`. `init` uses `--directory` instead. Unsupported flag/command combinations are rejected before activity.
 
-| Command | Behavior |
-| --- | --- |
-| `scan` | Run once, save evidence/findings and queue notifications; does not deliver by default |
-| `scan --dry-run` | Use in-memory state, disable model calls and send no notifications; source requests still occur |
-| `scan --notify` | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending |
-| `scan --fixture PATH` | Use local evidence instead of network sources and AI |
-| `scan --no-ai` | Keep structured matching and disable model calls for this invocation |
-| `start` | Run the scheduler and delivery worker in the foreground |
-| `findings`, `status`, `deliveries`, `budget` | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations |
-| `explain FINDING_ID` | Show a finding, its current policy decision and acknowledgement/suppression controls |
-| `history FINDING_ID` | Show saved finding revisions |
-| `acknowledge FINDING_ID` | Acknowledge the current revision; a material change creates a new revision |
-| `suppress FINDING_ID --hours 24 --reason TEXT` | Suppress until an explicit expiry |
-| `retry DELIVERY_ID` | Requeue a failed/uncertain delivery after checking receipt; does not send immediately |
-| `backup --output PATH` | Create a consistent SQLite backup at a new destination |
-| `unlock` | Remove stale lock metadata only when no worker owns the SQLite lock |
-| `test-notification --channel slack` | Send an explicit test message; `email` is also supported |
+| Command                                        | Behavior                                                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `scan`                                         | Run once, save evidence/findings and queue notifications; does not deliver by default                        |
+| `scan --dry-run`                               | Use in-memory state, disable model calls and send no notifications; source requests still occur              |
+| `scan --notify`                                | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending |
+| `scan --fixture PATH`                          | Use local evidence instead of network sources and AI                                                         |
+| `scan --no-ai`                                 | Keep structured matching and disable model calls for this invocation                                         |
+| `start`                                        | Run the scheduler and delivery worker in the foreground                                                      |
+| `findings`, `status`, `deliveries`, `budget`   | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations                       |
+| `health`                                       | Check worker heartbeat, completed-scan freshness and actionable delivery problems; exits 2 when unhealthy    |
+| `health --scan-only`                           | Check completed scans and delivery without requiring a foreground worker, for external cron schedules        |
+| `explain FINDING_ID`                           | Show a finding, its current policy decision and acknowledgement/suppression controls                         |
+| `history FINDING_ID`                           | Show saved finding revisions                                                                                 |
+| `acknowledge FINDING_ID`                       | Acknowledge the current revision; a material change creates a new revision                                   |
+| `suppress FINDING_ID --hours 24 --reason TEXT` | Suppress until an explicit expiry                                                                            |
+| `retry DELIVERY_ID`                            | Requeue a failed/uncertain delivery after checking receipt; does not send immediately                        |
+| `backup --output PATH`                         | Create a consistent SQLite backup at a new destination                                                       |
+| `unlock`                                       | Remove stale lock metadata only when no worker owns the SQLite lock                                          |
+| `test-notification --channel slack`            | Send an explicit test message; `email` is also supported                                                     |
 
 Only one scan/scheduler instance may write a given database. Inspection and acknowledgement use SQLite safely alongside the worker. Do not share a database between containers or hosts or put it on a network filesystem. Stop the worker before replacing a database with a backup; retain permissions and move aside stale SQLite sidecar files with the old database.
 
@@ -136,7 +138,9 @@ Digests use fixed UTC epoch-aligned time buckets, defaulting to midnight UTC, wi
 
 A notification marked `accepted` was accepted by the destination, not necessarily read. Interrupted or ambiguous delivery becomes `unknown`: inspect the destination before `retry`, because it may already have arrived. Automatic retry is reserved for explicit retryable rejection. Delivery state remains available even when the notification channel itself fails.
 
-`scan` exits with status 2 for degraded monitoring; setup/command failures use status 1. Check `status`, service logs and delivery state rather than treating an empty findings list as an all-clear.
+`scan` exits with status 2 for degraded monitoring or failed/uncertain delivery, including an early urgent delivery attempt; setup/command failures use status 1. `health` is read-only, makes no network requests, and reports monitoring health rather than whether systems are secure. The Compose service includes this health check. Check `status`, service logs and delivery state rather than treating an empty findings list as an all-clear.
+
+SIGTERM/SIGINT cancels source/model requests and stops further analysis. Delivery already in progress is allowed to finish within its transport timeout; interrupted or ambiguous receipt remains explicit. Before urgent sends, inventory exclusions, withdrawals and removals are reconciled. Every delivery rechecks current routing policy.
 
 ## Boundaries and privacy
 

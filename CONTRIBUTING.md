@@ -9,7 +9,7 @@ npm ci
 npm run check
 ```
 
-`npm run build` compiles the source, `npm test` builds and runs the Node test suite, and `npm run check` also verifies the packed package. Tests should use synthetic data and injected HTTP/email clients; they must not require production model credentials, bill a provider or send Slack/email messages.
+`npm run build` cleans generated `dist` output and compiles with strict unused-code checks. `npm test` builds and runs the Node test suite. `npm run check` also checks formatting and verifies the packed package in a clean consumer. Use `npm run format` for consistent formatting; `npm pack` performs a fresh build. Tests should use synthetic data and injected HTTP/email clients; they must not require production model credentials, bill a provider or send Slack/email messages.
 
 For an offline synthetic demonstration:
 
@@ -23,14 +23,14 @@ Do not commit `node_modules`, `dist`, generated tarballs, local configuration, r
 
 ## Implementation responsibilities
 
-| Area | Responsibility |
-| --- | --- |
-| `src/config.ts`, `src/inventory.ts` | Strict validation, predictable paths, bounds and metadata-only inventory import |
-| `src/http.ts`, `src/sources.ts` | Safe network access, complete collection/checkpoints and explicit source uncertainty |
-| `src/assessment.ts` | Identity/version evidence, advisory grouping, per-deployment assessment and deterministic policy |
-| `src/models.ts` | Bounded provider requests, evidence attribution, conservative budgets and visible model failure |
-| `src/store.ts`, `src/delivery.ts` | Transactional history/outbox, deduplication, acknowledgement, suppression and honest delivery status |
-| `src/engine.ts`, `src/cli.ts` | Orchestration, persistent monitoring, useful health status and installation/operator workflows |
+| Area                                | Responsibility                                                                                       |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/config.ts`, `src/inventory.ts` | Strict validation, predictable paths, bounds and metadata-only inventory import                      |
+| `src/http.ts`, `src/sources.ts`     | Safe network access, complete collection/checkpoints and explicit source uncertainty                 |
+| `src/assessment.ts`                 | Identity/version evidence, advisory grouping, per-deployment assessment and deterministic policy     |
+| `src/models.ts`                     | Bounded provider requests, evidence attribution, conservative budgets and visible model failure      |
+| `src/store.ts`, `src/delivery.ts`   | Transactional history/outbox, deduplication, acknowledgement, suppression and honest delivery status |
+| `src/engine.ts`, `src/cli.ts`       | Orchestration, persistent monitoring, useful health status and installation/operator workflows       |
 
 Keep provider and source schemas explicit. Do not accept a new service's response as trustworthy merely because it is syntactically valid. Unsupported affected-range formats must remain unknown. New inventory adapters must describe what their data actually establishes about deployment.
 

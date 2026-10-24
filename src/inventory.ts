@@ -5,27 +5,41 @@ import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
 
 const shortText = z.string().trim().min(1).max(500);
-const npmName = z.string().max(214).regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/, 'Expected a canonical npm package name');
+const npmName = z
+  .string()
+  .max(214)
+  .regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/, 'Expected a canonical npm package name');
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
 const componentSchema = z.strictObject({
-  id: shortText, ecosystem: z.literal('npm'), name: npmName, version: shortText.optional(),
+  id: shortText,
+  ecosystem: z.literal('npm'),
+  name: npmName,
+  version: shortText.optional(),
 });
 const productSchema = z.strictObject({
-  name: shortText, version: shortText.optional(), keywords: z.array(shortText).max(100).default([]),
+  name: shortText,
+  version: shortText.optional(),
+  keywords: z.array(shortText).max(100).default([]),
 });
 const systemSchema = z.strictObject({
-  id: shortText, name: shortText, environment: shortText.default('unknown'), owner: shortText.optional(),
-  exposure: z.enum(['internet', 'internal', 'unknown']).default('unknown'), criticality: severity.default('unknown'),
+  id: shortText,
+  name: shortText,
+  environment: shortText.default('unknown'),
+  owner: shortText.optional(),
+  exposure: z.enum(['internet', 'internal', 'unknown']).default('unknown'),
+  criticality: severity.default('unknown'),
   updated_at: z.iso.datetime({ offset: true }),
   components: z.array(componentSchema).max(20_000).default([]),
-  products: z.array(productSchema).max(1000).default([]), keywords: z.array(shortText).max(100).default([]),
+  products: z.array(productSchema).max(1000).default([]),
+  keywords: z.array(shortText).max(100).default([]),
   lockfile: z.string().trim().min(1).max(4096).optional(),
 });
 const inventorySchema = z.strictObject({ systems: z.array(systemSchema).min(1).max(1000) });
 
 function readBounded(path: string, maximum: number): string {
   const stat = statSync(path);
-  if (!stat.isFile() || stat.size > maximum) throw new Error(`Inventory input must be a regular file no larger than ${maximum} bytes: ${path}`);
+  if (!stat.isFile() || stat.size > maximum)
+    throw new Error(`Inventory input must be a regular file no larger than ${maximum} bytes: ${path}`);
   const content = readFileSync(path);
   if (content.byteLength > maximum) throw new Error(`Inventory input exceeds ${maximum} bytes: ${path}`);
   return content.toString('utf8');
@@ -50,7 +64,12 @@ function importLockfile(path: string): Component[] {
     if (!match) continue;
     const name = npmName.parse(value.name ?? match[1]);
     const version = value.version === undefined ? undefined : shortText.parse(value.version);
-    components.push({ id: `lock:${location}`, ecosystem: 'npm', name, ...(version === undefined ? {} : { version }) });
+    components.push({
+      id: `lock:${location}`,
+      ecosystem: 'npm',
+      name,
+      ...(version === undefined ? {} : { version }),
+    });
   }
   return components;
 }
@@ -69,7 +88,8 @@ export function loadInventory(path: string): Inventory {
     if (system.components.length > 20_000) throw new Error(`System ${system.id} exceeds 20000 components`);
     const componentIds = new Set<string>();
     for (const component of system.components) {
-      if (componentIds.has(component.id)) throw new Error(`Duplicate component ID in ${system.id}: ${component.id}`);
+      if (componentIds.has(component.id))
+        throw new Error(`Duplicate component ID in ${system.id}: ${component.id}`);
       componentIds.add(component.id);
     }
     const productNames = new Set<string>();
