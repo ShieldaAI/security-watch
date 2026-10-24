@@ -206,11 +206,15 @@ async function main(): Promise<void> {
       missing_environment_variables: missing,
       database: config.database,
       models_enabled: config.models.enabled,
-      feeds: config.sources.feeds.length,
+      sources: config.sources,
+      feeds: config.sources.feeds.length + Number(config.sources.hacker_news),
       notices: [
         'Model compatibility is verified only by a real analysis request; doctor does not spend tokens or send notifications.',
         'Public advisory queries disclose package names/versions. Models receive relevant inventory context.',
-        'Generic products are news candidates, not verified vulnerability coverage.',
+        'System news impact is an AI assessment with citations; structured CVE version matching remains separate.',
+        ...((config.sources.hacker_news || config.sources.feeds.length) && !config.models.enabled
+          ? ['Enable an analysis model to classify system news and assess deployment impact.']
+          : []),
       ],
     });
     if (missing.length) process.exitCode = 2;

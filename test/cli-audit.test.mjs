@@ -15,7 +15,7 @@ function setup(t) {
     version: 1,
     inventory: './systems.json',
     database: './state/watch.db',
-    sources: { osv: false, github: false, kev: false },
+    sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false },
     policy: { library: { levels: ['critical'], channels: ['slack'] } },
     notifications: { slack: { webhook_url_env: 'AUDIT_SLACK_TOKEN' } },
   };

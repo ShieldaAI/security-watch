@@ -23,6 +23,34 @@ function model(extra = {}) {
   return { provider: 'openai', model: 'fixture-model', api_key_env: 'WATCH_CONFIG_MODEL_KEY', ...extra };
 }
 
+test('source defaults use cve.now and The Hacker News with legacy sources as explicit opt-ins', () => {
+  for (const input of [{ version: 1 }, { version: 1, sources: {} }]) {
+    assert.deepEqual(parseConfig(input).sources, {
+      cve_now: true,
+      hacker_news: true,
+      osv: false,
+      github: false,
+      github_token_env: 'GITHUB_TOKEN',
+      kev: false,
+      feeds: [],
+    });
+  }
+  const migrated = parseConfig({ version: 1, sources: { osv: true, github: true, kev: true } });
+  assert.equal(migrated.sources.osv, true);
+  assert.equal(migrated.sources.github, true);
+  assert.equal(migrated.sources.kev, true);
+  assert.equal(migrated.sources.cve_now, true);
+  assert.equal(migrated.sources.hacker_news, true);
+  const offline = parseConfig({
+    version: 1,
+    sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false },
+  });
+  assert.equal(offline.sources.cve_now, false);
+  assert.equal(offline.sources.hacker_news, false);
+  assert.throws(() => parseConfig({ version: 1, sources: { cve_now: 'true' } }));
+  assert.throws(() => parseConfig({ version: 1, sources: { hacker_news: 'false' } }));
+});
+
 test('environment substitution changes parsed scalar strings without injecting YAML structure', (t) => {
   const dir = directory(t);
   const path = join(dir, 'watch.yaml');

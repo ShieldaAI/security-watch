@@ -24,7 +24,7 @@ const inventory = {
 };
 const config = parseConfig({
   version: 1,
-  sources: { osv: false, github: false, kev: false },
+  sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false },
   policy: { library: { levels: ['critical'], channels: ['slack'] } },
   notifications: { slack: { webhook_url_env: WEBHOOK_ENV } },
 });

@@ -78,6 +78,8 @@ function fingerprint(a: Assessment, decision: Decision): string {
     component: a.component_id,
     category: a.category,
     applicability: a.applicability,
+    news_classification: a.news_analysis?.classification ?? null,
+    news_impact: a.news_analysis?.impact ?? null,
     severity: a.source_severity,
     priority: a.priority,
     exploited: a.exploited,

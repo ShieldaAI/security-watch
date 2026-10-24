@@ -33,7 +33,7 @@ test('CLI dry-run performs source matching but never invokes a configured paid m
       version: 1,
       inventory: './systems.json',
       database: './data/watch.db',
-      sources: { osv: true, github: false, kev: false, feeds: [] },
+      sources: { cve_now: false, hacker_news: false, osv: true, github: false, kev: false, feeds: [] },
       models: {
         enabled: true,
         analysis: { provider: 'openai', model: 'fixture-model', api_key_env: 'WATCH_CLI_DRY_MODEL_KEY' },

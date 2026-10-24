@@ -4,6 +4,7 @@ import { assess, decide } from '../dist/assessment.js';
 
 const now = Date.parse('2026-10-24T12:00:00Z');
 const config = {
+  models: { enabled: false },
   inventory_stale_days: 7,
   policy: {
     library: { levels: ['critical'], basis: 'priority', channels: ['slack', 'email'] },
@@ -229,7 +230,7 @@ test('product version and apparent distro backport do not become unsupported saf
   assert.equal(decide({ ...finding, relevance: 'irrelevant' }, config).action, 'notify');
 });
 
-test('standalone news requires whole-name context; AI irrelevance can suppress news but not product advisories', () => {
+test('standalone news requires whole-name context and unclassified news enters review', () => {
   const inventory = { systems: [system('production', '1.0.0', { components: [], keywords: ['express'] })] };
   const story = advisory({
     id: 'feed:story',
@@ -243,8 +244,8 @@ test('standalone news requires whole-name context; AI irrelevance can suppress n
   assert.deepEqual(assess(inventory, [story], config, now), []);
   const finding = assess(inventory, [{ ...story, title: 'Express security release' }], config, now)[0];
   assert.equal(finding.category, 'news');
-  assert.equal(decide(finding, config).action, 'notify');
-  assert.equal(decide({ ...finding, relevance: 'irrelevant' }, config).action, 'record');
+  assert.equal(decide(finding, config).action, 'digest');
+  assert.equal(decide({ ...finding, relevance: 'irrelevant' }, config).action, 'digest');
 });
 
 test('uncertain lower-severity findings enter a review digest, while unscored malware uses its explicit override', () => {
@@ -358,6 +359,6 @@ test('AI news irrelevance cannot suppress source-critical findings or enabled ex
   assert.equal(decide(exploited, config).action, 'notify');
   assert.equal(
     decide(exploited, { ...config, policy: { ...config.policy, exploited_override: false } }).action,
-    'record',
+    'digest',
   );
 });

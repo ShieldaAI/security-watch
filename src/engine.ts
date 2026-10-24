@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
-import { ModelAnalyzer } from './models.js';
+import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
 import { safeHttp } from './http.js';
 import { missingCredentials } from './config.js';
@@ -31,6 +31,7 @@ const evidenceSchema = z
     modified_at: z.iso.datetime(),
     fetched_at: z.iso.datetime(),
     published_at: z.iso.datetime().optional(),
+    content_status: z.enum(['full', 'excerpt', 'unavailable']).optional(),
     packages: z.array(
       z
         .object({
@@ -89,6 +90,14 @@ function canRetainPriority(previous: Assessment | undefined, current: Assessment
     severityRank[previous.priority] > severityRank[current.priority],
   );
 }
+function generalNews(assessment: Assessment | undefined): boolean {
+  return Boolean(
+    assessment?.active !== false &&
+    assessment?.ai?.status === 'complete' &&
+    assessment.news_analysis?.classification === 'general_news' &&
+    assessment.news_analysis.impact === 'not_applicable',
+  );
+}
 
 export async function runScan(options: {
   config: Config;
@@ -145,11 +154,25 @@ export async function runScan(options: {
     return hash({
       assessment,
       system: systemHashes.get(finding.system_id),
+      analysis: {
+        model: config.models.analysis,
+        verification: config.models.verification,
+        prompt: PROMPT_VERSION,
+        max_input_chars: config.models.max_input_chars,
+      },
       evidence: finding.evidence_ids.map((id) => {
         const item = evidenceById.get(id);
         if (!item) return null;
         const { fetched_at: _fetched, ...content } = item;
-        return content;
+        const fetched = Date.parse(item.fetched_at);
+        return {
+          ...content,
+          fresh:
+            generalNews(previousById.get(finding.id)) ||
+            (Number.isFinite(fetched) &&
+              fetched <= now + 300_000 &&
+              now - fetched <= Math.max(120_000, config.poll_interval_minutes * 120_000)),
+        };
       }),
     });
   };
@@ -163,6 +186,9 @@ export async function runScan(options: {
         priority: previous.priority,
         applicability: previous.applicability,
         ...(previous.relevance ? { relevance: previous.relevance } : {}),
+        ...(previous.news_analysis ? { news_analysis: previous.news_analysis } : {}),
+        summary: previous.summary,
+        reasons: previous.reasons,
         ai: previous.ai,
       };
     }
@@ -203,6 +229,8 @@ export async function runScan(options: {
       message: 'Inventory is empty; add systems before enabling monitoring.',
     });
   if (
+    !config.sources.cve_now &&
+    !config.sources.hacker_news &&
     !config.sources.osv &&
     !config.sources.github &&
     !config.sources.kev &&
@@ -210,11 +238,15 @@ export async function runScan(options: {
     !options.fixture
   )
     errors.push({ source: 'sources', message: 'All sources are disabled.' });
-  if (config.sources.feeds.length && !config.models.enabled)
+  if (
+    !options.fixture &&
+    (config.sources.hacker_news || config.sources.feeds.length) &&
+    !config.models.enabled
+  )
     errors.push({
       source: 'models',
       message:
-        'AI is disabled. News receives keyword candidate matching only; contextual news severity is incomplete.',
+        'AI is disabled. System news receives candidate matching only; enable an analysis model to distinguish vulnerability impact from general system coverage.',
     });
   for (const system of inventory.systems) {
     const updated = Date.parse(system.updated_at);
@@ -249,7 +281,19 @@ export async function runScan(options: {
   for (const finding of findings.sort((a, b) => severityRank[b.priority] - severityRank[a.priority])) {
     checkCancellation(signal);
     const system = inventory.systems.find((s) => s.id === finding.system_id);
-    let enriched = system && !options.fixture ? await analyzer.analyze(finding, system, evidence) : finding;
+    // An unchanged conference/announcement does not become a vulnerability just
+    // because it leaves the rolling RSS window. Inventory/content changes still
+    // invalidate its basis; affected/excluded impact claims always check freshness.
+    const keepGeneral =
+      config.models.enabled &&
+      generalNews(previousById.get(finding.id)) &&
+      store.getMeta(`assessment-basis:${finding.id}`) === bases.get(finding.id);
+    let enriched =
+      keepGeneral && !options.fixture
+        ? interim(finding, bases.get(finding.id)!)
+        : system && !options.fixture
+          ? await analyzer.analyze(finding, system, evidence)
+          : finding;
     checkCancellation(signal);
     const previous = previousById.get(finding.id);
     if (

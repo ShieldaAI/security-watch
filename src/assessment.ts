@@ -167,6 +167,10 @@ function base(
     system_id: system.id,
     ...(component ? { component_id: component } : {}),
     category,
+    news_only: group.evidence.every((item) => item.kind === 'news'),
+    news_candidate:
+      group.evidence.every((item) => item.kind === 'news') ||
+      (category === 'product' && group.evidence.some((item) => item.kind === 'news')),
     applicability: 'unknown',
     source_severity: sourceSeverity,
     priority: contextualPriority(sourceSeverity, system, exploited),
@@ -284,7 +288,7 @@ export function assess(
       }
 
       // News linked to an advisory enriches the component finding and cannot evade its category policy.
-      if (componentMatched) continue;
+      if (componentMatched && !isNews) continue;
       let productMatched = false;
       for (const product of system.products) {
         if (![product.name, ...product.keywords].some((keyword) => mentions(text, keyword))) continue;
@@ -310,7 +314,7 @@ export function assess(
         result.summary = `${product.name}${product.version ? ` ${product.version}` : ''} in ${system.name}: ${result.applicability}.`;
         output.push(result);
       }
-      if (productMatched || !isNews) continue;
+      if (componentMatched || productMatched || !isNews) continue;
       const keywords = [...system.keywords, ...system.components.map((component) => component.name)];
       if (!keywords.some((keyword) => mentions(text, keyword))) continue;
       const result = base(group, system, now, 'news');
@@ -363,6 +367,57 @@ export function decide(assessment: Assessment, config: Config): Decision {
     };
   if (assessment.exploited && policy.exploited_override)
     return { action: 'notify', channels, reason: 'Known-exploitation override; investigate immediately.' };
+  if ((assessment.news_candidate || assessment.news_only) && assessment.source_severity !== 'critical') {
+    const news = assessment.news_analysis;
+    if (assessment.ai?.status === 'complete' && news) {
+      if (news.classification === 'general_news' && news.impact === 'not_applicable')
+        return {
+          action: 'record',
+          channels: [],
+          reason:
+            'AI reviewed this as general system news, with no newly reported vulnerability or actionable vulnerability update.',
+        };
+      if (news.impact === 'not_affected')
+        return {
+          action: 'record',
+          channels: [],
+          reason:
+            'AI found that the reported news does not affect this deployment; this is a news assessment, not a verified safety conclusion.',
+        };
+      if (
+        news.impact === 'affected' &&
+        ['new_vulnerability', 'known_vulnerability_update'].includes(news.classification)
+      )
+        return rule.levels.includes(severity)
+          ? {
+              action: 'notify',
+              channels,
+              reason: `AI reports an impacted system in ${news.classification}; matched ${assessment.category} rule at ${severity}. Verify the cited versions and prerequisites.`,
+            }
+          : {
+              action: 'record',
+              channels: [],
+              reason: `${severity} does not match the configured ${assessment.category} severity levels.`,
+            };
+    }
+    if (config.models.enabled && !assessment.ai)
+      return {
+        action: 'record',
+        channels: [],
+        reason: 'News candidate awaiting AI classification before delivery.',
+      };
+    if (policy.urgent_unknown && highest(assessment.source_severity, assessment.priority) === 'critical')
+      return {
+        action: 'notify',
+        channels,
+        reason: 'Potentially critical news impact remains uncertain; investigation required.',
+      };
+    return {
+      action: 'digest',
+      channels,
+      reason: 'News impact is unclassified, incomplete or uncertain; included in the review digest.',
+    };
+  }
   if (
     assessment.category === 'news' &&
     assessment.relevance === 'irrelevant' &&

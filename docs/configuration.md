@@ -15,10 +15,12 @@ inventory_stale_days: 7
 digest_interval_hours: 24
 
 sources:
-  osv: true
-  github: true
+  cve_now: true
+  hacker_news: true
+  osv: false
+  github: false
   github_token_env: GITHUB_TOKEN
-  kev: true
+  kev: false
   feeds: []
 
 models:
@@ -110,23 +112,33 @@ Use longer explicit keywords for short product names: matching ignores terms sho
 
 ## Sources and coverage
 
-| Setting                    | Default and behavior                                                                                              |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `sources.osv`              | `true`; query exact npm name/version pairs, fetch full advisory records and revisit previously tracked advisories |
-| `sources.github`           | `true`; collect both reviewed and malware npm advisories, tracking modifications and withdrawals                  |
-| `sources.github_token_env` | `GITHUB_TOKEN`; optional authentication for the GitHub API                                                        |
-| `sources.kev`              | `true`; enrich matching CVEs with CISA known-exploitation evidence; KEV alone does not invent a product finding   |
-| `sources.feeds`            | `[]`; up to 30 selected public HTTPS RSS 2.0/Atom URLs, without URL credentials                                   |
+| Setting                    | Default and behavior                                                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sources.cve_now`          | `true`; collect recent CVE entries, revisit inventory-relevant tracked/news-cited IDs and query exact npm package/version pairs through cve.now's stack endpoint |
+| `sources.hacker_news`      | `true`; collect The Hacker News security feed and bounded article text for system news analysis                                                                  |
+| `sources.osv`              | `false`; optional exact npm name/version queries, full advisory records and tracked-advisory refreshes                                                           |
+| `sources.github`           | `false`; optional reviewed and malware npm advisories, tracking modifications and withdrawals                                                                    |
+| `sources.github_token_env` | `GITHUB_TOKEN`; optional authentication for the GitHub API                                                                                                       |
+| `sources.kev`              | `false`; optional matching-CVE enrichment with CISA known-exploitation evidence; KEV alone does not invent a product finding                                     |
+| `sources.feeds`            | `[]`; up to 30 selected public HTTPS RSS 2.0/Atom URLs, without URL credentials                                                                                  |
 
-Feeds supply titles and summaries/content present in the feed. The bot does not crawl linked articles, search the web, execute page scripts or obtain paywalled content. Choose feed URLs deliberately. Public destinations, DNS results, redirects, response sizes and request durations are checked; a failing source retains its previous checkpoint and cached evidence and produces degraded status.
+`hacker_news` means **The Hacker News** at `thehackernews.com`, the cybersecurity publication, not Y Combinator's Hacker News. Its feed is [The Hacker News RSS](https://feeds.feedburner.com/TheHackersNews). The bot fetches bounded article text only from allowed The Hacker News hosts, without executing scripts: at most 50 articles per scan, four concurrently, with a 2 MB HTML response cap and 16,000 characters of extracted text per article. Evidence records whether full article content, a feed excerpt or unavailable content was used. A failed or capped article fetch retains the feed excerpt and cannot support a new confident AI-only dismissal. Incomplete articles relevant to the inventory create a `hacker_news:articles` monitoring-health finding; the successful RSS collection and its checkpoint are still retained.
 
-GitHub's first collection looks back seven days of modifications; later scans use checkpoint overlap. OSV exact-version queries supply existing advisory matches for the declared npm inventory. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
+Additional `feeds` supply titles and summaries/content present in their RSS/Atom response; their article links are not fetched. The bot does not search the web or obtain paywalled content. Choose feed URLs deliberately. Public destinations, DNS results, redirects, response sizes and request durations are checked; a failing source retains its previous checkpoint and cached evidence and produces degraded status.
 
-References: [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
+cve.now's first recent-entry collection looks back seven days; later scans use one hour of checkpoint overlap. Collection is bounded to 200 listing pages and 5,000 advisory records per scan. Historical refreshes are limited to cached records relevant to the current inventory and CVE/GHSA IDs in relevant cached/current news, so unrelated global history does not expand the refresh set forever.
+
+The stack endpoint is queried separately for each deduplicated exact npm package/version pair, at most 1,000 pairs per scan and four requests concurrently. Separate requests preserve matches that cve.now would deduplicate in a multi-package request. Only those pairs are sent, not a lockfile or system/deployment metadata. Limits fail visibly as incomplete collection, retaining the previous checkpoint. Recent-entry pagination cannot guarantee discovery of every update to an older, previously unseen CVE. Structured affected ranges and original advisory descriptions are used as evidence; generated summaries do not establish affectedness. Unsupported statuses, including supersession without verified withdrawal semantics, fail visibly instead of being treated as a resolved vulnerability. This is not exhaustive historical product coverage.
+
+Optional GitHub collection first looks back seven days of modifications; later scans use checkpoint overlap. Optional OSV exact-version queries supply existing advisory matches for the declared npm inventory. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
+
+For an existing installation, configuration fields set to `true` stay enabled. To switch to cve.now and The Hacker News only, add the two new fields as shown above, explicitly set `osv`, `github` and `kev` to `false`, clear any unneeded additional feeds, and restart the worker. Omitting the old fields now defaults them to `false`; omitting the new fields defaults them to `true`. To run without any network sources, explicitly disable all five source switches and keep `feeds: []`. Existing cached evidence and history are retained.
+
+References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The Hacker News](https://thehackernews.com/), [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
 
 ## Model configuration
 
-No model is enabled by default. Set an exact model ID supported by the selected provider; no model names, prices or capabilities are guessed. The model must return the expected structured JSON within the configured limit.
+No model is enabled by default. **Enable a model for system news/impact discrimination**: provide the analysis model ID you want to use and its credentials. Without it, name/keyword matches remain uncertain candidates for review. Set an exact model ID supported by the selected provider; no model names, prices or capabilities are guessed. The model must return the expected structured JSON within the configured limit.
 
 ```yaml
 models:
@@ -146,7 +158,18 @@ models:
   timeout_seconds: 45
 ```
 
-The `verification` entry is optional. It runs for source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently. Disagreement is preserved as uncertainty; two agreeing models are not proof of safety. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
+The `verification` entry is optional. It runs for every news analysis, source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently. Disagreement is preserved as uncertainty; two agreeing models are not proof of safety. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
+
+For matched system news, analysis records two distinct conclusions:
+
+- News classification: `new_vulnerability`, `known_vulnerability_update`, `general_news` or `unknown`. A report about an existing CVE, exploitation or a patch is distinct from a newly reported vulnerability; a product announcement or a passing mention is general news.
+- Claimed impact on the declared system: `affected`, `not_affected`, `unknown` or `not_applicable`, with cited evidence and an explanation. This is the model's contextual conclusion, separate from authoritative version-range `applicability`; it does not certify the system safe or establish general product-version support.
+
+The model also records affected product names, affected versions and prerequisites from its supporting article quotes. A decisive `affected` or `not_affected` claim requires a known installed target version and source product/version evidence; missing deployment details stay uncertain.
+
+For noncritical system news, a validated complete analysis of general news/no applicable vulnerability or no claimed system impact records the article without a vulnerability notification. Generic product findings retain this news analysis even when a cited CVE has been collected; deterministic npm applicability remains separate. A new vulnerability or known-vulnerability update with claimed impact follows the configured news/product severity policy. Unknown, conflicting, disabled or unavailable analysis goes to review. Incomplete article/context evidence and stale inventory cannot support a new confident AI-only dismissal. Initial news candidates are held for analysis before notification routing; source-critical and enabled exploitation safeguards still apply.
+
+A completed `general_news`/`not_applicable` classification can remain a historical record after its article leaves the current RSS window, provided the article and inventory content and analysis/verification model, prompt and input settings have not changed. It is not reclassified as an uncertain vulnerability merely because time passed. This exception applies only to a completed general-news classification; current `affected`/`not_affected` impact claims remain subject to evidence freshness checks. Changed source/inventory/model context triggers reassessment.
 
 | `ModelSpec` field                                 | Meaning                                                                                                            |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -174,7 +197,7 @@ Each `library`, `product` and `news` rule has `levels`, `basis` and `channels`. 
 - `urgent_unknown: true` sends potentially critical unknown/conflicting findings immediately, even before affectedness can be established. Other uncertain findings go to a review digest, including uncertainty below the category's immediate levels.
 - `exploited_override: true` and `malware_override: true` notify immediately even without a matching severity level. They do not override an empty channel list or a supported `not_affected` decision.
 - Confirmed exclusions and all-source withdrawals are retained without new vulnerability notifications. Withdrawal alone does not prove a system safe. Withdrawal disagreement remains conflicting.
-- AI may reject noncritical standalone news relevance; it cannot suppress source-critical news, an enabled exploitation override or deterministic library/product urgency by declaring it irrelevant. Advisory-linked package news uses library policy. Multi-advisory articles retain unmatched CVE/GHSA subjects separately until authoritative alias evidence joins them.
+- AI distinguishes noncritical system news from vulnerability reports and evaluates claimed system impact before routing; general news and supported AI-only exclusions are recorded without vulnerability alerts. Generic product reports with linked CVEs use this analysis too. Uncertain analysis goes to review. AI cannot suppress source-critical news, an enabled exploitation override or deterministic package urgency by declaring it irrelevant. Advisory-linked package news uses library policy. Multi-advisory articles retain unmatched CVE/GHSA subjects separately until authoritative alias evidence joins them.
 - `health_channels` routes monitoring failures independently from vulnerability thresholds. If every destination fails, inspect local status/logs; the bot cannot notify through an unavailable channel.
 
 `poll_interval_minutes` is an integer from 1 to 1,440, default 15. `inventory_stale_days` is 1–365, default 7; timestamps more than five minutes in the future are also invalid for assessment. `digest_interval_hours` is an integer from 1 to 168, default 24. Digest boundaries are aligned to the Unix epoch in UTC, not a user's timezone. Each Slack/email digest contains at most five findings; additional groups are sent separately.

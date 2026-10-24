@@ -43,6 +43,8 @@ export interface Evidence {
   title: string;
   url: string;
   description: string;
+  /** News adapters disclose whether the article text, only an excerpt, or no article was retrieved. */
+  content_status?: 'full' | 'excerpt' | 'unavailable';
   aliases: string[];
   severity: Severity;
   modified_at: string;
@@ -69,7 +71,15 @@ export interface Config {
   poll_interval_minutes: number;
   inventory_stale_days: number;
   digest_interval_hours: number;
-  sources: { osv: boolean; github: boolean; github_token_env: string; kev: boolean; feeds: string[] };
+  sources: {
+    cve_now: boolean;
+    hacker_news: boolean;
+    osv: boolean;
+    github: boolean;
+    github_token_env: string;
+    kev: boolean;
+    feeds: string[];
+  };
   models: {
     enabled: boolean;
     analysis?: ModelSpec;
@@ -102,6 +112,10 @@ export interface Rule {
   channels: Channel[];
 }
 export interface Assessment {
+  /** Only news evidence supports this candidate; AI impact remains a separate claim. */
+  news_only?: boolean;
+  /** News-only or generic product context without deterministic package applicability. */
+  news_candidate?: boolean;
   active?: boolean;
   id: string;
   event_id: string;
@@ -121,6 +135,8 @@ export interface Assessment {
   updated_at: string;
   withdrawn?: boolean;
   relevance?: 'relevant' | 'irrelevant' | 'unknown';
+  /** Evidence-grounded model opinion, distinct from authoritative applicability. */
+  news_analysis?: NewsAnalysis;
   ai?: {
     model: string;
     provider: string;
@@ -151,6 +167,8 @@ export interface HttpOptions {
   timeoutMs?: number;
   allowPrivate?: boolean;
   redirects?: number;
+  /** When present, every redirect must remain within one of these exact origins. */
+  allowedRedirectOrigins?: string[];
   signal?: AbortSignal;
 }
 export interface HttpResult {
@@ -169,5 +187,17 @@ export interface AiAnalysis {
   priority: Severity;
   summary: string;
   evidence_ids: string[];
+  quotes: { evidence_id: string; quote: string }[];
+  news_analysis?: NewsAnalysis | null;
+}
+export interface NewsAnalysis {
+  classification: 'new_vulnerability' | 'known_vulnerability_update' | 'general_news' | 'unknown';
+  impact: 'affected' | 'not_affected' | 'unknown' | 'not_applicable';
+  affected_products: string[];
+  /** Source wording describing affected or fixed versions, not invented normalized ranges. */
+  affected_versions: string[];
+  /** Source wording describing the conditions necessary for exploitation. */
+  prerequisites: string[];
+  rationale: string;
   quotes: { evidence_id: string; quote: string }[];
 }

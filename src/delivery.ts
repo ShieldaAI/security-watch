@@ -79,6 +79,15 @@ export function notificationText(job: Notification): { subject: string; text: st
     `Delivery: ${job.id}`,
     `System: ${safeText(a.system_id, 200)}${a.component_id ? ` / ${safeText(a.component_id, 200)}` : ''}`,
     `Applicability: ${a.applicability}; source severity: ${a.source_severity}; priority: ${a.priority}`,
+    ...(a.news_analysis
+      ? [
+          `AI news classification: ${a.news_analysis.classification}; reported system impact: ${a.news_analysis.impact}`,
+          `Affected products: ${safeText(a.news_analysis.affected_products.join('; ') || 'Not established', 180)}`,
+          `Reported versions: ${safeText(a.news_analysis.affected_versions.join('; ') || 'Not established', 180)}`,
+          `Prerequisites: ${safeText(a.news_analysis.prerequisites.join('; ') || 'Not established', 240)}`,
+          `Impact reasoning: ${safeText(a.news_analysis.rationale, 400)}`,
+        ]
+      : []),
     ...(a.exploited ? ['Known exploitation reported.'] : []),
     safeText(a.summary, 750),
     ...a.reasons.slice(0, 4).map((r) => `• ${safeText(r, 180)}`),
@@ -105,6 +114,9 @@ function digestText(jobs: Notification[]): { subject: string; text: string } {
       `Finding: ${a.id}\nDelivery: ${job.id}\n` +
       `System: ${safeText(a.system_id, 60)}${a.component_id ? ` / ${safeText(a.component_id, 60)}` : ''}\n` +
       `Applicability: ${a.applicability}; source: ${a.source_severity}\n` +
+      (a.news_analysis
+        ? `AI news: ${a.news_analysis.classification}; impact: ${a.news_analysis.impact}\n`
+        : '') +
       `${safeText(sourceUrl ?? 'No source URL supplied', 160)}`
     );
   });

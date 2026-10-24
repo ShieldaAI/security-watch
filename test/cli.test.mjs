@@ -36,7 +36,7 @@ function fixture(t, overrides = {}) {
     version: 1,
     inventory: './systems.json',
     database: './state/watch.db',
-    sources: { osv: false, github: false, kev: false, feeds: [] },
+    sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false, feeds: [] },
     models: { enabled: false },
     policy: { library: { levels: ['critical'], channels: ['slack'] }, health_channels: [] },
     notifications: { slack: { webhook_url_env: 'WATCH_CLI_SLACK_TOKEN' } },

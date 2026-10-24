@@ -132,6 +132,8 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
       throw new NetworkError('INVALID_REDIRECT');
     }
     const next = validateDestination(destination, options.allowPrivate);
+    if (options.allowedRedirectOrigins && !options.allowedRedirectOrigins.includes(next.origin))
+      throw new NetworkError('REDIRECT_DENIED');
     const nextOptions: HttpOptions = { ...options, redirects: redirects - 1 };
     // Never send authentication headers to a different origin.
     if (next.origin !== url.origin) nextOptions.headers = { accept: options.headers?.accept ?? '*/*' };

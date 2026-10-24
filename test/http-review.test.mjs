@@ -392,11 +392,26 @@ test('news analysis includes the installed component that matched article text a
   let sent;
   const result = await new ModelAnalyzer(configuration(), state(), async (_url, options) => {
     sent = JSON.parse(JSON.parse(options.body).messages[1].content);
-    return modelResponse();
+    return modelResponse(
+      analysis({
+        news_analysis: {
+          classification: 'new_vulnerability',
+          impact: 'affected',
+          affected_products: ['alpha'],
+          affected_versions: ['version 1.0.0'],
+          prerequisites: [],
+          rationale:
+            'The reported affected version matches the supplied installed version, subject to inventory freshness.',
+          quotes: analysis().quotes,
+        },
+      }),
+    );
   }).analyze(newsAssessment, largeSystem, [newsEvidence]);
   assert.equal(result.ai.status, 'complete', result.reasons.join('; '));
   assert.deepEqual(sent.system.components, system.components);
-  assert.equal(result.relevance, 'relevant');
+  assert.equal(result.relevance, 'unknown');
+  assert.equal(result.news_analysis.classification, 'unknown');
+  assert.equal(result.news_analysis.impact, 'unknown');
   assert.equal(result.applicability, 'unknown');
 });
 

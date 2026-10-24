@@ -10,6 +10,8 @@ const OLD = '2026-10-24T10:00:00.000Z';
 function config(sources = {}) {
   return {
     sources: {
+      cve_now: false,
+      hacker_news: false,
       osv: false,
       github: false,
       github_token_env: 'SECURITY_WATCH_TEST_UNUSED_TOKEN',

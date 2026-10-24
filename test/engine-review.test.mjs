@@ -7,7 +7,7 @@ import { Store } from '../dist/store.js';
 const now = Date.parse('2026-10-24T12:00:00Z');
 const config = parseConfig({
   version: 1,
-  sources: { osv: false, github: false, kev: false },
+  sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false },
   policy: { library: { levels: ['critical'], channels: ['slack'] }, health_channels: ['slack'] },
   notifications: { slack: { webhook_url_env: 'UNUSED_TEST_WEBHOOK' } },
 });

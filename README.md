@@ -7,18 +7,18 @@ An experimental TypeScript bot that compares security advisories and news with y
 ## What works
 
 - Manual YAML/JSON inventories and npm package-lock v2/v3 imports, with separate assessments for each deployment/component.
-- OSV exact-version queries, GitHub reviewed and malware advisories, CISA known-exploitation enrichment, and selected public RSS/Atom feeds.
-- Deterministic npm identity/version checks, optional AI context, and separate source severity, applicability and contextual priority.
+- cve.now CVE updates and npm stack checks, plus The Hacker News security articles for system monitoring. OSV, GitHub, CISA KEV and other RSS/Atom feeds remain optional.
+- Deterministic npm identity/version checks and configurable AI analysis that distinguishes new vulnerabilities, updates to known vulnerabilities and general system news. Source severity, applicability and contextual priority stay separate.
 - Configurable library, product and news thresholds; immediate critical uncertainty, exploitation and malware overrides; review digests.
 - Slack incoming webhooks and SMTP email, with a durable SQLite outbox, explicit uncertain delivery status and manual retry.
 - Finding history, acknowledgement, expiring suppression, source checkpoints, model budgets, backup and monitoring-health findings.
 
-| Inventory item                     | Alpha coverage                                                                                                             |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| npm package with an exact version  | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources                |
-| npm package-lock v2/v3             | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts             |
-| Product, OS, database or SaaS name | Whole-name/keyword relevance and AI context; **no general product-version, vendor-backport or SaaS configuration adapter** |
-| Unknown or stale version           | Review required; never infer safety from missing evidence                                                                  |
+| Inventory item                     | Alpha coverage                                                                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| npm package with an exact version  | Match supported affected ranges or verified OSV query results; preserve uncertainty and conflicting sources                                 |
+| npm package-lock v2/v3             | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts                              |
+| Product, OS, database or SaaS name | Whole-name/keyword candidates plus AI news/impact assessment; **no general product-version, vendor-backport or SaaS configuration adapter** |
+| Unknown or stale version           | Review required; never infer safety from missing evidence                                                                                   |
 
 `affected` means the declared npm identity/version matches affected advisory evidence. A lockfile does not establish what is deployed, which features are enabled or whether vulnerable code is reachable. `not_affected` requires supported version-range exclusions; an empty advisory search is not that conclusion.
 
@@ -35,9 +35,9 @@ npm install --global ./shieldaai-security-watch-0.1.0-alpha.0.tgz
 security-watch init --directory ./watch --yes
 ```
 
-`init --yes` creates example inventory and configuration with AI and notification routes disabled. Interactive `init` can select an AI provider/model and enable Slack routes. Neither form sends messages or overwrites existing files.
+`init --yes` creates example inventory and configuration with cve.now and The Hacker News enabled, and AI and notification routes disabled. Interactive `init` can select an AI provider/model and enable Slack routes. Neither form sends messages or overwrites existing files.
 
-Replace the example inventory in `watch/systems.yaml`, then edit `watch/security-watch.yaml`. Configure notification routes and put credentials in the named environment variables. See the [configuration guide](docs/configuration.md).
+Replace the example inventory in `watch/systems.yaml`, then edit `watch/security-watch.yaml`. For system news analysis, enable `models`, set your exact analysis model ID and provide its credential through the named environment variable. Configure notification routes separately. Without AI, matching system names remain candidates requiring review; a mention alone does not prove impact. See the [configuration guide](docs/configuration.md).
 
 ```sh
 security-watch doctor --config ./watch/security-watch.yaml
@@ -98,13 +98,17 @@ Edit the copied inventory, notification routes and credentials, and apply the sa
 
 ## How decisions work
 
-1. Collect bounded source responses, preserve source revisions, and join advisory aliases. News mentioning several existing advisories enriches their separate findings.
+1. Collect bounded cve.now responses and The Hacker News articles, preserve source revisions, and join advisory aliases. News mentioning several existing advisories enriches their separate findings.
 2. Compare each deployment's npm identity and version. Generic product matches remain uncertain. Stale inventory cannot support a safe conclusion.
-3. Optionally ask the configured model for evidence-backed context. A second configured model reviews critical, exploited, uncertain or conflicting cases. Model disagreement remains visible.
+3. Ask the configured model to classify matched system news and assess the claimed impact on the declared deployment, using article evidence and version context. General news about a system is distinguished from a new vulnerability or an update to a known one. A second configured model reviews critical, exploited, uncertain or conflicting cases. Model disagreement remains visible.
 4. Apply category policy. Source severity is a floor; an AI downgrade cannot suppress a source-critical library/product finding. News with an advisory identifier and an exact installed package mention uses library policy even before structured advisory data arrives.
 5. Commit finding changes and notification jobs together. Deliver meaningful changes without treating cosmetic article wording or AI phrasing as new events.
 
 With the default rules, libraries select critical severity and products/news select high or critical; routes are empty until configured. Unknown/conflicting potentially critical findings notify immediately when `urgent_unknown` is enabled. Lower-priority uncertainty goes to a review digest. Known-exploitation and malicious-package overrides are separately configurable. A category with no channels sends nothing, including overrides.
+
+For system news, the model records `new_vulnerability`, `known_vulnerability_update`, `general_news` or `unknown`, and a separate claimed system impact. A complete, noncritical article classified as general news or not impacting the declared system is retained without a vulnerability notification. This also applies to generic products when their article links to a collected CVE; deterministic package evidence keeps its own applicability rules. A claimed impact from a vulnerability story follows your severity policy; uncertain or unavailable analysis goes to review. Source-critical and enabled exploitation safeguards still apply. The claimed impact is an AI assessment, separate from verified version-range applicability.
+
+A completed general-news classification remains a historical record when a story rotates out of RSS, provided the article, inventory content and model configuration have not changed. Current affected/excluded impact claims require fresh evidence; an old general-news classification is not a current safety conclusion.
 
 Models cannot run tools, change recipients, edit version ranges or establish that a dependency is safe. Model outages and exhausted budgets retain deterministic results and create monitoring-health findings. There is no automatic provider fallback.
 
@@ -144,11 +148,11 @@ SIGTERM/SIGINT cancels source/model requests and stops further analysis. Deliver
 
 ## Boundaries and privacy
 
-OSV queries disclose dependency names and versions to OSV. GitHub, CISA and feed servers receive normal HTTP requests; GitHub authentication is optional. The selected model provider receives relevant components/products/keywords and deployment context from the matched system, plus selected evidence. Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
+cve.now stack queries disclose deduplicated npm package names and versions; lockfiles and deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives relevant components/products/keywords and deployment context from the matched system, plus selected evidence. Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
 
 Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no application telemetry. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
 
-This alpha has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, general SBOM import, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported; there is no CVSS v4 calculator. Product backports, reachability and exploit prerequisites require human/vendor evidence. GitHub begins with recent modifications, while OSV queries exact installed npm versions; this is not an exhaustive historical audit of every product.
+This alpha has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, general SBOM import, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported; there is no CVSS v4 calculator. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
 
 Current evidence and findings are loaded into memory during each scan; audit history and model caches have no automatic retention pruning. This alpha targets small installations. Plan storage, pagination and retention before using it for a large fleet.
 

@@ -38,14 +38,24 @@ export const configSchema = z
     digest_interval_hours: z.number().int().min(1).max(168).default(24),
     sources: z
       .object({
-        osv: z.boolean().default(true),
-        github: z.boolean().default(true),
+        cve_now: z.boolean().default(true),
+        hacker_news: z.boolean().default(true),
+        osv: z.boolean().default(false),
+        github: z.boolean().default(false),
         github_token_env: envName.default('GITHUB_TOKEN'),
-        kev: z.boolean().default(true),
+        kev: z.boolean().default(false),
         feeds: z.array(z.url()).max(30).default([]),
       })
       .strict()
-      .default({ osv: true, github: true, github_token_env: 'GITHUB_TOKEN', kev: true, feeds: [] }),
+      .default({
+        cve_now: true,
+        hacker_news: true,
+        osv: false,
+        github: false,
+        github_token_env: 'GITHUB_TOKEN',
+        kev: false,
+        feeds: [],
+      }),
     models: z
       .object({
         enabled: z.boolean().default(false),

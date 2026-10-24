@@ -10,14 +10,16 @@ Include the relevant commit/version, Node version, a minimal synthetic reproduct
 
 ## Trust model
 
-Trusted inputs are the operator's configuration, inventory, chosen model/SMTP endpoints, environment, local filesystem and installed application/dependencies. Feed bodies, advisory text and model output are untrusted evidence. The application does not protect against a malicious local administrator, compromised dependency, hostile model endpoint explicitly trusted by the operator, or altered system clock.
+Trusted inputs are the operator's configuration, inventory, chosen model/SMTP endpoints, environment, local filesystem and installed application/dependencies. Feed bodies, article text, advisory text and model output are untrusted evidence. The application does not protect against a malicious local administrator, compromised dependency, hostile model endpoint explicitly trusted by the operator, or altered system clock.
 
 Implemented boundaries include:
 
 - Strict configuration/inventory parsing, bounded input sizes and metadata-only lockfile import. No package installation or lifecycle-script execution occurs during monitoring.
 - Public HTTPS fetching with checks on the addresses used by the connection, bounded redirects/timeouts/response sizes, and removal of authentication headers on cross-origin redirects. Model endpoints may explicitly opt into private addressing; SMTP endpoints are operator-selected.
 - Models receive no shell, browser, filesystem or notification tools. Output is schema-checked, evidence IDs must exist, and supporting quotes must appear in the supplied evidence.
+- The Hacker News article fetches are restricted to allowed publication hosts and bounded text extraction; arbitrary linked websites are not crawled. Missing, excerpted, stale or truncated evidence cannot support a new decisive AI-only news-impact conclusion. Completed general-news classifications can remain historical records when the article/inventory/model context is unchanged; current affected/excluded claims remain freshness-gated.
 - Deterministic package matching and source-severity floors govern library/product decisions. AI cannot rewrite recipients, authoritative version constraints or dependency applicability.
+- AI news classification and claimed system impact are stored separately from authoritative applicability. Evidence-backed general news or an AI-reported exclusion can suppress noncritical news alerts, but cannot override source-critical or enabled known-exploitation safeguards.
 - Slack destinations come only from operator configuration and are restricted to standard `hooks.slack.com` incoming webhooks. SMTP requires TLS. Notification content is rendered as text and cannot enable attachments, filesystem reads or URL-fetching features in the email transport.
 - Findings and their delivery jobs are committed together. Ambiguous delivery is visible and requires a manual receipt check before retrying.
 
@@ -25,7 +27,7 @@ These controls reduce risks; they are not a general prompt-injection detector or
 
 ## Data handling
 
-OSV requests reveal npm package names and exact versions. Other advisory/feed servers receive normal request metadata, and GitHub may receive the configured API token. The configured AI provider receives selected relevant inventory entries and deployment context from the matched system plus selected evidence. Notifications disclose finding context and source links to Slack or the configured email recipients. There is no application telemetry.
+cve.now stack requests reveal deduplicated npm package names and exact versions through URL query parameters; lockfiles and system/deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP request metadata. Optional OSV requests also reveal package names and exact versions. Other enabled advisory/feed servers receive normal request metadata, and GitHub may receive the configured API token. The configured AI provider receives selected relevant inventory entries and deployment context from the matched system plus selected evidence. Notifications disclose finding context and source links to Slack or the configured email recipients. There is no application telemetry.
 
 Credential values are read from environment variables, not placed in model prompts or intentionally persisted in SQLite. Do not insert keys into model names, feed URLs, inventory text or configuration substitutions. Use your service manager or secret manager to supply credentials; the CLI does not automatically load `.env` files. Do not commit configuration, database files, backups or `.env` files to source control.
 
@@ -34,10 +36,11 @@ SQLite stores evidence, finding revisions, model analysis excerpts, caches, budg
 ## Coverage limitations
 
 - Exact vulnerability matching is limited to supported npm identity/version evidence. Lockfile entries include dependencies that may not be present in production.
-- Generic products, operating systems and SaaS services have name/keyword relevance only. Vendor backports, enabled features and exploit reachability are not automatically established.
+- Generic products, operating systems and SaaS services have name/keyword candidate matching plus optional AI news/impact analysis. AI impact is an evidence-backed opinion, not a deterministic product-version result. Vendor backports, enabled features and exploit reachability are not automatically established.
 - Missing versions, unknown constraints and stale inventory remain uncertain. No returned advisory does not mean no vulnerability exists.
 - CVSS v3.0/v3.1 calculation and supplied source labels/scores are supported; CVSS v4 vectors are not calculated in this alpha.
 - Sources and model contexts are bounded. Incomplete collection or analysis is degraded monitoring, not successful clearance.
+- Recent cve.now entry collection, tracked/news-cited refreshes and exact npm stack queries do not establish exhaustive historical coverage for every product. The Hacker News may block article access; the feed excerpt remains available for review without a confident impact conclusion.
 - There is no general SBOM ingestion, authenticated web crawling, automatic remediation, distributed lock, multi-host worker or independent penetration-test certification.
 - Notifications are not exactly-once delivery. A timeout can occur after a destination accepts a message. Verify receipt before retrying an `unknown` job.
 

@@ -10,6 +10,7 @@ const source = {
   id: 'feed:alpha',
   source: 'feed:fixture',
   kind: 'news',
+  content_status: 'full',
   title: 'Alpha security report',
   description: QUOTE,
   severity: 'high',
@@ -49,6 +50,7 @@ const finding = {
 function configuration(provider = 'openai-compatible', extra = {}) {
   return parseConfig({
     version: 1,
+    sources: { cve_now: false, hacker_news: false },
     models: {
       enabled: true,
       analysis: {
@@ -86,6 +88,20 @@ function output(extra = {}) {
     summary: 'This excerpt alone does not establish applicability.',
     evidence_ids: [source.id],
     quotes: [{ evidence_id: source.id, quote: QUOTE }],
+    news_analysis: {
+      classification:
+        extra.relevance === 'unknown'
+          ? 'unknown'
+          : extra.relevance === 'relevant'
+            ? 'known_vulnerability_update'
+            : 'general_news',
+      impact: extra.relevance === 'unknown' || extra.relevance === 'relevant' ? 'unknown' : 'not_applicable',
+      affected_products: [],
+      affected_versions: [],
+      prerequisites: [],
+      rationale: 'The supplied excerpt supports this news classification.',
+      quotes: [{ evidence_id: source.id, quote: QUOTE }],
+    },
     ...extra,
   };
 }
@@ -106,7 +122,7 @@ test('truncated source context cannot suppress a news finding, including on cach
   let context;
   const long = {
     ...source,
-    description: `${QUOTE} ${'Padding. '.repeat(500)} Actually alpha 1.0.0 is affected.`,
+    description: `${QUOTE} ${'Padding. '.repeat(4000)} Actually alpha 1.0.0 is affected.`,
   };
   const analyzer = new ModelAnalyzer(
     cfg,
@@ -142,7 +158,14 @@ test('bounded evidence selection retains authoritative records and reports omitt
       context = JSON.parse(JSON.parse(request.body).messages[1].content);
       const first = context.evidence[0];
       return response(
-        output({ evidence_ids: [first.id], quotes: [{ evidence_id: first.id, quote: QUOTE }] }),
+        output({
+          evidence_ids: [first.id, 'feed:0'],
+          quotes: [
+            { evidence_id: first.id, quote: QUOTE },
+            { evidence_id: 'feed:0', quote: QUOTE },
+          ],
+          news_analysis: { ...output().news_analysis, quotes: [{ evidence_id: 'feed:0', quote: QUOTE }] },
+        }),
       );
     },
     () => NOW,
@@ -150,7 +173,8 @@ test('bounded evidence selection retains authoritative records and reports omitt
   assert.equal(context.evidence[0].id, advisory.id);
   assert.equal(context.coverage.total_evidence, 8);
   assert.equal(context.coverage.omitted_evidence, 2);
-  assert.equal(result.relevance, 'unknown');
+  assert.equal(result.news_analysis.classification, 'unknown');
+  assert.equal(result.news_analysis.impact, 'unknown');
 });
 
 test('inventory becoming stale invalidates cached irrelevance and retains a review finding', async () => {

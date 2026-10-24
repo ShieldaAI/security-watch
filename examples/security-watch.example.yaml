@@ -6,11 +6,13 @@ inventory_stale_days: 7
 digest_interval_hours: 24
 
 sources:
-  osv: true
-  github: true
+  cve_now: true
+  hacker_news: true # The Hacker News security publication, not Hacker News/Y Combinator.
+  osv: false # Optional independent exact npm name/version lookups.
+  github: false
   github_token_env: GITHUB_TOKEN
-  kev: true
-  feeds: [] # Add trusted public HTTPS RSS/Atom URLs. Article links are not fetched.
+  kev: false
+  feeds: [] # Optional additional public HTTPS RSS/Atom feeds.
 
 models:
   enabled: false
@@ -19,7 +21,8 @@ models:
   max_input_chars: 12000
   max_output_tokens: 1500
   timeout_seconds: 45
-  # To enable AI, set enabled: true and configure an exact model ID:
+  # Enable AI to distinguish an impacted system from general news about it.
+  # Set enabled: true, provide credentials, and configure your exact model ID:
   # analysis:
   #   provider: openai
   #   model: YOUR_MODEL_ID

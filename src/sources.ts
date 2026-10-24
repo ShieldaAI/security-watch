@@ -10,16 +10,18 @@ import type {
   SourceResult,
 } from './types.js';
 import { cleanText, hash, highest, timestamp } from './util.js';
+import { collectCveNow, evidenceRelevant } from './cve-now.js';
+import { SourceError } from './source-error.js';
 
 const OSV = 'https://api.osv.dev/v1';
 const GITHUB = 'https://api.github.com/advisories';
 const KEV = 'https://raw.githubusercontent.com/cisagov/kev-data/develop/known_exploited_vulnerabilities.json';
+const HACKER_NEWS = 'https://feeds.feedburner.com/TheHackersNews';
 const MAX_PAGES = 50;
 const MAX_ADVISORIES = 5_000;
 const MAX_FEED_ENTRIES = 500;
 const HOUR = 3_600_000;
 type RecordValue = Record<string, unknown>;
-class SourceError extends Error {}
 
 function record(value: unknown): RecordValue {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -610,7 +612,7 @@ async function feed(url: string, source: string, http: HttpClient, now: number):
     const entry = record(rawEntry);
     const title = plainText(entry.title, 500);
     if (!title) throw new SourceError('Feed entry is missing its title.');
-    const description = plainText(entry.description ?? entry.summary ?? entry.content ?? '');
+    const description = plainText(entry.encoded ?? entry.content ?? entry.description ?? entry.summary ?? '');
     const links = list(entry.link);
     const selectedLink = links.find(
       (link) => typeof link === 'string' || !record(link)['@_rel'] || record(link)['@_rel'] === 'alternate',
@@ -642,9 +644,106 @@ async function feed(url: string, source: string, http: HttpClient, now: number):
       fetched_at: timestamp(now),
       ...(published ? { published_at: published } : {}),
       packages: [],
+      content_status: description ? 'excerpt' : 'unavailable',
     });
   }
   return [...results.values()];
+}
+
+function hackerNewsUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.port ||
+      !['thehackernews.com', 'www.thehackernews.com'].includes(url.hostname) ||
+      !/^\/\d{4}\/\d{2}\/[^/]+\.html$/.test(url.pathname)
+    )
+      return undefined;
+    url.hash = '';
+    url.search = '';
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Extract only the marked article body, never navigation/related-story text.
+ * Missing or malformed wrappers leave the feed excerpt explicitly incomplete. */
+function articleBody(html: string): string | undefined {
+  const sanitized = html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ');
+  const tags = /<\/?[a-z][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>/gi;
+  let match: RegExpExecArray | null;
+  let element: string | undefined;
+  let start = 0;
+  let depth = 0;
+  while ((match = tags.exec(sanitized))) {
+    const tag = match[0];
+    const name = tag.match(/^<\/?([a-z][a-z0-9-]*)/i)?.[1]?.toLowerCase();
+    if (!name) continue;
+    if (!element) {
+      if (tag.startsWith('</') || !['div', 'article', 'section'].includes(name)) continue;
+      const attributes = new Map<string, string>();
+      for (const attribute of tag.matchAll(/\b([a-z][a-z0-9_-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi))
+        attributes.set(attribute[1]!.toLowerCase(), attribute[2] ?? attribute[3] ?? '');
+      if (
+        !(attributes.get('itemprop') ?? '').split(/\s+/).includes('articleBody') &&
+        !(attributes.get('class') ?? '')
+          .split(/\s+/)
+          .some((value) => ['articlebody', 'post-body'].includes(value))
+      )
+        continue;
+      element = name;
+      start = tags.lastIndex;
+      depth = 1;
+    } else if (name === element) {
+      depth += tag.startsWith('</') ? -1 : tag.endsWith('/>') ? 0 : 1;
+      if (depth === 0) return sanitized.slice(start, match.index);
+    }
+  }
+  return undefined;
+}
+
+async function hackerNews(http: HttpClient, now: number): Promise<Evidence[]> {
+  const entries = await feed(HACKER_NEWS, 'hacker_news', http, now);
+  // RSS is a finite current window. Articles outside the fetch budget remain
+  // visible as excerpts; models cannot use them as complete dismissal evidence.
+  for (let offset = 0; offset < Math.min(entries.length, 50); offset += 4)
+    await Promise.all(
+      entries.slice(offset, Math.min(offset + 4, 50)).map(async (entry) => {
+        const url = hackerNewsUrl(entry.url);
+        if (!url) return;
+        try {
+          const response = await http(url, {
+            maxBytes: 2_000_000,
+            redirects: 3,
+            allowedRedirectOrigins: ['https://thehackernews.com', 'https://www.thehackernews.com'],
+          });
+          if (response.status !== 200) return;
+          const body = articleBody(response.body);
+          if (!body) return;
+          const full = plainText(body, 16_001);
+          if (!full || full.length < entry.description.length) return;
+          entry.description = full.slice(0, 16_000);
+          entry.content_status = full.length <= 16_000 ? 'full' : 'excerpt';
+          entry.url = url;
+          entry.aliases = aliases(
+            `${entry.title}\n${entry.description}`.match(
+              /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
+            ) ?? [],
+          );
+        } catch {
+          // Fetch/parse failures must not erase the headline and feed excerpt.
+          // No transport exception text is persisted or exposed to model prompts.
+        }
+      }),
+    );
+  return entries;
 }
 
 /** Collect complete source revisions. Failed sources retain their checkpoint and cached evidence. */
@@ -658,6 +757,7 @@ export async function collectSources(
 ): Promise<SourceResult> {
   const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints } };
   const jobs: { source: string; run: () => Promise<Evidence[]> }[] = [];
+  if (config.sources.hacker_news) jobs.push({ source: 'hacker_news', run: () => hackerNews(http, now) });
   if (config.sources.osv)
     jobs.push({ source: 'osv', run: () => osv(inventory, previousEvidence, http, now) });
   if (config.sources.github)
@@ -671,6 +771,11 @@ export async function collectSources(
     const source = `feed:${hash(url).slice(0, 16)}`;
     jobs.push({ source, run: () => feed(url, source, http, now) });
   }
+  if (config.sources.cve_now)
+    jobs.push({
+      source: 'cve_now',
+      run: () => collectCveNow(inventory, checkpoints.cve_now, previousEvidence, result.evidence, http, now),
+    });
   for (const job of jobs) {
     try {
       const evidence = await job.run();
@@ -678,6 +783,16 @@ export async function collectSources(
         throw new SourceError('Source returned a future modification timestamp; collection is incomplete.');
       result.evidence.push(...evidence);
       result.checkpoints[job.source] = timestamp(now);
+      if (job.source === 'hacker_news') {
+        const incomplete = evidence.filter(
+          (item) => item.content_status !== 'full' && evidenceRelevant(item, inventory),
+        ).length;
+        if (incomplete)
+          result.errors.push({
+            source: 'hacker_news:articles',
+            message: `${incomplete} relevant The Hacker News article(s) could not be read in full; excerpts remain available for cautious review.`,
+          });
+      }
     } catch (error) {
       // Never expose exception text from transports/parsers: it can contain feed tokens or HTTP headers.
       result.errors.push({

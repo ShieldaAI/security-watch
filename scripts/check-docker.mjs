@@ -16,7 +16,7 @@ import {writeFileSync,statSync} from 'node:fs';
 assert.equal(process.getuid(),1000);
 const inventory={systems:[{id:'demo',name:'Demo',environment:'test',exposure:'internal',criticality:'high',updated_at:new Date().toISOString(),components:[{id:'parser',ecosystem:'npm',name:'example-parser',version:'1.2.0'}]}]};
 writeFileSync('/config/systems.json',JSON.stringify(inventory),{mode:0o600});
-writeFileSync('/config/security-watch.yaml',JSON.stringify({version:1,inventory:'/config/systems.json',database:'/data/watch.db',sources:{osv:false,github:false,kev:false}}),{mode:0o600});
+writeFileSync('/config/security-watch.yaml',JSON.stringify({version:1,inventory:'/config/systems.json',database:'/data/watch.db',sources:{cve_now:false,hacker_news:false,osv:false,github:false,kev:false}}),{mode:0o600});
 writeFileSync('/config/advisories.json',JSON.stringify(${JSON.stringify(evidence)}),{mode:0o600});
 const run=args=>execFileSync(process.execPath,['/app/dist/cli.js',...args,'--config','/config/security-watch.yaml'],{encoding:'utf8',timeout:15000});
 const report=JSON.parse(run(['scan','--fixture','/config/advisories.json']));

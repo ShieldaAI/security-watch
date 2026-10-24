@@ -73,7 +73,7 @@ function spec(provider = 'openai-compatible', extra = {}) {
 function config(provider = 'openai-compatible', overrides = {}) {
   const base = {
     version: 1,
-    sources: { osv: true, github: false, kev: false, feeds: [] },
+    sources: { cve_now: false, hacker_news: false, osv: true, github: false, kev: false, feeds: [] },
     models: { enabled: true, analysis: spec(provider), daily_token_limit: 1000000, ...overrides.models },
     policy: {
       library: { levels: ['high', 'critical'], basis: 'priority', channels: ['slack'] },
@@ -290,7 +290,7 @@ test('dollar budgets include verification and cached requests consume no additio
   const store = memory(t);
   const priced = spec('openai-compatible', { input_usd_per_million: 10, output_usd_per_million: 20 });
   const cfg = config('openai-compatible', {
-    models: { analysis: priced, verification: { ...priced, model: 'reviewer' }, daily_budget_usd: 0.08 },
+    models: { analysis: priced, verification: { ...priced, model: 'reviewer' }, daily_budget_usd: 0.15 },
   });
   let calls = 0;
   const analyzer = new ModelAnalyzer(

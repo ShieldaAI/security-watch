@@ -52,3 +52,18 @@ The review used separate matching/source, HTTP/model, persistence/delivery and o
 5. Plan retention and pagination before increasing scale. Evidence, finding history and model caches are retained; this alpha has no automatic pruning or distributed worker coordination.
 
 Database schema is now 4. Back up an operational database, stop the old worker, and use `scan` or `start` to migrate before running read-only commands with this version. This review does not publish the npm package or merge a release.
+
+## Source and system-news update (2026-10-24)
+
+The source update switches new configurations to cve.now and The Hacker News. cve.now original descriptions and structured affected ranges support CVE matching; model-generated source summaries are excluded. Exact npm queries are separate so the provider's response deduplication cannot hide another installed version. Relevant historical CVEs are refreshed without repeatedly fetching all unrelated global history.
+
+System news now records new vulnerabilities, known-vulnerability updates, general coverage or uncertainty separately from claimed deployment impact. Quotes, product identity, installed versions, article completeness and evidence freshness constrain model conclusions. Linked CVEs retain generic-product news classification while deterministic package matching and critical/exploitation safeguards remain authoritative. Completed general coverage stays historical unless its source, inventory or model context changes; stale affected claims cannot escape in previously queued alerts.
+
+Independent source, model and integration reviews found and corrected lost exact matches, cumulative refresh limits, unsupported supersession, incomplete-article health visibility, linked-CVE routing and stale/historical news lifecycle issues.
+
+- **289 tests pass** on Node 24.22.1 and 26.12.0 locally, and on Node 24.22.1 in the Linux Docker test stage.
+- `npm run check` passes, including strict compilation, formatting and installation/type/runtime checks from a clean npm tarball.
+- A live cve.now check with the public test package `lodash@4.17.20` and a recent checkpoint returned eight advisory entries without source errors, including five historical exact package matches. This does not validate an exhaustive historical product scan.
+- Four live cursor pages returned distinct, ordered records. A broader listing probe encountered HTTP 403; full seven-day bootstrap success is not claimed. Source failures remain visible and do not advance the checkpoint.
+- A live The Hacker News check through the runtime HTTP client returned 50 stories: 48 complete article extracts and two bounded excerpts. Relevant incomplete articles produced the expected monitoring-health warning.
+- No real Slack/email messages or paid model calls were made. Deployment-specific provider/destination validation and observation remain required; the alpha-scope assessment is not a production guarantee.
