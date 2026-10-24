@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+coverage/
+*.db*
+*.tgz
+package-lock.json
+.env*
+security-watch.yaml
+systems.yaml
+.docker-check-*/

@@ -1,0 +1,27 @@
+version: 1
+inventory: ./libraries.example.yaml
+database: ./data/libraries.db
+poll_interval_minutes: 30
+
+# Structured package checks work without a model or model credentials.
+sources:
+  cve_now: false
+  hacker_news: false
+  osv: true
+  github: false
+  kev: false
+  feeds: []
+  vendor_feeds: []
+models:
+  enabled: false
+
+policy:
+  library:
+    levels: [critical]
+    basis: source_severity
+    channels: [] # Set [slack] or [email], and configure that destination below.
+  health_channels: []
+notifications:
+  max_attempts: 3
+  # slack:
+  #   webhook_url_env: SLACK_WEBHOOK_URL

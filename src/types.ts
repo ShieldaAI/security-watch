@@ -1,42 +1,108 @@
+import type { ModelProvider, OutputFormat } from './providers.js';
+import type { Ecosystem } from './ecosystems.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
 export type Channel = 'slack' | 'email';
-export interface Component { id: string; ecosystem: 'npm'; name: string; version?: string }
-export interface Product { name: string; version?: string; keywords: string[] }
-export interface System {
-  id: string; name: string; environment: string; owner?: string;
-  exposure: 'internet' | 'internal' | 'unknown'; criticality: Severity; updated_at: string;
-  components: Component[]; products: Product[]; keywords: string[];
+export interface Component {
+  id: string;
+  ecosystem: Ecosystem;
+  name: string;
+  version?: string;
 }
-export interface Inventory { systems: System[] }
+export interface Product {
+  name: string;
+  version?: string;
+  keywords: string[];
+}
+export interface System {
+  id: string;
+  name: string;
+  environment: string;
+  owner?: string;
+  exposure: 'internet' | 'internal' | 'unknown';
+  criticality: Severity;
+  updated_at: string;
+  components: Component[];
+  products: Product[];
+  keywords: string[];
+}
+export interface Inventory {
+  systems: System[];
+}
 export interface PackageClaim {
-  ecosystem: string; name: string; range?: string; versions?: string[];
-  matched_versions?: string[]; fixed?: string;
+  ecosystem: string;
+  name: string;
+  range?: string;
+  versions?: string[];
+  matched_versions?: string[];
+  fixed?: string;
 }
 export interface Evidence {
-  id: string; source: string; kind: 'advisory' | 'news' | 'kev' | 'health';
-  title: string; url: string; description: string; aliases: string[];
-  severity: Severity; modified_at: string; fetched_at: string; published_at?: string;
-  packages: PackageClaim[]; withdrawn?: boolean; exploited?: boolean; malware?: boolean;
+  id: string;
+  source: string;
+  kind: 'advisory' | 'news' | 'kev' | 'health';
+  title: string;
+  url: string;
+  description: string;
+  /** Whether the adapter retrieved full text, an excerpt or no usable content. */
+  content_status?: 'full' | 'excerpt' | 'unavailable';
+  aliases: string[];
+  severity: Severity;
+  modified_at: string;
+  fetched_at: string;
+  published_at?: string;
+  packages: PackageClaim[];
+  withdrawn?: boolean;
+  exploited?: boolean;
+  malware?: boolean;
 }
 export interface ModelSpec {
-  provider: 'openai' | 'anthropic' | 'openai-compatible'; model: string;
-  api_key_env: string; endpoint?: string; allow_private_endpoint: boolean;
-  input_usd_per_million?: number; output_usd_per_million?: number;
+  provider: ModelProvider;
+  output_format?: OutputFormat;
+  model: string;
+  api_key_env: string;
+  endpoint?: string;
+  allow_private_endpoint: boolean;
+  input_usd_per_million?: number;
+  output_usd_per_million?: number;
 }
 export interface Config {
-  version: 1; inventory: string; database: string; poll_interval_minutes: number;
-  inventory_stale_days: number; digest_interval_hours: number;
-  sources: { osv: boolean; github: boolean; github_token_env: string; kev: boolean; feeds: string[] };
+  version: 1;
+  inventory: string;
+  database: string;
+  poll_interval_minutes: number;
+  news_lookback_minutes: number;
+  inventory_stale_days: number;
+  digest_interval_hours: number;
+  sources: {
+    cve_now: boolean;
+    hacker_news: boolean;
+    osv: boolean;
+    github: boolean;
+    github_token_env: string;
+    kev: boolean;
+    feeds: string[];
+    vendor_feeds?: ('nodejs' | 'python' | 'php')[];
+  };
   models: {
-    enabled: boolean; analysis?: ModelSpec; verification?: ModelSpec;
-    daily_request_limit: number; daily_token_limit: number; daily_budget_usd?: number;
-    max_input_chars: number; max_output_tokens: number; timeout_seconds: number;
+    enabled: boolean;
+    analysis?: ModelSpec;
+    verification?: ModelSpec;
+    daily_request_limit: number;
+    daily_token_limit: number;
+    daily_budget_usd?: number;
+    max_input_chars: number;
+    max_output_tokens: number;
+    timeout_seconds: number;
   };
   policy: {
-    library: Rule; product: Rule; news: Rule;
-    urgent_unknown: boolean; exploited_override: boolean; malware_override: boolean;
+    library: Rule;
+    product: Rule;
+    news: Rule;
+    urgent_unknown: boolean;
+    exploited_override: boolean;
+    malware_override: boolean;
     health_channels: Channel[];
   };
   notifications: {
@@ -44,34 +110,123 @@ export interface Config {
     email?: { smtp_url_env: string; from: string; to: string[] };
     max_attempts: number;
   };
+  monitoring?: {
+    heartbeat_url_env: string;
+    interval_seconds: number;
+    allow_private_endpoint: boolean;
+  };
+  maintenance?: {
+    interval_hours: number;
+    retention?: {
+      analysis_cache_days?: number;
+      evidence_history_days?: number;
+      finding_history_days?: number;
+      accepted_delivery_days?: number;
+      inactive_findings_days?: number;
+      unreferenced_evidence_days?: number;
+      batch_size?: number;
+    };
+    backup?: {
+      directory: string;
+      keep: number;
+      max_bytes: number;
+    };
+  };
 }
-export interface Rule { levels: Severity[]; basis: 'source_severity' | 'priority'; channels: Channel[] }
+export interface Rule {
+  levels: Severity[];
+  basis: 'source_severity' | 'priority';
+  channels: Channel[];
+}
 export interface Assessment {
+  /** Only news evidence supports this candidate; AI impact remains a separate claim. */
+  news_only?: boolean;
+  /** News-only or generic product context without deterministic package applicability. */
+  news_candidate?: boolean;
   active?: boolean;
-  id: string; event_id: string; system_id: string; component_id?: string;
-  category: Category; applicability: Applicability; source_severity: Severity; priority: Severity;
-  title: string; summary: string; reasons: string[]; evidence_ids: string[]; urls: string[];
-  exploited: boolean; fix?: string; updated_at: string;
+  id: string;
+  event_id: string;
+  system_id: string;
+  component_id?: string;
+  category: Category;
+  applicability: Applicability;
+  source_severity: Severity;
+  priority: Severity;
+  title: string;
+  summary: string;
+  reasons: string[];
+  evidence_ids: string[];
+  urls: string[];
+  exploited: boolean;
+  fix?: string;
+  updated_at: string;
   withdrawn?: boolean;
   relevance?: 'relevant' | 'irrelevant' | 'unknown';
-  ai?: { model: string; provider: string; prompt_version: string; status: 'complete' | 'unavailable' | 'conflicting' };
+  /** Model assessment of the article, separate from version-range applicability. */
+  news_analysis?: NewsAnalysis;
+  ai?: {
+    model: string;
+    provider: string;
+    prompt_version: string;
+    status: 'complete' | 'unavailable' | 'conflicting';
+  };
 }
 export interface Decision {
-  action: 'notify' | 'digest' | 'record'; channels: Channel[]; reason: string;
+  action: 'notify' | 'digest' | 'record';
+  channels: Channel[];
+  reason: string;
 }
 export interface Notification {
-  id: string; finding_id: string; channel: Channel; payload: string;
+  id: string;
+  finding_id: string;
+  channel: Channel;
+  payload: string;
   status: 'pending' | 'sending' | 'accepted' | 'unknown' | 'failed';
-  attempts: number; available_at: number; last_error?: string;
+  attempts: number;
+  available_at: number;
+  last_error?: string;
 }
 export interface HttpOptions {
-  method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string;
-  maxBytes?: number; timeoutMs?: number; allowPrivate?: boolean; redirects?: number;
+  method?: 'GET' | 'POST';
+  headers?: Record<string, string>;
+  body?: string;
+  maxBytes?: number;
+  timeoutMs?: number;
+  /** Minimum delay between request starts to an origin; shared by concurrent calls. */
+  minIntervalMs?: number;
+  allowPrivate?: boolean;
+  redirects?: number;
+  /** When present, every redirect must remain within one of these exact origins. */
+  allowedRedirectOrigins?: string[];
+  signal?: AbortSignal;
 }
-export interface HttpResult { status: number; headers: Record<string, string>; body: string }
+export interface HttpResult {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
 export type HttpClient = (url: string, options?: HttpOptions) => Promise<HttpResult>;
-export interface SourceResult { evidence: Evidence[]; errors: { source: string; message: string }[]; checkpoints: Record<string, string> }
+export interface SourceResult {
+  evidence: Evidence[];
+  errors: { source: string; message: string }[];
+  checkpoints: Record<string, string>;
+}
 export interface AiAnalysis {
-  relevance: 'relevant' | 'irrelevant' | 'unknown'; priority: Severity;
-  summary: string; evidence_ids: string[]; quotes: { evidence_id: string; quote: string }[];
+  relevance: 'relevant' | 'irrelevant' | 'unknown';
+  priority: Severity;
+  summary: string;
+  evidence_ids: string[];
+  quotes: { evidence_id: string; quote: string }[];
+  news_analysis?: NewsAnalysis | null;
+}
+export interface NewsAnalysis {
+  classification: 'new_vulnerability' | 'known_vulnerability_update' | 'general_news' | 'unknown';
+  impact: 'affected' | 'not_affected' | 'unknown' | 'not_applicable';
+  affected_products: string[];
+  /** Affected or fixed versions quoted from the source. */
+  affected_versions: string[];
+  /** Source wording describing the conditions necessary for exploitation. */
+  prerequisites: string[];
+  rationale: string;
+  quotes: { evidence_id: string; quote: string }[];
 }

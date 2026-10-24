@@ -1,0 +1,38 @@
+# Example package identities. Replace this inventory and update its timestamp.
+# A missing version stays unknown; the sample versions are not upgrade recommendations.
+systems:
+  - id: example-application
+    name: Example application
+    environment: unknown
+    exposure: unknown
+    criticality: unknown
+    updated_at: '2026-10-24T12:00:00Z'
+    libraries:
+      npm:
+        - express
+        - '@types/node'
+      python:
+        - requests
+        - name: urllib3
+          version: '2.2.3'
+      php:
+        - name: symfony/http-foundation
+          version: '6.4.0'
+      go:
+        - golang.org/x/net
+      maven:
+        - org.apache.logging.log4j:log4j-core
+      rust:
+        - serde
+      ruby:
+        - rails
+      dotnet:
+        - Newtonsoft.Json
+      elixir:
+        - phoenix
+      dart:
+        - http
+      haskell:
+        - aeson
+      swift:
+        - https://github.com/apple/swift-nio.git

@@ -1,0 +1,16 @@
+# Example package identities, not a claim about what is installed.
+# Versions are optional. Replace the illustrated versions with deployed values.
+npm:express
+npm:@types/node
+python:requests
+python:urllib3==2.2.3
+php:symfony/http-foundation@6.4.0
+go:golang.org/x/net
+maven:org.apache.logging.log4j:log4j-core
+rust:serde
+ruby:rails
+dotnet:Newtonsoft.Json
+elixir:phoenix
+dart:http
+haskell:aeson
+swift:https://github.com/apple/swift-nio.git

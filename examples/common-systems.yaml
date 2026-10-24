@@ -1,0 +1,243 @@
+# Sample monitoring list, not a record of installed software.
+# Add installed versions and deployment context before assessing impact.
+# Go is shorter than the matcher minimum; its longer aliases are used for discovery.
+systems:
+  - id: nodejs
+    name: Node.js
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Node.js
+        keywords:
+          - NodeJS
+          - Node JS
+  - id: python
+    name: Python
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Python
+        keywords:
+          - CPython
+  - id: java
+    name: Java
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Java
+        keywords:
+          - OpenJDK
+          - JDK
+          - JRE
+  - id: go
+    name: Go
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Go
+        keywords:
+          - Golang
+          - Go programming language
+          - Go standard library
+  - id: rust
+    name: Rust
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Rust
+        keywords:
+          - rustc
+          - Cargo
+  - id: php
+    name: PHP
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: PHP
+        keywords: []
+  - id: ruby
+    name: Ruby
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Ruby
+        keywords:
+          - Ruby on Rails
+  - id: dotnet
+    name: .NET
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: .NET
+        keywords:
+          - ASP.NET
+          - .NET Core
+  - id: linux
+    name: Linux
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Linux
+        keywords:
+          - Linux kernel
+  - id: windows
+    name: Windows
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Windows
+        keywords:
+          - Windows Server
+  - id: docker
+    name: Docker
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Docker
+        keywords:
+          - Docker Engine
+          - Docker Desktop
+          - Moby
+  - id: kubernetes
+    name: Kubernetes
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Kubernetes
+        keywords:
+          - kubelet
+          - kube-apiserver
+  - id: nginx
+    name: NGINX
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: NGINX
+        keywords: []
+  - id: apache-http
+    name: Apache HTTP Server
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Apache HTTP Server
+        keywords:
+          - Apache httpd
+  - id: openssl
+    name: OpenSSL
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: OpenSSL
+        keywords: []
+  - id: openssh
+    name: OpenSSH
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: OpenSSH
+        keywords: []
+  - id: postgresql
+    name: PostgreSQL
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: PostgreSQL
+        keywords:
+          - Postgres
+  - id: mysql
+    name: MySQL
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: MySQL
+        keywords: []
+  - id: redis
+    name: Redis
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Redis
+        keywords: []
+  - id: mongodb
+    name: MongoDB
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: MongoDB
+        keywords: []
+  - id: git
+    name: Git
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Git
+        keywords: []
+  - id: jenkins
+    name: Jenkins
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Jenkins
+        keywords: []
+  - id: elasticsearch
+    name: Elasticsearch
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: Elasticsearch
+        keywords: []
+  - id: sqlite
+    name: SQLite
+    environment: sample inventory
+    exposure: unknown
+    criticality: unknown
+    updated_at: 2026-10-24T15:13:17.645Z
+    products:
+      - name: SQLite
+        keywords: []

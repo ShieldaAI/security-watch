@@ -1,16 +1,20 @@
 version: 1
 inventory: ./systems.example.yaml
 database: ./data/watch.db
-poll_interval_minutes: 15
+poll_interval_minutes: 30
+news_lookback_minutes: 40
 inventory_stale_days: 7
 digest_interval_hours: 24
 
 sources:
-  osv: true
-  github: true
+  cve_now: true
+  hacker_news: true # The Hacker News security publication, not Hacker News/Y Combinator.
+  osv: false # Enable for library queries across the supported ecosystems.
+  github: false
   github_token_env: GITHUB_TOKEN
-  kev: true
-  feeds: [] # Add trusted public HTTPS RSS/Atom URLs. Article links are not fetched.
+  kev: false
+  feeds: [] # Optional additional public HTTPS RSS/Atom feeds.
+  vendor_feeds: [] # Optional official news: [nodejs, python, php].
 
 models:
   enabled: false
@@ -19,7 +23,8 @@ models:
   max_input_chars: 12000
   max_output_tokens: 1500
   timeout_seconds: 45
-  # To enable AI, set enabled: true and configure an exact model ID:
+  # Enable AI to distinguish an impacted system from general news about it.
+  # Set enabled: true, provide credentials, and configure your exact model ID:
   # analysis:
   #   provider: openai
   #   model: YOUR_MODEL_ID
@@ -28,8 +33,8 @@ models:
   #   provider: anthropic
   #   model: YOUR_REVIEW_MODEL_ID
   #   api_key_env: ANTHROPIC_API_KEY
-  # A daily_budget_usd additionally requires input_usd_per_million and
-  # output_usd_per_million on every model. No pricing means UNKNOWN cost.
+  # daily_budget_usd requires input_usd_per_million and output_usd_per_million
+  # on each model. Without prices, only request and token limits are enforced.
 
 policy:
   library:
@@ -57,3 +62,25 @@ notifications:
   #   smtp_url_env: SMTP_URL
   #   from: security-watch@example.com
   #   to: [security@example.com]
+
+# Optional external success pings. Configure the receiver to alert on missed pings.
+# monitoring:
+#   heartbeat_url_env: HEARTBEAT_URL
+#   interval_seconds: 60
+#   allow_private_endpoint: false
+
+# Optional automatic maintenance. Preview with `security-watch prune` before starting.
+# maintenance:
+#   interval_hours: 24
+#   retention:
+#     analysis_cache_days: 30
+#     evidence_history_days: 180
+#     finding_history_days: 180
+#     accepted_delivery_days: 180
+#     inactive_findings_days: 365
+#     unreferenced_evidence_days: 365
+#     batch_size: 1000
+#   backup:
+#     directory: ./backups
+#     keep: 7
+#     max_bytes: 536870912
