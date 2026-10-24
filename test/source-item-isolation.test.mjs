@@ -369,6 +369,6 @@ test('cancellation stops source collection and does not become a recoverable ite
         ),
         (error) => error.name === 'AbortError',
       );
-      if (stage !== 'cve-detail') assert(!calls.includes('https://later.example/feed'));
+      if (stage !== 'cve-detail') assert(calls.every((url) => url !== 'https://later.example/feed'));
     });
 });
