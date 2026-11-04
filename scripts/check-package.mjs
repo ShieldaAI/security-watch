@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,6 +147,11 @@ store.close();
     consumer,
   );
   run([join(consumer, 'compiled/consumer.mjs')], consumer);
+  writeFileSync(
+    join(consumer, 'offline-advisory-preview.mjs'),
+    readFileSync(join(root, 'examples/offline-advisory-preview.mjs')),
+  );
+  run(['offline-advisory-preview.mjs'], consumer);
   console.log('Clean packed CLI, offline matching, public types and exports passed.');
 } finally {
   rmSync(temp, { recursive: true, force: true });

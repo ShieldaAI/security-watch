@@ -1,7 +1,7 @@
 {
   "name": "@shieldaai/security-watch",
   "version": "0.1.0-alpha.0",
-  "description": "Evidence-led security advisory and news monitoring for your systems",
+  "description": "Self-hosted security advisory monitoring for dependency inventories, with evidence and Slack or email alerts.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -67,5 +67,16 @@
   "bugs": {
     "url": "https://github.com/ShieldaAI/security-watch/issues"
   },
-  "homepage": "https://github.com/ShieldaAI/security-watch#readme"
+  "homepage": "https://github.com/ShieldaAI/security-watch#readme",
+  "keywords": [
+    "security-advisories",
+    "dependency-monitoring",
+    "vulnerability-monitoring",
+    "cve",
+    "osv",
+    "npm",
+    "slack",
+    "self-hosted",
+    "typescript"
+  ]
 }
