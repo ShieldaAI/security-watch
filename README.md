@@ -1,8 +1,19 @@
 # Shielda Security Watch
 
-An experimental TypeScript bot that compares security advisories and news with your system inventory, records its evidence, and routes findings to Slack or email.
+Self-hosted security advisory monitoring for dependency inventories, with local evidence and Slack or email alerts. This experimental TypeScript bot compares advisories and news with your system inventory and records why each finding was routed.
 
 **Alpha.** The package is `@shieldaai/security-watch`; prereleases use the `alpha` tag. See [coverage and security limits](SECURITY.md) before deploying it.
+
+Try the [offline advisory preview](https://github.com/ShieldaAI/security-watch/blob/main/docs/offline-advisory-preview.md) to evaluate
+matching against fictional inventory without network calls, model requests or
+notifications.
+
+For tool permissions and approvals, see
+[Agent Guard](https://github.com/ShieldaAI/agent-guard). For model response
+validation, see [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node)
+or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall). The
+[package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md)
+explains how these separate projects fit together.
 
 ## Features
 
