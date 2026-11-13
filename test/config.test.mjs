@@ -23,6 +23,16 @@ function model(extra = {}) {
   return { provider: 'openai', model: 'fixture-model', api_key_env: 'WATCH_CONFIG_MODEL_KEY', ...extra };
 }
 
+test('AI dismissal review defaults safe and legacy setting accepts only explicit booleans', () => {
+  assert.equal(parseConfig({ version: 1 }).policy.ai_dismissals, 'review');
+  assert.equal(
+    parseConfig({ version: 1, policy: { review_before_news_suppression: true } }).policy.ai_dismissals,
+    'review',
+  );
+  for (const value of ['true', 1, null])
+    assert.throws(() => parseConfig({ version: 1, policy: { review_before_news_suppression: value } }));
+});
+
 test('scan cadence and news lookback are separate bounded minute settings', () => {
   const defaults = parseConfig({ version: 1 });
   assert.equal(defaults.poll_interval_minutes, 15);
@@ -135,7 +145,7 @@ test('dollar caps require both prices for analysis and verification, including e
         models: {
           enabled: true,
           analysis: priced,
-          verification: model({ input_usd_per_million: 1 }),
+          verification: model({ model: 'second-model', input_usd_per_million: 1 }),
           daily_budget_usd: 5,
         },
       }),
@@ -146,7 +156,7 @@ test('dollar caps require both prices for analysis and verification, including e
     models: {
       enabled: true,
       analysis: priced,
-      verification: model({ input_usd_per_million: 0, output_usd_per_million: 0 }),
+      verification: model({ model: 'second-model', input_usd_per_million: 0, output_usd_per_million: 0 }),
       daily_budget_usd: 5,
     },
   });
@@ -225,7 +235,7 @@ test('credentials health includes only enabled models and selected channels, wit
   env(t, 'WATCH_CONFIG_EMAIL_KEY', undefined);
   const config = parseConfig({
     version: 1,
-    models: { enabled: true, analysis: model(), verification: model() },
+    models: { enabled: true, analysis: model(), verification: model({ model: 'second-model' }) },
     policy: { library: { levels: ['critical'], channels: ['slack'] } },
     notifications: {
       slack: { webhook_url_env: 'WATCH_CONFIG_SLACK_KEY' },

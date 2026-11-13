@@ -109,6 +109,20 @@ function safeText(input: string, length: number): string {
     .replace(/@/g, '@\u200b')
     .slice(0, length);
 }
+/** The operator's own inventory names and notes, so the reader knows where to check. */
+function locationLines(a: Assessment, length: number): string[] {
+  const where = a.location;
+  if (!where) return [];
+  const single = (value: string, limit: number) => safeText(value, limit).replace(/\s*\n\s*/g, ' ');
+  return [
+    `Where to look: ${single(where.system, 120)}${where.owner ? ` (owner: ${single(where.owner, 80)})` : ''}${where.system_note ? ` - ${single(where.system_note, length)}` : ''}`,
+    ...(where.component
+      ? [
+          `Affected item: ${single(where.component, 160)}${where.component_note ? ` - ${single(where.component_note, length)}` : ''}`,
+        ]
+      : []),
+  ];
+}
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = safeText(`[${a.priority.toUpperCase()}] ${a.title}`, 180).replace(/[\n\r]/g, ' ');
@@ -124,6 +138,7 @@ export function notificationText(job: Notification): { subject: string; text: st
     `Finding: ${a.id}`,
     `Delivery: ${job.id}`,
     `System: ${safeText(a.system_id, 200)}${a.component_id ? ` / ${safeText(a.component_id, 200)}` : ''}`,
+    ...locationLines(a, 300),
     `Applicability: ${a.applicability}; source severity: ${a.source_severity}; priority: ${a.priority}`,
     ...(a.news_analysis
       ? [
@@ -159,6 +174,9 @@ function digestText(jobs: Notification[]): { subject: string; text: string } {
       `[${a.priority.toUpperCase()}] ${safeText(a.title, 90)}\n` +
       `Finding: ${a.id}\nDelivery: ${job.id}\n` +
       `System: ${safeText(a.system_id, 60)}${a.component_id ? ` / ${safeText(a.component_id, 60)}` : ''}\n` +
+      locationLines(a, 120)
+        .map((line) => `${line}\n`)
+        .join('') +
       `Applicability: ${a.applicability}; source: ${a.source_severity}\n` +
       (a.news_analysis
         ? `AI news: ${a.news_analysis.classification}; impact: ${a.news_analysis.impact}\n`
@@ -177,21 +195,87 @@ function retryAt(headers: Record<string, string>, now: number, attempts: number)
     ? Math.min(now + 86_400_000, Math.max(now + 1000, retry))
     : now + Math.min(3_600_000, 30_000 * 2 ** Math.min(attempts - 1, 7));
 }
+/**
+ * A reason the SMTP address cannot be used, found without connecting. A user name or password
+ * containing %, @, : or / must be percent-encoded (a literal % is written %25).
+ */
+export function smtpProblem(address: string): string | undefined {
+  try {
+    const url = new URL(address);
+    if (
+      !['smtp:', 'smtps:'].includes(url.protocol) ||
+      !url.hostname ||
+      url.search ||
+      url.hash ||
+      (url.pathname && url.pathname !== '/')
+    )
+      return 'Invalid SMTP configuration';
+    decodeURIComponent(url.username);
+    decodeURIComponent(url.password);
+  } catch {
+    return 'Invalid SMTP configuration: the address is not a valid smtp:// or smtps:// URL, or its user name or password is not percent-encoded';
+  }
+  return undefined;
+}
+function mailbox(address: string): string {
+  const at = address.lastIndexOf('@');
+  return at < 0 ? address : `${address.slice(0, at)}@${address.slice(at + 1).toLowerCase()}`;
+}
+/** Failures in the connection, TLS or sign-in steps happen before any message is handed over. */
+function beforeEnvelope(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = 'code' in error ? String(error.code) : '';
+  const command = 'command' in error ? String(error.command) : '';
+  return (
+    code === 'ETLS' ||
+    code === 'EAUTH' ||
+    ['CONN', 'STARTTLS', 'EHLO', 'HELO'].includes(command) ||
+    /^AUTH\b/.test(command)
+  );
+}
 function statusCode(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('responseCode' in error)) return undefined;
   const code = Number(error.responseCode);
   return Number.isFinite(code) ? code : undefined;
 }
 
-/** Sends due jobs; "accepted" means the destination accepted the request, not that a human read it. */
+export interface DeliveryOptions {
+  /** The time treated as "now", in milliseconds. Defaults to the system clock. */
+  now?: number;
+  /** Replaces the built-in SMTP sender, for tests or a different transport. */
+  emailSender?: EmailSender;
+  /** Stops in-flight sends when aborted; queued jobs are left untouched. */
+  signal?: AbortSignal;
+  /** Where destination secrets are read from. Defaults to the process environment. */
+  credentials?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * Sends due jobs; "accepted" means the destination accepted the request, not that a human read it.
+ * Pass the optional settings as one object. The positional form is kept for existing callers.
+ */
 export async function deliverPending(
   store: Store,
   config: Config,
   http: HttpClient,
-  now = Date.now(),
-  emailSender: EmailSender = sendEmail,
-  signal?: AbortSignal,
+  options?: DeliveryOptions | number,
+  positionalSender?: EmailSender,
+  positionalSignal?: AbortSignal,
+  positionalCredentials?: Readonly<Record<string, string | undefined>>,
 ): Promise<{ accepted: number; failed: number; unknown: number }> {
+  const settings: DeliveryOptions =
+    typeof options === 'object'
+      ? options
+      : {
+          ...(options === undefined ? {} : { now: options }),
+          ...(positionalSender ? { emailSender: positionalSender } : {}),
+          ...(positionalSignal ? { signal: positionalSignal } : {}),
+          ...(positionalCredentials ? { credentials: positionalCredentials } : {}),
+        };
+  const now = settings.now ?? Date.now();
+  const emailSender = settings.emailSender ?? sendEmail;
+  const signal = settings.signal;
+  const credentials = settings.credentials ?? process.env;
   const result = { accepted: 0, failed: 0, unknown: 0 };
   let job: Notification | undefined;
   const started = Date.now();
@@ -258,18 +342,44 @@ export async function deliverPending(
       if (!batch.length) continue;
     }
     const item = batch[0]!;
+    const ids = batch.map((entry) => entry.id);
+    // Another handle on the same database can take a job back while it is being sent. The outcome
+    // can then no longer be recorded as usual; keep the worker running and never resend silently.
+    const displaced = (error: unknown, sent: boolean): void => {
+      if (!(error instanceof Error) || error.message !== 'Notification is not in flight') throw error;
+      if (sent)
+        store.markUncertain(
+          ids,
+          'The delivery result could not be recorded because the job was changed while it was being sent. Verify receipt before retrying.',
+        );
+      result.unknown += batch.length;
+    };
     const finish = (status: 'accepted' | 'failed' | 'unknown', message?: string) => {
-      for (const entry of batch) {
-        store.completeJob(entry.id, status, now, message);
-        result[status]++;
+      // Sample once per acknowledgement so every item in an accepted digest shares its receipt time.
+      const received = status === 'accepted' ? Date.now() : undefined;
+      const acceptedAt = received !== undefined && received >= now ? received : undefined;
+      try {
+        store.completeBatch(ids, status, now, message, acceptedAt);
+      } catch (error) {
+        displaced(error, status !== 'failed');
+        return;
       }
+      result[status] += batch.length;
     };
     const retry = (message: string, at: number) => {
       for (const entry of batch) {
-        if (entry.attempts >= config.notifications.max_attempts) {
-          store.completeJob(entry.id, 'failed', now, `${message}; retry limit reached`);
-          result.failed++;
-        } else store.completeJob(entry.id, 'pending', at, message);
+        try {
+          if (entry.attempts >= config.notifications.max_attempts) {
+            store.completeJob(entry.id, 'failed', now, `${message}; retry limit reached`);
+            result.failed++;
+          } else if ((store.revisionOf(entry.finding_id) ?? 0) > (entry.revision ?? Infinity))
+            // A newer revision was saved while this one was being sent; it carries its own job.
+            store.completeJob(entry.id, 'failed', now, 'Superseded by a newer assessment');
+          else store.completeJob(entry.id, 'pending', at, message);
+        } catch (error) {
+          displaced(error, false);
+          return;
+        }
       }
     };
     let text: { subject: string; text: string };
@@ -281,7 +391,7 @@ export async function deliverPending(
     }
     if (item.channel === 'slack') {
       const settings = config.notifications.slack;
-      const secret = settings ? process.env[settings.webhook_url_env] : undefined;
+      const secret = settings ? credentials[settings.webhook_url_env] : undefined;
       if (!secret) {
         finish('failed', 'Slack destination is not configured');
         continue;
@@ -353,24 +463,14 @@ export async function deliverPending(
       }
     } else {
       const settings = config.notifications.email;
-      const secret = settings ? process.env[settings.smtp_url_env] : undefined;
+      const secret = settings ? credentials[settings.smtp_url_env] : undefined;
       if (!settings || !secret) {
         finish('failed', 'Email destination is not configured');
         continue;
       }
-      try {
-        const url = new URL(secret);
-        if (
-          !['smtp:', 'smtps:'].includes(url.protocol) ||
-          url.search ||
-          url.hash ||
-          (url.pathname && url.pathname !== '/')
-        ) {
-          finish('failed', 'Invalid SMTP configuration');
-          continue;
-        }
-      } catch {
-        finish('failed', 'Invalid SMTP configuration');
+      const problem = smtpProblem(secret);
+      if (problem) {
+        finish('failed', problem);
         continue;
       }
       try {
@@ -382,8 +482,9 @@ export async function deliverPending(
           text: text.text,
           signal,
         });
-        const expected = new Set(settings.to);
-        const accepted = new Set(receipt.accepted);
+        // Mail servers and clients lower-case the domain; the mailbox part is left as written.
+        const expected = new Set(settings.to.map(mailbox));
+        const accepted = new Set(receipt.accepted.map(mailbox));
         if (
           !receipt.rejected.length &&
           accepted.size === expected.size &&
@@ -400,6 +501,8 @@ export async function deliverPending(
         const code = statusCode(error);
         if (!signal?.aborted && error instanceof EmailConnectionError)
           retry('SMTP connection failed before sending', retryAt({}, now, item.attempts));
+        else if (!signal?.aborted && !code && beforeEnvelope(error))
+          retry('SMTP TLS or sign-in failed before sending', retryAt({}, now, item.attempts));
         else if (code && code >= 400 && code < 500)
           retry(`SMTP rejected request with status ${code}`, retryAt({}, now, item.attempts));
         else if (code && code >= 500 && code < 600)

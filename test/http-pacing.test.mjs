@@ -1,37 +1,59 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import http, { createServer } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import { safeHttp } from '../dist/http.js';
 
 async function server(t, handler) {
   const instance = createServer(handler);
   await new Promise((resolve) => instance.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve) => instance.close(resolve)));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        instance.close(resolve);
+        instance.closeAllConnections();
+      }),
+  );
   return `http://127.0.0.1:${instance.address().port}`;
 }
 
-test('HTTP origin pacing spaces concurrent starts without serializing response completion', async (t) => {
-  const starts = [];
-  let active = 0;
-  let maximumActive = 0;
-  const origin = await server(t, (_request, response) => {
-    starts.push(performance.now());
-    maximumActive = Math.max(maximumActive, ++active);
-    setTimeout(() => {
-      active--;
-      response.end('ok');
-    }, 200);
-  });
-  const results = await Promise.all(
-    Array.from({ length: 4 }, () => safeHttp(origin, { allowPrivate: true, minIntervalMs: 80 })),
-  );
-  assert(results.every((result) => result.status === 200));
-  assert.equal(starts.length, 4);
-  for (let index = 1; index < starts.length; index++)
-    assert(starts[index] - starts[index - 1] >= 60, 'Requests must not start in a burst');
-  assert(maximumActive >= 2, 'A slow response need not hold the origin admission queue');
-});
+test(
+  'HTTP origin pacing spaces concurrent starts without serializing response completion',
+  { timeout: 10_000 },
+  async (t) => {
+    const starts = [];
+    const pendingResponses = [];
+    const origin = await server(t, (_request, response) => {
+      pendingResponses.push(response);
+      // Completion waits for all four real requests. A scheduler that serializes
+      // responses instead of admission cannot satisfy this gate.
+      if (pendingResponses.length === 4) for (const pending of pendingResponses) pending.end('ok');
+    });
+    const originalRequest = http.request;
+    const request = t.mock.method(http, 'request', function (...args) {
+      starts.push(performance.now());
+      return Reflect.apply(originalRequest, this, args);
+    });
+    // safeHttp imports the named builtin export. Synchronize it with this
+    // process-local spy, which still dispatches every request to the real server.
+    syncBuiltinESMExports();
+    t.after(() => {
+      request.mock.restore();
+      syncBuiltinESMExports();
+    });
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        safeHttp(origin, { allowPrivate: true, minIntervalMs: 80, timeoutMs: 5000 }),
+      ),
+    );
+    assert(results.every((result) => result.status === 200));
+    assert.equal(starts.length, 4);
+    for (let index = 1; index < starts.length; index++)
+      assert(starts[index] - starts[index - 1] >= 60, 'Client request admission must not start in a burst');
+    assert.equal(pendingResponses.length, 4, 'Outstanding responses do not hold the origin admission queue');
+  },
+);
 
 test('queued HTTP requests cancel promptly and consume their timeout before reaching the server', async (t) => {
   let calls = 0;

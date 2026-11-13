@@ -74,7 +74,7 @@ news_lookback_minutes: 40
 
 Run `security-watch start --config security-watch.yaml` to keep the worker running. `scan` performs one scan and exits. Both commands use the configured news window; restart `start` after changing the configuration. Poll intervals accept 1–1,440 minutes and news windows accept 1–10,080 minutes. The defaults are 15 and 60 minutes respectively.
 
-The 10-minute overlap in this example catches stories that arrive late in a feed. Stable evidence and finding IDs prevent the overlap from creating duplicate notifications. After downtime or a source failure, discovery reaches back to the last successful checkpoint, with up to five minutes of additional overlap. Catch-up can therefore cover more than 40 minutes. Feed history and existing collection limits still constrain what can be recovered.
+The 10-minute overlap in this example re-reads recent stories, and stable evidence and finding IDs prevent the overlap from creating duplicate notifications. A feed can also list a story after the time it is stamped with, for example when it publishes with a delay or stamps entries with a date only. The monitor remembers which entries each feed listed at the previous scan, so an entry that appears for the first time is collected even when its stamp is older than the window, up to seven days before the last successful scan. An entry that was already listed and left out as too old stays out. The first scan of a new installation uses the window alone. After downtime or a source failure, discovery reaches back to the last successful checkpoint, with up to five minutes of additional overlap. Catch-up can therefore cover more than 40 minutes. Feed history and existing collection limits still constrain what can be recovered.
 
 The window applies to discovery of news in The Hacker News and additional RSS/Atom feeds. Previously tracked relevant stories can still be refreshed, and stored findings and evidence remain available. Older CVEs, exact package matches, withdrawals and tracked advisory updates are checked independently of this news window.
 
@@ -93,7 +93,7 @@ notifications:
   max_attempts: 3
 ```
 
-`SMTP_URL` must name an `smtp:` or `smtps:` endpoint. STARTTLS/TLS is required, certificates are verified, and URL query options are rejected. SMTP destinations are operator-selected and may be internal. Up to 20 recipients are supported. Partial acceptance produces `unknown`, since automatically repeating the whole message could duplicate delivery to accepted recipients.
+`SMTP_URL` must name an `smtp:` or `smtps:` endpoint, for example `smtps://alerts:PASSWORD@mail.example.com`. STARTTLS/TLS is required, certificates are verified, and URL query options are rejected. A user name or password that contains `%`, `@`, `:` or `/` must be percent-encoded; write a literal `%` as `%25`. `doctor` reports an address it cannot use, and such an address is recorded as a failed delivery, never as an uncertain one. Recipient addresses are compared with the domain in lower case, so `Ops@Example.ORG` and `Ops@example.org` are the same recipient. SMTP destinations are operator-selected and may be internal. Up to 20 recipients are supported. Partial acceptance produces `unknown`, since automatically repeating the whole message could duplicate delivery to accepted recipients.
 
 ## System inventory
 
@@ -103,6 +103,7 @@ systems:
     name: Production API
     environment: production
     owner: platform
+    note: runs on cluster eu-1, namespace api; on-call rota "platform"
     exposure: internet
     criticality: critical
     updated_at: '2026-10-24T12:00:00Z'
@@ -111,11 +112,13 @@ systems:
         ecosystem: npm
         name: example-parser
         version: 1.2.0
+        note: request parsing in services/api, file package.json
     lockfile: ./api/package-lock.json
     products:
       - name: PostgreSQL
         version: '16.4'
         keywords: [Postgres]
+        note: managed database "api-prod", owned by the data team
     keywords: [our-runtime-name]
 ```
 
@@ -124,7 +127,8 @@ Replace the example names and timestamp with verified deployment information. `u
 | Field                                 | Meaning                                                                                                |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | System `id`                           | Stable, unique deployment identity; keep it unchanged when upgrading a package                         |
-| `environment`, `owner`                | Inventory context; owner is metadata and does not route notifications in this alpha                    |
+| `environment`, `owner`                | Inventory context; the owner is shown in notifications and does not route them                         |
+| `note` (system, component, product)   | Your own pointer to where the item lives or who to ask; shown in notifications, see below              |
 | `exposure`                            | `internet`, `internal` or `unknown`                                                                    |
 | `criticality`                         | `unknown`, `low`, `medium`, `high` or `critical`; business importance, separate from advisory severity |
 | Component `id`                        | Unique within its system; keep stable across upgrades                                                  |
@@ -134,7 +138,24 @@ Replace the example names and timestamp with verified deployment information. `u
 | Product `name`, `version`, `keywords` | Product context and matching terms; not a supported vendor version/backport decision                   |
 | System `keywords`                     | Explicit terms for news matching                                                                       |
 
-Lockfiles must be package-lock v2/v3 with a `packages` map. Imports include transitive, development and optional entries and skip workspace links. They read metadata only. Import IDs follow `lock:node_modules/…` paths. Imported and manual component IDs must be unique. The inventory is bounded to 2 MiB, individual lockfiles to 20 MiB, and each system to 20,000 components. Duplicate system IDs or product names within a system are rejected; YAML aliases are rejected.
+### Notes: telling readers where to look
+
+A finding names a system and a library. The person who receives the alert usually needs one more fact: where that library is used and who can check it. Put that in a `note`:
+
+- on a **system**: where it runs and who owns it, for example `runs on cluster eu-1, namespace shop`;
+- on a **component** or library: where it is declared or used, for example `checkout API, repository acme/checkout, file package.json`;
+- on a **product**: which instance is meant, for example `managed database "shop-prod"`.
+
+Every notification then carries two extra lines built from your inventory:
+
+```text
+Where to look: Web shop (owner: Dana, platform team) - runs on cluster eu-1, namespace shop
+Affected item: npm alpha 1.0.0 - checkout API, repository acme/checkout, file package.json
+```
+
+Both lines appear even without notes, with the system's name and the item in plain words. A note is one line of at most 500 characters. Editing a note updates messages that are still waiting to be sent and does not create a new alert. Notes are stored in the local database and sent to your notification destinations. They are not sent to advisory sources, and they are not included in requests to AI models under either disclosure profile. They are your own text, not evidence: a note never changes whether a finding applies or how it is routed.
+
+Lockfiles must be package-lock v2/v3 with a `packages` map. An entry whose name or version cannot be read is skipped with a monitoring warning instead of rejecting the file; npm names registered before 2017 with capital letters, such as `JSONStream`, are accepted as published. Imports include transitive, development and optional entries and skip workspace links. They read metadata only. Import IDs follow `lock:node_modules/…` paths. Imported and manual component IDs must be unique. The inventory is bounded to 2 MiB, individual lockfiles to 20 MiB, and each system to 20,000 components. Duplicate system IDs or product names within a system are rejected; YAML aliases are rejected.
 
 Use longer explicit keywords for short product names: matching ignores terms shorter than three characters. Whole-name matching reduces substring/scope collisions but cannot disambiguate every product name. Inventory changes trigger reassessment of stored evidence. A removed finding becomes inactive; disappearance is not proof of remediation.
 
@@ -159,7 +180,17 @@ libraries:
     - org.apache.logging.log4j:log4j-core
 ```
 
-The versions above illustrate syntax; use your installed versions. Arrays also accept explicit prefixes, such as `libraries: [python:requests, npm:express]`. Empty lines and `#` comment lines are ignored in text lists. Entries can be `python:requests`, `python:requests==2.32.3`, `npm:express@4.21.2`, or a package name followed by one exact version separated by whitespace. `latest`, wildcards and dependency constraints are rejected. Names without versions still produce advisory candidates, with applicability unknown.
+The versions above illustrate syntax; use your installed versions. Arrays also accept explicit prefixes, such as `libraries: [python:requests, npm:express]`. Empty lines and lines that start with `#` are ignored in text lists.
+
+To say where a library is used, add a note. In a text list, write it after `#` at the end of the line. In YAML, either quote the whole entry or use the object form:
+
+```yaml
+libraries:
+  - 'npm:express@4.21.2   # checkout API, repository acme/checkout, file package.json'
+  - { ecosystem: python, name: requests, version: '2.32.3', note: 'billing worker, services/billing' }
+```
+
+Without the quotes YAML treats everything after `#` as a comment of its own and the note is lost. The same library listed more than once keeps each distinct note, joined with `|`. Entries can be `python:requests`, `python:requests==2.32.3`, `npm:express@4.21.2`, or a package name followed by one exact version separated by whitespace. `latest`, wildcards and dependency constraints are rejected. Names without versions still produce advisory candidates, with applicability unknown.
 
 ```sh
 security-watch normalize-libraries --input examples/libraries.example.txt
@@ -169,7 +200,7 @@ security-watch init --directory ./watch --yes --libraries examples/libraries.exa
 
 Normalization is local and does not install packages, call providers or overwrite an existing output file. Its output is a component array suitable for an inventory's `components` field. Setup creates one application system and enables OSV; it cannot combine `--libraries` with `--systems`. Lists are capped at 2 MiB and 20,000 entries. Generated library IDs include ecosystem, package and version; use explicit component IDs when you need the same identity across upgrades. See the [grouped example](../examples/libraries.example.yaml) and [library-only configuration](../examples/library-watch.example.yaml).
 
-Only npm affected ranges are evaluated locally. For other ecosystems, an exact positive OSV query or an explicitly listed affected version establishes a match; unsupported ranges and empty search results do not establish exclusion. OSV receives the ecosystem, name and optional version. Use the registry's published package spelling, especially for NuGet; arbitrary casing is not a discovery guarantee. A language/runtime product name is not a library package.
+npm affected ranges and a documented PyPI final-release subset are evaluated locally. For other ecosystems and unsupported PyPI forms, an exact positive OSV query or an explicitly listed affected version establishes a match; unsupported ranges and empty search results do not establish exclusion. OSV receives the ecosystem, name and optional version. Use the registry's published package spelling, especially for NuGet; arbitrary casing is not a discovery guarantee. A language/runtime product name is not a library package.
 
 ## Sources and coverage
 
@@ -184,6 +215,10 @@ Only npm affected ranges are evaluated locally. For other ecosystems, an exact p
 | `sources.vendor_feeds`     | `[]`; opt-in official Node.js, Python and PHP feeds with bounded article extraction                                                                              |
 | `sources.feeds`            | `[]`; up to 30 selected public HTTPS RSS 2.0/Atom URLs, without URL credentials                                                                                  |
 
+Collection is designed to keep making progress. cve.now records that match a package on your list are re-read at every scan; records kept only because a declared product or keyword appears in their text are re-read in turn, 200 per scan, oldest first. When cve.now or GitHub lists more new records than one scan reads (5,000), the oldest are collected, the scan is reported as incomplete, and the next scan continues from where this one stopped. A package name in a source record that this application cannot normalise is kept as published and matches nothing; it no longer discards the rest of the record. A stored OSV record that OSV no longer serves is skipped.
+
+A package named only in the text of a news story counts as a match when the name is distinctive (it contains a digit, hyphen, dot, scope or path, such as `left-pad` or `@acme/sdk`) or when the story is about packages (it mentions the ecosystem, or words such as "package", "library" or "module"). Everyday words that are also package names, such as `send`, `buffer` or `request`, therefore do not match a story about a router. Use a system `keywords` entry when you want a plain word matched everywhere.
+
 `hacker_news` means **The Hacker News** at `thehackernews.com`, the cybersecurity publication, not Y Combinator's Hacker News. Its feed is [The Hacker News RSS](https://feeds.feedburner.com/TheHackersNews). The bot fetches bounded article text only from allowed The Hacker News hosts, without executing scripts: at most 50 articles per scan, four concurrently, with a 2 MB HTML response cap and 16,000 characters of extracted text per article. Evidence records whether full article content, a feed excerpt or unavailable content was used. A failed or capped article fetch retains the feed excerpt and cannot support a new confident AI-only dismissal. Incomplete articles relevant to the inventory create a `hacker_news:articles` monitoring-health finding; the successful RSS collection and its checkpoint are still retained.
 
 Set `sources.vendor_feeds: [nodejs, python, php]`, or choose those names with `init --vendor-feeds`, to enable the official Node.js vulnerability feed, Python release blog and PHP announcements. Each adapter fetches at most 20 eligible articles per scan from its fixed vendor origin, with bounded HTML parsing and 16,000-character text limits. Unsupported links or failed extraction retain an excerpt; relevant incomplete articles produce a health warning. PHP announcements are extracted by their feed anchor so unrelated releases do not become one article. Vendor release dates and later advisory-index publication dates do not prove first vulnerability disclosure.
@@ -192,17 +227,21 @@ Additional `feeds` supply titles and summaries/content present in their RSS/Atom
 
 Malformed individual records are skipped while valid neighboring records continue through collection and assessment. Incomplete collection keeps the previous checkpoint, including when valid records have already been saved. Authentication failures, rate limits, invalid pagination and request bounds can stop the affected source; other sources and notification delivery continue. Cancellation stops further requests.
 
-cve.now's first recent-entry collection looks back seven days; later scans use one hour of checkpoint overlap. Collection is bounded to 200 listing pages and 5,000 advisory records per scan. Historical refreshes are limited to cached records relevant to the current inventory and CVE/GHSA IDs in relevant cached/current news, so unrelated global history does not expand the refresh set forever.
+cve.now's first recent-entry collection looks back one day (about 800 records and 17 minutes when measured on 2026-11-13); later scans use one hour of checkpoint overlap. Exact npm package queries are not limited by this window. Collection is bounded to 200 listing pages and 5,000 advisory records per scan. Historical refreshes are limited to cached records relevant to the current inventory and CVE/GHSA IDs in relevant cached/current news, so unrelated global history does not expand the refresh set forever.
 
 The stack endpoint is queried separately for each deduplicated exact npm package/version pair, at most 1,000 pairs per scan and four requests concurrently. Separate requests preserve matches that cve.now would deduplicate in a multi-package request. Only those pairs are sent, not a lockfile or system/deployment metadata. Limits and request failures report incomplete collection and retain the previous checkpoint. Valid cve.now records collected before a failure are still assessed, so a failed listing request does not discard successful exact-package matches. Recent-entry pagination cannot guarantee discovery of every update to an older, previously unseen CVE. Structured affected ranges and original advisory descriptions are used as evidence; generated summaries do not establish affectedness. Unsupported statuses, including supersession without verified withdrawal semantics, fail visibly instead of being treated as a resolved vulnerability. This is not exhaustive historical product coverage.
 
 Optional GitHub collection first looks back seven days of modifications; later scans use checkpoint overlap. Optional OSV queries supply existing advisory matches for the declared library inventory. Versionless queries discover candidates but cannot establish installed-version impact. The per-scan limit is 10,000 unique ecosystem/package/version queries. GitHub-only operation is not a full historical vulnerability scan. Pagination and collection have explicit caps; reaching a cap reports an incomplete source rather than an all-clear.
+
+OSV and GitHub CVSS 4.0 vectors contribute validated base severity alongside existing severity labels and numeric scores. Optional threat/environment metrics are preserved for inspection but excluded from the calculated base score; they do not establish exploitation or local deployment facts. `explain` includes bounded `cvss_v4` score/unsupported diagnostics beside source timestamps. See [supported CVSS v4 semantics and limits](cvss-v4-support.md).
 
 For an existing installation, configuration fields set to `true` stay enabled. To switch to cve.now and The Hacker News only, add the two new fields as shown above, explicitly set `osv`, `github` and `kev` to `false`, clear any unneeded additional feeds, and restart the worker. Omitting the old fields now defaults them to `false`; omitting the new fields defaults them to `true`. To run without any network sources, explicitly disable all five source switches and keep both `feeds: []` and `vendor_feeds: []`. Existing cached evidence and history are retained.
 
 References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The Hacker News](https://thehackernews.com/), [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
 
 ## Model configuration
+
+Before enabling real delivery, [offline rehearsal](offline-rehearsal.md) can replay a bounded sequence of normalized evidence and optional inventory snapshots through the existing policy, queue and simulated delivery transports. It preserves configured channel selection while replacing destinations with in-process sinks, forces models/sources off, and verifies a temporary SQLite backup/restore. The command does not load credentials or open the configured database. Its private report omits raw identifiers, source text and destinations; it does not measure live coverage or model/analyst quality.
 
 Models are disabled by default. To classify system news and assess impact, configure an analysis model and its credentials. Without a model, name/keyword matches remain candidates for review. Use an exact model ID supported by the provider. The model must support the structured JSON response and output limit required by this adapter.
 
@@ -218,13 +257,13 @@ models:
     model: '${VERIFICATION_MODEL}'
     api_key_env: ANTHROPIC_API_KEY
   daily_request_limit: 100
-  daily_token_limit: 100000
+  daily_token_limit: 1000000
   max_input_chars: 12000
   max_output_tokens: 1500
   timeout_seconds: 45
 ```
 
-The `verification` entry is optional. It runs for every news analysis, source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently; disagreement leaves the result uncertain. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
+The `verification` entry is optional and must name a different model from `analysis` (another provider, model ID or endpoint): an identical model would only repeat the first answer, so that configuration is rejected. It runs for every news analysis, source-critical, exploited, unknown/conflicting findings or when the first model proposes critical priority. It receives the evidence independently; disagreement leaves the result uncertain. Verification failure, exhausted budget or disagreement retains the highest validated proposed priority with an explicit unavailable/conflicting state. `scan --dry-run` disables models and does not spend model budget. Use a normal `scan` without `--notify` to test actual model behavior while persisting budget reservations and findings.
 
 For matched system news, analysis records two distinct conclusions:
 
@@ -237,15 +276,16 @@ For noncritical system news, a validated complete analysis of general news/no ap
 
 Completed `general_news`/`not_applicable` classifications remain in history after an article leaves RSS. Changes to the article, inventory, models, prompt or input settings trigger reassessment. This retention rule applies only to general news; `affected` and `not_affected` impact claims still require fresh evidence.
 
-| `ModelSpec` field                                 | Meaning                                                                                             |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `provider`                                        | One of the profiles below; use the same fields for analysis and verification                        |
-| `model`                                           | Required model ID available to your account, or an Azure deployment name; there is no default       |
-| `api_key_env`                                     | Optional environment-variable name; defaults to the profile's key variable, never a literal API key |
-| `endpoint`                                        | Complete API request URL; required for Azure, generic compatible endpoints and local profiles       |
-| `output_format`                                   | `auto` by default; choose `json_schema`, `json_object` or `prompt` when supported                   |
-| `allow_private_endpoint`                          | `false` by default; permits private destinations and HTTP for the configured model request          |
-| `input_usd_per_million`, `output_usd_per_million` | Optional operator-supplied prices, each between 0 and 10,000                                        |
+| `ModelSpec` field                                 | Meaning                                                                                                                   |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                        | One of the profiles below; use the same fields for analysis and verification                                              |
+| `disclosure_profile`                              | `minimal` by default; `deployment-context` explicitly adds the limited deployment fields below, separately for each model |
+| `model`                                           | Required model ID available to your account, or an Azure deployment name; there is no default                             |
+| `api_key_env`                                     | Optional environment-variable name; defaults to the profile's key variable, never a literal API key                       |
+| `endpoint`                                        | Complete API request URL; required for Azure, generic compatible endpoints and local profiles                             |
+| `output_format`                                   | `auto` by default; choose `json_schema`, `json_object` or `prompt` when supported                                         |
+| `allow_private_endpoint`                          | `false` by default; permits private destinations and HTTP for the configured model request                                |
+| `input_usd_per_million`, `output_usd_per_million` | Optional operator-supplied prices, each between 0 and 10,000                                                              |
 
 `auto` uses the profile's default format below. Profiles select API protocols and defaults; they do not establish that every model on a service supports those settings.
 
@@ -308,9 +348,39 @@ The local profiles and `openai-compatible` may omit the actual key when private 
 
 See the [provider registry](https://github.com/ShieldaAI/security-watch/blob/main/src/providers.ts) for endpoint defaults and official API references. `doctor` validates configuration; a live analysis is needed to check account access and the selected model's compatibility. From a source checkout, `node scripts/check-models.mjs --help` describes a bounded synthetic test with separate passed, failed and skipped results. A missing key or model is a skip, never a successful live test.
 
-Set `daily_budget_usd` only after configuring both prices for **every** selected model. Without prices, dollar cost is unknown; request and token allowances still apply. Model calls reserve conservative input/output allowances before the request. Reservations are not provider invoices, are not refunded after a timeout or malformed response, and include verification calls. Daily counters use UTC days. Adding a dollar cap after unpriced calls prevents further billed requests for that UTC day because the prior spend is unknown. There are no automatic model retries or provider fallbacks. Cache hits reuse validated results without a new request reservation. Provider usage and billing remain authoritative.
+Set `daily_budget_usd` only after configuring both prices for **every** selected model. Without prices, dollar cost is unknown; request and token allowances still apply. Model calls reserve an allowance before the request: one token per three bytes of the request plus 512, plus the full `max_output_tokens`. The default `daily_token_limit` of 1,000,000 covers the default 100 daily requests at the largest default request size; lower it to cap spending more tightly. Reservations are not provider invoices, are not refunded after a timeout or malformed response, and include verification calls. Daily counters use UTC days. Adding a dollar cap after unpriced calls prevents further billed requests for that UTC day because the prior spend is unknown. There are no automatic model retries or provider fallbacks. Cache hits reuse validated results without a new request reservation. Provider usage and billing remain authoritative.
 
-The analysis includes relevant components/products/keywords from the matched system and its deployment context, with up to six bounded evidence excerpts. Authoritative and urgent evidence is prioritized, and omitted/truncated context is explicit. Selection is capped at 20 components and 20 products; excess or oversized context fails with an explicit model-context health finding. Partial context or stale inventory cannot support an AI dismissal; unknown relevance enters review. Models receive no tools or notification credentials. The adapter checks that evidence IDs exist and quotes match the source text, but these checks cannot establish whether the model interpreted the source correctly.
+### Data sent to models
+
+Each analysis and verification model has its own `disclosure_profile`. The default is `minimal`, including when the setting is omitted in existing configurations. A verifier never inherits the first model's disclosure permission. Both use explicit field projections so adding inventory fields cannot expand a provider request.
+
+| Profile              | Inventory fields in the request                                                                                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `minimal`            | Relevant package ecosystem, name and known exact version; relevant product name and known version; request-local opaque component/product IDs; current/stale inventory status; whether the exact target has a known installed version |
+| `deployment-context` | All minimal fields plus system environment, exposure and criticality, and only system/product keywords mentioned in the selected evidence, capped at 30 per list                                                                      |
+
+Neither profile sends original system/component IDs, system name, owner, inventory update timestamp, arbitrary configuration, repository/source URLs or revisions, origin, digest, package URLs, SBOM references or graph, provenance, observations, signature/attestation declarations, remediation records or operator identities. These remain available to local assessment and audit. `deployment-context` is an explicit opt-in to the listed fields, including free-text environment and matching keywords. It does not grant access to other inventory metadata. Choose it separately for a trusted local model if cloud providers should receive only minimal inventory.
+
+```yaml
+models:
+  enabled: true
+  analysis:
+    provider: openai
+    model: your-model-id
+    disclosure_profile: minimal
+  verification:
+    provider: anthropic
+    model: your-model-id
+    disclosure_profile: minimal
+```
+
+Both profiles also send the target event/category and verified aliases, selected evidence identifiers and source labels, titles and bounded source excerpts, explicit package claims, severity/exploitation/withdrawal signals, source dates and context coverage. Evidence text is required for cited analysis and is untrusted data. This policy selects fields, not secrets embedded in permitted package/product names or source text. Review private feeds before enabling cloud analysis. If those fields cannot be disclosed, keep models disabled or select an approved local endpoint. Missing deployment fields mean unknown context and cannot establish that a vulnerability prerequisite is absent.
+
+Up to six evidence records are selected, with authoritative and urgent evidence prioritized. Omitted/truncated context is explicit. Selection is capped at 20 components and 20 products; excess or oversized context fails with an explicit model-context health finding. Partial context or stale inventory cannot support an AI dismissal; unknown relevance enters review. Models receive no tools or notification credentials. The adapter checks that evidence IDs exist and quotes match source text, but these checks cannot establish whether the model interpreted the source correctly.
+
+The `security-watch-10` prompt/cache revision invalidates older analyses. Each cache key includes the normalized disclosure profile and exact projected context; changing a profile or visible installed version cannot reuse the other contract's cached result. Deterministic matching and local priority rules still use the full local inventory when models are off or receive minimal context. The default now omits deployment details that older versions sent, so contextual model judgments may differ. There is no need to opt in to preserve deterministic vulnerability findings.
+
+This setting controls AI requests only. Public cve.now lookups receive npm names/exact versions, optional OSV lookups receive ecosystem/name/version, and notification destinations receive formatted finding context and links under their own configuration. See [the separate disclosure boundaries](../SECURITY.md#data-handling).
 
 ## Policy and scheduling
 
@@ -321,7 +391,8 @@ Each `library`, `product` and `news` rule has `levels`, `basis` and `channels`. 
 - `urgent_unknown: true` sends potentially critical unknown/conflicting findings immediately, even before affectedness can be established. Other uncertain findings go to a review digest, including uncertainty below the category's immediate levels.
 - `exploited_override: true` and `malware_override: true` notify immediately even without a matching severity level. They do not override an empty channel list or a supported `not_affected` decision.
 - Confirmed exclusions and all-source withdrawals are retained without new vulnerability notifications. Withdrawal alone does not prove a system safe. Withdrawal disagreement remains conflicting.
-- AI distinguishes noncritical system news from vulnerability reports and evaluates claimed system impact before routing; general news and supported AI-only exclusions are recorded without vulnerability alerts. Generic product reports with linked CVEs use this analysis too. Uncertain analysis goes to review. AI cannot suppress source-critical news, an enabled exploitation override or deterministic package urgency by declaring it irrelevant. Advisory-linked package news uses library policy. Multi-advisory articles retain unmatched CVE/GHSA subjects separately until authoritative alias evidence joins them.
+- AI distinguishes noncritical system news from vulnerability reports and evaluates claimed system impact before routing; general news and supported AI-only exclusions enter a durable local review queue by default, with a digest when channels are configured. Generic product reports with linked CVEs use this analysis too. Uncertain analysis goes to review. AI cannot suppress source-critical news, an enabled exploitation override or deterministic package urgency by declaring it irrelevant. Advisory-linked package news uses library policy. Multi-advisory articles retain unmatched CVE/GHSA subjects separately until authoritative alias evidence joins them.
+- `policy.ai_dismissals: review` is the default. Both complete `general_news/not_applicable` and model-only `not_affected` conclusions require local review, including legacy AI-only irrelevant news. `record` is an explicit opt-out. Deterministic package exclusions, source-critical and enabled exploitation overrides take precedence. See the local review workflow below.
 - `health_channels` routes monitoring failures independently from vulnerability thresholds. If every destination fails, inspect local status/logs; the bot cannot notify through an unavailable channel.
 
 `poll_interval_minutes` is an integer from 1 to 1,440, default 15. `inventory_stale_days` is 1–365, default 7; timestamps more than five minutes in the future are also invalid for assessment. `digest_interval_hours` is an integer from 1 to 168, default 24. Digest boundaries are aligned to the Unix epoch in UTC, not a user's timezone. Each Slack/email digest contains at most five findings; additional groups are sent separately.
@@ -330,7 +401,30 @@ Each `library`, `product` and `news` rule has `levels`, `basis` and `channels`. 
 
 Slack digest groups also respect the message size limit. Entries that do not fit wait for another batch without consuming a send attempt. A malformed saved notification is marked failed while healthy queued work continues. A failed destination does not block another destination. Database errors that prevent reliable queue updates remain fatal; the worker must not claim successful delivery without durable state.
 
-Acknowledgement applies to the current finding revision. Material changes create a new revision. Suppression requires a reason and expiry and remains active until that expiry. `explain FINDING_ID` shows the current policy decision together with acknowledgement and suppression controls, so policy eligibility can be distinguished from an active operator hold. Existing pending deliveries are superseded when the assessment or policy changes. Cosmetic article/model wording does not create a fresh alert. Rare new advisory aliases can change canonical finding identity; this alpha does not migrate historical identities automatically.
+Acknowledgement applies to the current finding revision. Material changes create a new revision. Pass the revision you read, `security-watch acknowledge FINDING_ID --revision N`, to have the command refuse when a newer revision has appeared in the meantime; without `--revision` the current revision is acknowledged and its number is printed. Suppression requires a reason and expiry and remains active until that expiry. `explain FINDING_ID` shows the current policy decision together with acknowledgement and suppression controls, so policy eligibility can be distinguished from an active operator hold. Existing pending deliveries are superseded when the assessment or policy changes. Ordinary alerts keep semantic deduplication. AI dismissal reviews additionally bind the exact reviewed conclusion, evidence content and inventory/model context; changes to that basis create a new review revision. Scan timestamps, unchanged evidence refreshes and JSON object key order do not reopen a review. Rare new advisory aliases can change canonical finding identity; this release does not migrate historical identities automatically.
+
+### Reviewing AI dismissals locally
+
+```yaml
+policy:
+  ai_dismissals: review
+```
+
+This changes the old omitted-setting behavior from quiet recording to review. Existing `review_before_news_suppression: false` is accepted as an explicit legacy alias for `ai_dismissals: record`; `true` maps to `review` and now covers both quiet paths. Conflicting old/new values are rejected. `init` writes the normalized policy. Replace the legacy key with `ai_dismissals` when editing an existing configuration. `status` reports the effective policy. Existing saved findings are enrolled or superseded on the next scan; changing YAML does not rewrite historical verdicts by itself.
+
+```sh
+security-watch reviews --limit 100
+security-watch reviews --limit 100 --after CURSOR_FROM_PREVIOUS_PAGE
+security-watch review FINDING_ID --revision 2 --disposition investigate --reviewer local-operator --reason 'Check the cited version and prerequisites'
+security-watch review FINDING_ID --revision 2 --disposition dismiss --reviewer local-operator --reason 'Inspected the article and installed version'
+security-watch reviews --all
+```
+
+Listing returns the exact finding revision, saved assessment, source IDs/content hashes, queue state and declared reviewer disposition. Pages contain at most 1,000 items, default 100; use the returned cursor for the next page. `status` and `reviews` include pending/investigation counts and the age of the oldest open item. A digest reaching Slack or email never counts as human review. An empty channel list still creates a local queue item. General `acknowledge` or temporary `suppress` controls do not adjudicate the review.
+
+`investigate` records the operator's reason and keeps the item actionable. `dismiss` closes that exact review and acknowledges only its current finding revision, canceling any pending digest for it. These commands send no messages and invoke no model. An already in-flight delivery may still complete. A changed conclusion, source content, installed context or configured model creates a new review revision; a stale verdict is rejected inside a SQLite transaction. Evidence is rechecked at adjudication even if a scan has fetched new source content but has not yet finished reassessment. Source withdrawal, authoritative exclusion, inventory removal or a changed review policy supersedes open obsolete reviews during the scan. No verdict establishes authoritative package safety.
+
+The reviewer is a local operator label, not a separately authenticated account. Access is controlled by OS permissions on the private database and the existing worker/store controls. The label and reason stay in the local database and backups; they are not added to AI provider requests. Schema 6 is applied by `scan` or `start`; read-only and adjudication commands ask for migration first on older stores. Backup verification checks the review table and relationships. Generic retention protects review-bearing finding history and associated evidence, including resolved reviews; it does not yet expire review records. Account for that retained audit data in backup capacity and local access policy.
 
 ## Persistence and recovery
 
@@ -404,3 +498,143 @@ From a source checkout, `npm run evaluate:models -- --help` lists the available 
 The default cap is 20 total requests, 45 seconds per request and 2,048 output tokens. Select cases/providers to fit the cap. Optional verification uses up to two requests per case. Provider charges may apply; a token/request cap is not a dollar budget. Evaluation sends no notifications and uses fictional inventory against source-derived synthetic text.
 
 The versioned corpus includes source references, but its labels remain `pending_human_review`. Reports separate accepted output, attempted coverage, reference-label agreement, false exclusions, rejected outputs and conflicting results. Acceptance measures the production schema/evidence checks, not accuracy. Treat label agreement as a comparison with provisional references; it does not establish production performance. Rejected, skipped and conflicting cases remain visible rather than disappearing from the report.
+
+## Agent deployment evidence, SBOMs and drift
+
+Existing inventory/configuration files continue to work. Systems and components may add
+`origin`, `digest` (`sha256:`, `sha384:` or `sha512:` plus lowercase hex),
+`provenance: {source, reference?, recorded_at?}` and
+`observation: {observed_at, method, reference?}`. Timestamps use ISO 8601 with a timezone.
+These fields record operator-supplied evidence; they do not verify a signature, registry,
+running process or attestation. System `configuration` accepts up to 100 scalar observations.
+Record security settings only, never credentials. Inventory snapshots are persisted in the
+private, unencrypted SQLite database and backups.
+
+Optional artifact metadata includes `artifact_kind` (`application`, `library`, `mcp_server`,
+`mcp_client`, `plugin`, `skill`, `model`, `container` or `other`), `purl`, `source_url`,
+`source_revision`, `sbom_ref` and `dependencies: [{ref, component_id?}]`. A generic model,
+MCP server or plugin can be a system with no package components; its kind does not invent
+a package ecosystem or version match. Source URLs must be HTTPS without credentials,
+query or fragment. References are data and are never fetched. Package URL metadata does
+not override the component's declared ecosystem/name/version used by deterministic assessment.
+
+`signature_verification` and `attestation_verification` each accept
+`{status: verified|failed|unknown, reference, recorded_at, recorded_by?}`. These are results
+recorded by an operator or external verifier, not verification performed by Security Watch.
+The importer never turns an SBOM signature into a `verified` status. Component findings
+show the component's own verification declaration, not a system signature inherited as
+proof for every dependency.
+
+`remediation_evidence` contains at most 100 records per system or component:
+`{event_id, stage: proposed|changed|deployed, verification: supported|failed|unknown,
+reference, recorded_at, recorded_by?}`. Findings include records matching their event ID
+or a known advisory alias under `remediation.operator_records`. They also retain declared
+signature/attestation evidence. None of these fields changes deterministic applicability,
+closes a finding or asserts a deployment is safe. Retain separate records for proposal,
+change, deployment and verification evidence. Required references and dates make a declaration
+traceable; they do not authenticate its author. Do not place credentials or secrets in them.
+
+```yaml
+systems:
+  - id: flow-service
+    name: Flow service
+    updated_at: '2026-10-28T12:00:00Z'
+    sbom: ./deployment.cdx.json
+    provenance:
+      source: deployment-pipeline
+      reference: build-123
+    observation:
+      observed_at: '2026-10-28T12:00:00Z'
+      method: operator runtime inventory
+    configuration:
+      LANGFLOW_WEBHOOK_AUTH_ENABLE: true
+```
+
+`sbom` imports a local CycloneDX JSON 1.4, 1.5 or 1.6 file. The importer is bounded to
+20 MiB, 20,000 components and 32 nesting levels. Supported package URLs determine package
+identity and exact version; conflicting versions, duplicate references and invalid SHA-256
+hashes fail import. SHA-256 component hashes and the input-file digest are retained.
+Original package URLs and component references are preserved. Dependency graphs are bounded
+to 20,000 source entries, 1,000 targets per entry and 100,000 total edges. The import report's
+`dependencies` and inventory system's `sbom_dependencies` retain `{ref, depends_on}` entries.
+Imported components also have `dependencies` links with `component_id` when the target can
+be resolved. Missing or unsupported targets remain unresolved references with warnings;
+relationships from an unknown source are retained with a warning. A declared CycloneDX metadata
+root retains its outgoing edges without being treated as a missing package. Duplicate or malformed
+references fail import. Dependency edges are declarations, not verified reachability or
+transitive affectedness. Explicit `library`, `application`, `container` and machine-learning-model
+component types populate artifact kind; names do not establish MCP/plugin trust.
+References, scripts, vulnerabilities and remote artifacts in the SBOM are never fetched or
+executed. Unsupported ecosystems and missing package URLs are reported as incomplete
+inventory, never silently treated as safe. SBOM timestamps do not establish deployment freshness.
+
+Preview without configuration or network access:
+
+```sh
+security-watch import-sbom --input ./deployment.cdx.json --output ./import-report.json
+security-watch coverage --config ./security-watch.yaml
+security-watch inventory-drift --config ./security-watch.yaml
+```
+
+The import command creates a new private report file (never overwrites); warnings give exit
+code 2. `loadInventory` imports via `sbom` and scans emit monitoring-health findings for import
+warnings. Exported APIs include `importCycloneDx`, `compareInventories` and `refreshCoverage`.
+
+Each completed scan compares the inventory with the previous completed scan. Drift reports
+additions, removals and changes in identity, version, digest, origin, provenance, environment,
+exposure, configuration, artifact/source identity, dependency relationships, declared signature/attestation
+results and remediation evidence. `updated_at` and deployment-observation timestamps alone do not create drift. The first scan establishes
+a baseline; `inventory-drift` shows the most recent comparison. This compares declarations,
+not live processes. Removing a dependency does not establish remediation.
+
+Each configured source produces a coverage receipt containing attempt/last-success times,
+expiry, complete/partial/failed collection, evidence count, sanitized errors and collection
+scope. `coverage` and `status` recalculate freshness when read. A complete empty query means
+that bounded request succeeded, not that the deployment is vulnerability-free. Fixtures
+produce no live-source receipts. Stale evidence cannot establish a new version exclusion;
+positive historical matches remain visible. Incomplete source coverage also prevents a
+current exclusion for findings using that source.
+
+Findings expose `remediation` with cited guidance, relevant configuration observations,
+artifact/observation evidence and a review state. An observed version exclusion is still an
+operator declaration, not a verified fix. Configuration-dependent guidance is currently
+curated for [Langflow webhook authentication](https://github.com/langflow-ai/langflow/security/advisories/GHSA-cf6m-vc3m-7cgm)
+and [LangGraph namespace isolation](https://github.com/langchain-ai/langgraph/security/advisories/GHSA-47pj-3jcm-6whg),
+plus MCP Python [token audience](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-w4fh-qvv9-3v23),
+[redirect handling](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-5h93-6whr-6q8j),
+[schema references](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-rwrf-2pqf-9j8j)
+and [OpenHands sandbox exposure](https://www.vulncheck.com/advisories/openhands-software-agent-sdk-unauthenticated-sandbox-agent-server-rce),
+reviewed on 2026-10-28. These findings remain `review_required`; updating a version or
+recording a setting cannot automatically close them. The source-derived fixtures in
+`examples/agent-advisories-2026.json` contain selected affected example versions and fixed
+capture timestamps, not a complete vulnerability database or live safety assessment.
+
+`examples/agent-advisory-cases-2026.json` separates vulnerable example releases,
+vendor-fixed releases with declared good or bad settings, missing versions and
+unsupported PyPI ordering. Final release versions within the supported subset can
+establish version exclusion; unsupported forms remain `unknown`. Version exclusion
+never establishes configuration remediation. MCP audience checks also require verifier output and settings, beyond
+the version update. OpenHands remains a product-level finding because the CNA names
+the GitHub SDK, not a verified registry package. Declared port/authentication
+settings remain review evidence rather than tested deployment security.
+
+### Python version range coverage
+
+PyPI range evaluation uses the pinned, maintained
+[`@renovatebot/pep440`](https://github.com/renovatebot/pep440) library, independently
+of npm semantics. The supported subset is final numeric releases (for example
+`1.29.1`) and comma-separated `==`, `!=`, `<`, `<=`, `>`, `>=` constraints over final
+numeric releases. PEP 440 zero-padding equivalence is respected. Input bounds limit
+range length, component count and integer size; failures remain `unknown`.
+
+Prerelease, development, postrelease, local and epoch versions, wildcard and
+compatible-release constraints, arbitrary equality and invalid/unsupported syntax
+remain `unknown` unless an exact positive source match establishes that the installed
+version is affected. An unsupported constraint alongside a supported one cannot
+establish exclusion. Empty or partial version lists do not establish exclusion either.
+Stale inventory, stale evidence and incomplete source coverage retain their existing
+uncertainty rules. This is intentionally a supported subset, not full PEP 440 coverage.
+
+The dependency requires Node **24.10.0 or newer**, now the minimum supported runtime.
+The lockfile pins version 6.0.0 and its registry integrity digest. No Python runtime
+or subprocess is required to evaluate advisories.

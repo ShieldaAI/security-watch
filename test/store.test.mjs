@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { removeAcceptanceSchema } from './helpers/legacy-notifications.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
@@ -47,11 +48,24 @@ function disk(t) {
   return { dir, path: join(dir, 'watch.db') };
 }
 function removeRetentionSchema(database) {
+  removeAcceptanceSchema(database);
   database.exec(`DROP INDEX IF EXISTS metadata_age; DROP INDEX IF EXISTS evidence_age; DROP INDEX IF EXISTS findings_age;
     DROP INDEX IF EXISTS evidence_revisions_age; DROP INDEX IF EXISTS finding_revisions_age;
     ALTER TABLE metadata DROP COLUMN updated_at; ALTER TABLE evidence DROP COLUMN content_hash;
     ALTER TABLE evidence DROP COLUMN fetched_at; ALTER TABLE findings DROP COLUMN updated_at;`);
 }
+
+test('one digest receipt commits atomically and a failed transition leaves the batch in flight', (t) => {
+  const store = memory(t);
+  for (const id of ['one', 'two'])
+    store.saveAssessment(base({ id }), { ...notify, channels: ['slack'] }, 1000);
+  const ids = [store.claimDue(1000).id, store.claimDue(1000).id];
+  assert.throws(() => store.completeBatch([ids[0], 'missing'], 'accepted', 1000, undefined, 1200));
+  assert(store.jobs().every((job) => job.status === 'sending' && job.accepted_at === undefined));
+  assert.throws(() => store.completeBatch(ids, 'unknown', 1000, undefined, 1200));
+  store.completeBatch(ids, 'accepted', 1000, undefined, 1200);
+  assert(store.jobs().every((job) => job.status === 'accepted' && job.accepted_at === 1200));
+});
 
 test('assessment and per-channel delivery jobs commit atomically', (t) => {
   const store = memory(t);

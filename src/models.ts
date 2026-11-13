@@ -12,7 +12,7 @@ import type {
 } from './types.js';
 import { hash, highest, severityRank } from './util.js';
 
-export const PROMPT_VERSION = 'security-watch-9';
+export const PROMPT_VERSION = 'security-watch-10';
 const quoteSchema = z.object({ evidence_id: z.string(), quote: z.string().min(20).max(600) }).strict();
 const newsSchema = z
   .object({
@@ -257,7 +257,11 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
       throw new Error('MODEL_INCONSISTENT_NEWS_ANALYSIS');
     if (
       (news.impact === 'affected' || news.impact === 'not_affected') &&
-      (!news.affected_products.length || !news.affected_versions.length)
+      (!news.affected_products.length ||
+        !news.affected_versions.length ||
+        // A version citation has to name a version: a blank or a stray character quotes nothing.
+        news.affected_versions.some((value) => !/\d/.test(value)) ||
+        news.affected_products.some((value) => value.trim().length < 2))
     )
       throw new Error('MODEL_UNSUPPORTED_NEWS_IMPACT');
   }
@@ -322,7 +326,8 @@ export class ModelAnalyzer {
       .map((e) => e.id);
     const incompleteArticles = evidence
       .filter(
-        (e) => e.kind === 'news' && (e.content_status === 'excerpt' || e.content_status === 'unavailable'),
+        // Only an article read in full can support a decisive claim; a missing status is not "full".
+        (e) => e.kind === 'news' && e.content_status !== 'full',
       )
       .map((e) => e.id);
     let partialContext =
@@ -369,26 +374,54 @@ export class ModelAnalyzer {
         (item) => `product:${item.name.toLowerCase()}` === assessment.component_id && item.version,
       ),
     );
-    const keywords = system.keywords.filter(mentions);
-    partialContext ||= keywords.length > 30;
+    const disclosureProfile = spec.disclosure_profile ?? 'minimal';
+    const includeDeployment = disclosureProfile === 'deployment-context';
+    const keywords = includeDeployment ? system.keywords.filter(mentions) : [];
+    const productKeywords = products.map((p) => (includeDeployment ? p.keywords.filter(mentions) : []));
+    const omittedKeywords =
+      Math.max(0, keywords.length - 30) +
+      productKeywords.reduce((count, items) => count + Math.max(0, items.length - 30), 0);
+    partialContext ||= omittedKeywords > 0;
     if (components.length > 20 || products.length > 20) throw new Error('MODEL_CONTEXT_LIMIT');
+    // Request-local IDs correlate the target without disclosing host inventory identities.
+    // Construct each wire object explicitly. Inventory schema additions must never silently
+    // expand disclosure, including when the verification model uses a different profile.
+    const componentIndex = components.findIndex((c) => c.id === assessment.component_id);
+    const productIndex = products.findIndex(
+      (p) => `product:${p.name.toLowerCase()}` === assessment.component_id,
+    );
     const context = {
+      disclosure_profile: disclosureProfile,
       target: {
         event_id: assessment.event_id,
         verified_aliases: verifiedTargetAliases(assessment.event_id, evidence),
         installed_version_known: targetHasInstalledVersion,
-        component_id: assessment.component_id ?? null,
+        component_id:
+          componentIndex >= 0 ? `c${componentIndex}` : productIndex >= 0 ? `p${productIndex}` : null,
         category: assessment.category,
       },
       system: {
-        environment: system.environment,
-        exposure: system.exposure,
-        criticality: system.criticality,
-        inventory_updated_at: system.updated_at,
+        ...(includeDeployment
+          ? {
+              environment: system.environment,
+              exposure: system.exposure,
+              criticality: system.criticality,
+              keywords: keywords.slice(0, 30),
+            }
+          : {}),
         inventory_status: staleInventory ? 'stale' : 'current',
-        components,
-        products,
-        keywords: keywords.slice(0, 30),
+        components: components.map((c, index) => ({
+          id: `c${index}`,
+          ecosystem: c.ecosystem,
+          name: c.name,
+          ...(c.version ? { version: c.version } : {}),
+        })),
+        products: products.map((p, index) => ({
+          id: `p${index}`,
+          name: p.name,
+          ...(p.version ? { version: p.version } : {}),
+          ...(includeDeployment ? { keywords: productKeywords[index]!.slice(0, 30) } : {}),
+        })),
       },
       coverage: {
         total_evidence: evidence.length,
@@ -396,7 +429,7 @@ export class ModelAnalyzer {
         truncated_evidence_ids: truncatedIds,
         incomplete_article_ids: incompleteArticles,
         stale_evidence_ids: staleEvidenceIds,
-        omitted_keywords: Math.max(0, keywords.length - 30),
+        omitted_keywords: omittedKeywords,
       },
       evidence: visible.map((e, index) => ({
         id: e.id,
@@ -405,7 +438,14 @@ export class ModelAnalyzer {
         title: e.title,
         excerpts: excerptsFor(e, index),
         severity: e.severity,
-        packages: e.packages,
+        packages: e.packages.map((p) => ({
+          ecosystem: p.ecosystem,
+          name: p.name,
+          range: p.range,
+          versions: p.versions,
+          matched_versions: p.matched_versions,
+          fixed: p.fixed,
+        })),
         exploited: e.exploited,
         withdrawn: e.withdrawn,
         aliases: e.aliases,
@@ -461,7 +501,13 @@ export class ModelAnalyzer {
     if (!excerpts.size) throw new Error('MODEL_EVIDENCE_MISSING');
     const input = JSON.stringify(context);
     if (input.length > this.config.models.max_input_chars) throw new Error('MODEL_CONTEXT_LIMIT');
-    const key = 'analysis:' + hash({ version: PROMPT_VERSION, spec, context });
+    const key =
+      'analysis:' +
+      hash({
+        version: PROMPT_VERSION,
+        spec: { ...spec, disclosure_profile: disclosureProfile },
+        context,
+      });
     const cached = this.store.getMeta(key);
     if (cached)
       return {
@@ -474,7 +520,8 @@ export class ModelAnalyzer {
     const { url, headers, body } = buildModelRequest(
       spec,
       this.env[spec.api_key_env],
-      instruction,
+      instruction +
+        ' The disclosure_profile describes the inventory fields the operator permits this model to receive. Request-local component/product IDs have no meaning outside this input. Undisclosed deployment context and keywords are unknown, never proof that prerequisites are absent or a target is not affected. Minimal inventory includes package/product identity and known version, not deployment configuration.',
       input,
       modelOutputSchema(
         excerpts,
@@ -484,8 +531,10 @@ export class ModelAnalyzer {
       maxOutput,
     );
     const serialized = JSON.stringify(body);
-    // Reserve conservatively; never refund timeouts, invalid output or possibly billed requests.
-    const inputAllowance = Buffer.byteLength(serialized) + 512;
+    // Reserve before sending; never refund timeouts, invalid output or possibly billed requests.
+    // One token per three bytes over-counts ordinary text (about four bytes per token) without
+    // charging the budget a whole token for every byte.
+    const inputAllowance = Math.ceil(Buffer.byteLength(serialized) / 3) + 512;
     const usd =
       spec.input_usd_per_million === undefined || spec.output_usd_per_million === undefined
         ? undefined

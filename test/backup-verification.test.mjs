@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { removeAcceptanceSchema } from './helpers/legacy-notifications.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, symlinkSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,8 +32,8 @@ test('verification restores a separate copy and returns only safe counts and tim
   const before = readFileSync(backup);
   const result = await verifyBackup(backup);
   assert.equal(result.ok, true);
-  assert.equal(result.schema_version, 5);
-  assert.equal(result.verified_schema_version, 5);
+  assert.equal(result.schema_version, 7);
+  assert.equal(result.verified_schema_version, 7);
   assert.equal(result.counts.budgets, 1);
   assert.equal(result.last_scan_at, '2026-10-24T12:00:00.000Z');
   assert.equal(JSON.stringify(result).includes('synthetic-secret'), false);
@@ -45,6 +46,7 @@ test('older supported backups migrate only in the verification copy', async (t) 
   const { store, backup } = setup(t);
   await store.backup(backup);
   const old = new DatabaseSync(backup);
+  removeAcceptanceSchema(old);
   old.exec(`DROP INDEX metadata_age; DROP INDEX evidence_age; DROP INDEX findings_age;
     DROP INDEX evidence_revisions_age; DROP INDEX finding_revisions_age;
     ALTER TABLE metadata DROP COLUMN updated_at; ALTER TABLE evidence DROP COLUMN content_hash;
@@ -54,7 +56,7 @@ test('older supported backups migrate only in the verification copy', async (t) 
   const before = readFileSync(backup);
   const result = await verifyBackup(backup);
   assert.equal(result.schema_version, 4);
-  assert.equal(result.verified_schema_version, 5);
+  assert.equal(result.verified_schema_version, 7);
   assert.equal(result.counts.budgets, 1);
   assert.deepEqual(readFileSync(backup), before);
 });

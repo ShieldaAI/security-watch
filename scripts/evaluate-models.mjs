@@ -7,6 +7,7 @@ import { safeHttp } from '../dist/http.js';
 import { ModelAnalyzer, PROMPT_VERSION } from '../dist/models.js';
 import { PROVIDERS, modelOutputFormat } from '../dist/providers.js';
 import { memoryState } from './check-models.mjs';
+import { recordAlertOutcome } from './evaluate-alerts.mjs';
 
 const corpusText = readFileSync(new URL('../test/fixtures/model-evaluation.json', import.meta.url), 'utf8');
 export const CORPUS = JSON.parse(corpusText);
@@ -137,7 +138,8 @@ export function parseEvaluationOptions(args) {
       const ids = value.split(',');
       const allowed =
         arg === '--cases' ? CORPUS.cases.map((item) => item.id) : PROVIDERS.map((item) => item.id);
-      if (ids.some((id) => !allowed.includes(id))) throw new Error('INVALID_OPTIONS');
+      if (new Set(ids).size !== ids.length || ids.some((id) => !allowed.includes(id)))
+        throw new Error('INVALID_OPTIONS');
       if (arg === '--verification-provider') {
         if (ids.length !== 1) throw new Error('INVALID_OPTIONS');
         options.verification = ids[0];
@@ -244,6 +246,12 @@ export async function evaluateModels(
         config = parseConfig({
           version: 1,
           sources: { cve_now: false, hacker_news: false },
+          policy: {
+            news: { channels: ['slack'], levels: ['high', 'critical'] },
+            product: { channels: ['slack'], levels: ['high', 'critical'] },
+            library: { channels: ['slack'], levels: ['high', 'critical'] },
+          },
+          notifications: { slack: { webhook_url_env: 'SYNTHETIC_EVALUATION_NEVER_READ' } },
           models: {
             enabled: true,
             analysis: analysis.spec,
@@ -295,6 +303,7 @@ export async function evaluateModels(
         results.push({
           ...base,
           status,
+          outcome: recordAlertOutcome(result, config, [fixture.evidence], now()),
           requests: caseRequests,
           ...(status === 'accepted'
             ? {
@@ -315,7 +324,47 @@ export async function evaluateModels(
       }
     }
   }
+  const allCasesSelected =
+    new Set(options.cases).size === corpus.cases.length &&
+    corpus.cases.every((item) => options.cases.includes(item.id));
+  const actionable = results.filter((row) => ['affected', 'unknown'].includes(row.expected.impact));
+  const benign = results.filter((row) => ['not_affected', 'not_applicable'].includes(row.expected.impact));
+  const outcomeMetrics = {
+    expected_trials: corpus.cases.length * options.providers.length,
+    measured_trials: results.filter((row) => row.outcome).length,
+    actionable_trials: actionable.length,
+    false_dismissals: actionable.filter((row) => row.outcome?.quiet).length,
+    benign_trials: benign.length,
+    unnecessary_immediate_alert_trials: benign.filter((row) => row.outcome?.immediate_notifications > 0)
+      .length,
+    nonactionable_digest_notifications: benign.reduce(
+      (sum, row) => sum + (row.outcome?.digest_notifications ?? 0),
+      0,
+    ),
+    local_review_items: results.reduce((sum, row) => sum + (row.outcome?.local_reviews ?? 0), 0),
+    scope:
+      'Production policy and fresh local SQLite outbox; no delivery. Pending synthetic labels do not establish production accuracy.',
+  };
+  const metrics = scoreEvaluation(results);
+  const complete =
+    allCasesSelected &&
+    results.length === outcomeMetrics.expected_trials &&
+    metrics.accepted === results.length &&
+    results.length > 0;
+  const qualityGate = {
+    passed:
+      complete &&
+      metrics.exact_matches === results.length &&
+      outcomeMetrics.false_dismissals === 0 &&
+      outcomeMetrics.unnecessary_immediate_alert_trials === 0,
+    complete,
+    label_mismatches: metrics.accepted - metrics.exact_matches,
+    scope:
+      'Full selected-provider corpus regression; accepted JSON alone cannot pass. Human label validation remains separate.',
+  };
   return {
+    outcome_metrics: outcomeMetrics,
+    quality_gate: qualityGate,
     corpus_version: corpus.version,
     corpus_sha256:
       corpus === CORPUS ? CORPUS_SHA256 : createHash('sha256').update(JSON.stringify(corpus)).digest('hex'),
@@ -331,7 +380,7 @@ export async function evaluateModels(
       timeout_seconds: options.timeout,
       models,
     },
-    metrics: scoreEvaluation(results),
+    metrics,
     providers: Object.fromEntries(
       options.providers.map((provider) => [
         provider,
@@ -340,6 +389,10 @@ export async function evaluateModels(
     ),
     results,
   };
+}
+
+export function evaluationExitCode(report) {
+  return !report.metrics.attempted ? 3 : report.quality_gate?.passed ? 0 : 1;
 }
 
 export async function main(args = process.argv.slice(2)) {
@@ -368,13 +421,17 @@ synthetic reference labels. Coverage and all-case correctness include skipped,
 rejected and conflicting cases; confusion tables show rejected/conflicting
 outcomes separately. Unknown reference impacts are excluded only from binary
 affected precision, not from exact agreement or false-exclusion reporting.
-Exit: 0 completed without rejected/conflicting cases; 1 rejects/conflicts;
-2 invalid options; 3 no attempted cases. Label mismatches remain in the report.`);
+Final policy and a fresh local outbox are evaluated with a synthetic Slack route;
+no notification is sent. False quiet dismissals, immediate unnecessary alerts and
+benign digest workload are reported separately.
+Exit: 0 full corpus with exact labels and safe final outcomes; 1 unsafe, mismatched,
+rejected, conflicting or incomplete/filtered run; 2 invalid options; 3 no attempted cases.
+This regression gate uses pending synthetic labels, not production accuracy.`);
     return 0;
   }
   const report = await evaluateModels(options);
   console.log(JSON.stringify(report, null, 2));
-  return report.metrics.rejected || report.metrics.conflicting ? 1 : report.metrics.attempted ? 0 : 3;
+  return evaluationExitCode(report);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
   process.exitCode = await main();

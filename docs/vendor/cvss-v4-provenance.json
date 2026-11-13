@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "repository": "https://github.com/FIRSTdotorg/cvss-v4-calculator",
+  "commit": "c5b0d409ae9f57c44264c6ce5f27d89298e1d32a",
+  "license": "BSD-2-Clause",
+  "files": {
+    "cvss_lookup.js": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/cvss_lookup.js",
+      "sha256": "d533fe625d95e15b7b488a4bf93dab5f7df16b7e38b0c8ee01281d7b31a8165e"
+    },
+    "max_composed.js": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/max_composed.js",
+      "sha256": "be707cc82c17993a04a84e47b1a8aaa1d0d212b56852254659ce77fd7d959f63"
+    },
+    "max_severity.js": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/max_severity.js",
+      "sha256": "f838ecb41bfd5114456e7fa7df8a8449ca2735c176867886fa34bd011dee0b24"
+    },
+    "metrics.js": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/metrics.js",
+      "sha256": "99ee2643587071bf744cd090c4bb2db58d523ed0276efd809871b00a12985a4c"
+    },
+    "cvss_score.js": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/cvss_score.js",
+      "sha256": "453ce6767b5c3939b51d1f21315f2649e47b5abeca674be287e94b524472a1bc"
+    },
+    "LICENSE": {
+      "url": "https://raw.githubusercontent.com/FIRSTdotorg/cvss-v4-calculator/c5b0d409ae9f57c44264c6ce5f27d89298e1d32a/LICENSE",
+      "sha256": "5d672639189da9bda914dd8c847069cc6959135000b17c45262bb742e5d3b392"
+    }
+  },
+  "adaptations": [
+    "Concatenate the five core/data files; no UI or runtime retrieval.",
+    "Declare every upstream assignment-only browser global inside its original function; data assignments become module constants.",
+    "Add typed module exports and freeze the metric validation table.",
+    "Apply repository formatting; arithmetic and lookup data are unchanged."
+  ]
+}

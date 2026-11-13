@@ -1,0 +1,145 @@
+[
+  {
+    "id": "GHSA-cf6m-vc3m-7cgm",
+    "source": "fixture:github-reviewed",
+    "kind": "advisory",
+    "title": "Langflow webhook authentication bypass (source-derived regression fixture)",
+    "url": "https://github.com/langflow-ai/langflow/security/advisories/GHSA-cf6m-vc3m-7cgm",
+    "description": "An unauthenticated caller can invoke flows when webhook authentication is disabled. The fix changes the default in 1.9.1; explicitly disabling LANGFLOW_WEBHOOK_AUTH_ENABLE still requires deployment review. This fixture lists one affected example version, not the complete affected range.",
+    "aliases": ["CVE-2026-8505"],
+    "severity": "critical",
+    "modified_at": "2026-10-05T00:00:00Z",
+    "fetched_at": "2026-10-28T12:00:00Z",
+    "published_at": "2026-08-12T00:00:00Z",
+    "packages": [
+      {
+        "ecosystem": "PyPI",
+        "name": "langflow",
+        "versions": ["1.9.0"],
+        "fixed": "1.9.1"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-47pj-3jcm-6whg",
+    "source": "fixture:github-reviewed",
+    "kind": "advisory",
+    "title": "LangGraph namespace prefix matching can cross tenant boundaries (source-derived regression fixture)",
+    "url": "https://github.com/langchain-ai/langgraph/security/advisories/GHSA-47pj-3jcm-6whg",
+    "description": "Prefix matching in checkpoint stores can read sibling namespaces. Deployments using namespaces as tenant boundaries need cross-tenant negative tests in addition to upgrading. This fixture lists an affected example version, not the complete affected range.",
+    "aliases": ["CVE-2026-71433"],
+    "severity": "medium",
+    "modified_at": "2026-08-11T00:00:00Z",
+    "fetched_at": "2026-10-28T12:00:00Z",
+    "published_at": "2026-07-30T00:00:00Z",
+    "packages": [
+      {
+        "ecosystem": "PyPI",
+        "name": "langgraph-checkpoint-sqlite",
+        "versions": ["3.1.0"],
+        "fixed": "3.1.1"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-w4fh-qvv9-3v23",
+    "source": "fixture:github-advisory-database",
+    "kind": "advisory",
+    "title": "MCP Python token audience enforcement requires explicit deployment configuration (source-derived regression fixture)",
+    "url": "https://github.com/advisories/GHSA-w4fh-qvv9-3v23",
+    "description": "The mcp HTTP server can accept tokens intended for another service when audience validation is absent. Patched releases add opt-in checking; upgrade alone does not enable it. Exact example versions are selected from the published ranges.",
+    "aliases": ["CVE-2026-116684"],
+    "severity": "medium",
+    "modified_at": "2026-10-27T21:07:01Z",
+    "fetched_at": "2026-10-28T16:44:48Z",
+    "published_at": "2026-10-27T21:06:59Z",
+    "packages": [
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 1.10.0, < 1.30.0",
+        "versions": ["1.29.1"],
+        "fixed": "1.30.0"
+      },
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 2.0.0, < 2.2.0",
+        "versions": ["2.1.1"],
+        "fixed": "2.2.0"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-5h93-6whr-6q8j",
+    "source": "fixture:github-advisory-database",
+    "kind": "advisory",
+    "title": "MCP Python HTTP redirects can expose custom credentials and request bodies (source-derived regression fixture)",
+    "url": "https://github.com/advisories/GHSA-5h93-6whr-6q8j",
+    "description": "Affected HTTP clients can forward custom headers and, on 307/308 redirects, bodies to another origin. A lone Authorization header was already removed. Server-only and stdio use are outside this issue. Exact example versions are selected from the published ranges.",
+    "aliases": ["CVE-2026-116685"],
+    "severity": "medium",
+    "modified_at": "2026-10-27T21:05:36Z",
+    "fetched_at": "2026-10-28T16:44:48Z",
+    "published_at": "2026-10-27T21:05:34Z",
+    "packages": [
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 1.8.0, < 1.30.0",
+        "versions": ["1.29.1"],
+        "fixed": "1.30.0"
+      },
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 2.0.0, < 2.2.0",
+        "versions": ["2.1.1"],
+        "fixed": "2.2.0"
+      }
+    ]
+  },
+  {
+    "id": "GHSA-rwrf-2pqf-9j8j",
+    "source": "fixture:github-advisory-database",
+    "kind": "advisory",
+    "title": "MCP Python tool schema references can trigger external access and stalls (source-derived regression fixture)",
+    "url": "https://github.com/advisories/GHSA-rwrf-2pqf-9j8j",
+    "description": "A client validating tool results can resolve remote or local-file schema references supplied by a server, including blocking synchronous retrieval. The fix limits resolution to the supplied document and standard metaschemas. Exact example versions are selected from the published ranges.",
+    "aliases": ["CVE-2026-116686"],
+    "severity": "medium",
+    "modified_at": "2026-10-27T21:05:30Z",
+    "fetched_at": "2026-10-28T16:44:48Z",
+    "published_at": "2026-10-27T21:05:29Z",
+    "packages": [
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 1.10.0, < 1.30.0",
+        "versions": ["1.29.1"],
+        "fixed": "1.30.0"
+      },
+      {
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "range": ">= 2.0.0, < 2.2.0",
+        "versions": ["2.1.1"],
+        "fixed": "2.2.0"
+      }
+    ]
+  },
+  {
+    "id": "CVE-2026-112346",
+    "source": "fixture:vulncheck-cna",
+    "kind": "advisory",
+    "title": "OpenHands Software Agent SDK sandbox port exposure (source-derived regression fixture)",
+    "url": "https://www.vulncheck.com/advisories/openhands-software-agent-sdk-unauthenticated-sandbox-agent-server-rce",
+    "description": "OpenHands Software Agent SDK releases before 1.52.0 can expose DockerWorkspace or Apptainer sandbox servers without session authentication. Reachable published ports permit sandbox command execution and access to mounted data and secrets. This is product evidence; no registry package identity or deployment applicability is inferred.",
+    "aliases": ["GHSA-rp7h-crm7-h5qj"],
+    "severity": "critical",
+    "published_at": "2026-10-26T15:34:30.749Z",
+    "modified_at": "2026-10-26T15:34:30.749Z",
+    "fetched_at": "2026-10-28T16:44:48Z",
+    "packages": []
+  }
+]

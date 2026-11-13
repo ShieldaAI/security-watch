@@ -3,21 +3,126 @@ import { dirname, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
-import { exactLibraryVersion, normalizeEcosystem, normalizePackageName, parseLibrary } from './ecosystems.js';
+import {
+  exactLibraryVersion,
+  mergeNotes,
+  normalizeEcosystem,
+  normalizePackageName,
+  parseLibrary,
+} from './ecosystems.js';
 import { hash } from './util.js';
+import { importCycloneDx } from './sbom.js';
 
 const shortText = z.string().trim().min(1).max(500);
-const npmName = z
-  .string()
-  .max(214)
-  .regex(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/, 'Expected a canonical npm package name');
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
+const evidenceText = shortText.refine(
+  (value) => !/[\u0000-\u001f\u007f]/u.test(value),
+  'Control characters are not allowed',
+);
+const referenceText = z
+  .string()
+  .min(1)
+  .max(1000)
+  .regex(/^[^\u0000-\u001f\u007f]+$/u);
+const declaredVerification = z.strictObject({
+  status: z.enum(['verified', 'failed', 'unknown']),
+  reference: evidenceText,
+  recorded_at: z.iso.datetime({ offset: true }),
+  recorded_by: evidenceText.optional(),
+});
+const dependencyLinks = z
+  .array(z.strictObject({ ref: referenceText, component_id: evidenceText.optional() }))
+  .max(1000)
+  .refine(
+    (links) => new Set(links.map((link) => link.ref)).size === links.length,
+    'Duplicate dependency reference',
+  );
+const dependencyGraph = z
+  .array(z.strictObject({ ref: referenceText, depends_on: z.array(referenceText).max(1000) }))
+  .max(20_000)
+  .refine(
+    (entries) => entries.reduce((count, entry) => count + entry.depends_on.length, 0) <= 100_000,
+    'At most 100000 dependency edges',
+  )
+  .refine(
+    (entries) =>
+      new Set(entries.map((entry) => entry.ref)).size === entries.length &&
+      entries.every((entry) => new Set(entry.depends_on).size === entry.depends_on.length),
+    'Duplicate dependency reference',
+  );
+const inventoryEvidence = {
+  artifact_kind: z
+    .enum([
+      'application',
+      'library',
+      'mcp_server',
+      'mcp_client',
+      'plugin',
+      'skill',
+      'model',
+      'container',
+      'other',
+    ])
+    .optional(),
+  purl: z
+    .string()
+    .max(1000)
+    .regex(/^pkg:[a-z][a-z0-9.+-]*\/[^\s\u0000-\u001f\u007f]+$/u)
+    .optional(),
+  source_url: z
+    .url()
+    .max(2048)
+    .refine((value) => {
+      const url = new URL(value);
+      return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
+    }, 'Source URL must be HTTPS without credentials, query or fragment')
+    .optional(),
+  source_revision: evidenceText.optional(),
+  sbom_ref: referenceText.optional(),
+  dependencies: dependencyLinks.optional(),
+  signature_verification: declaredVerification.optional(),
+  attestation_verification: declaredVerification.optional(),
+  remediation_evidence: z
+    .array(
+      z.strictObject({
+        event_id: evidenceText,
+        stage: z.enum(['proposed', 'changed', 'deployed']),
+        verification: z.enum(['supported', 'failed', 'unknown']),
+        reference: evidenceText,
+        recorded_at: z.iso.datetime({ offset: true }),
+        recorded_by: evidenceText.optional(),
+      }),
+    )
+    .max(100)
+    .optional(),
+  origin: shortText.optional(),
+  digest: z
+    .string()
+    .regex(/^(?:sha256:[a-f0-9]{64}|sha384:[a-f0-9]{96}|sha512:[a-f0-9]{128})$/)
+    .optional(),
+  provenance: z
+    .strictObject({
+      source: shortText,
+      reference: shortText.optional(),
+      recorded_at: z.iso.datetime({ offset: true }).optional(),
+    })
+    .optional(),
+  observation: z
+    .strictObject({
+      observed_at: z.iso.datetime({ offset: true }),
+      method: shortText,
+      reference: shortText.optional(),
+    })
+    .optional(),
+};
 const componentSchema = z
   .strictObject({
+    ...inventoryEvidence,
     id: shortText,
     ecosystem: shortText,
     name: shortText,
     version: shortText.optional(),
+    note: evidenceText.optional(),
   })
   .transform((component) => {
     const ecosystem = normalizeEcosystem(component.ecosystem);
@@ -34,12 +139,21 @@ const productSchema = z.strictObject({
   name: shortText,
   version: shortText.optional(),
   keywords: z.array(shortText).max(100).default([]),
+  note: evidenceText.optional(),
 });
 const systemSchema = z.strictObject({
+  ...inventoryEvidence,
+  sbom_dependencies: dependencyGraph.optional(),
+  configuration: z
+    .record(z.string().min(1).max(100), z.union([shortText, z.boolean(), z.number().finite()]))
+    .refine((value) => Object.keys(value).length <= 100, 'At most 100 configuration observations')
+    .optional(),
+  sbom: z.string().trim().min(1).max(4096).optional(),
   id: shortText,
   name: shortText,
   environment: shortText.default('unknown'),
   owner: shortText.optional(),
+  note: evidenceText.optional(),
   exposure: z.enum(['internet', 'internal', 'unknown']).default('unknown'),
   criticality: severity.default('unknown'),
   updated_at: z.iso.datetime({ offset: true }),
@@ -53,6 +167,28 @@ const systemSchema = z.strictObject({
 });
 const inventorySchema = z.strictObject({ systems: z.array(systemSchema).min(1).max(1000) });
 
+/** Already materialized snapshots cannot import files or expand filesystem references. */
+export const inventorySnapshotSchema = z
+  .strictObject({
+    systems: z
+      .array(systemSchema.omit({ lockfile: true, libraries: true, sbom: true }))
+      .min(1)
+      .max(1000),
+    import_warnings: z.array(z.string().max(2000)).max(1000).optional(),
+  })
+  .refine((inventory) => {
+    const ids = new Set(inventory.systems.map((system) => system.id));
+    return (
+      ids.size === inventory.systems.length &&
+      inventory.systems.every(
+        (system) =>
+          new Set(system.components.map((component) => component.id)).size === system.components.length &&
+          new Set(system.products.map((product) => product.name.toLowerCase())).size ===
+            system.products.length,
+      )
+    );
+  }, 'Duplicate inventory identities');
+
 function readBounded(path: string, maximum: number): string {
   const stat = statSync(path);
   if (!stat.isFile() || stat.size > maximum)
@@ -62,12 +198,15 @@ function readBounded(path: string, maximum: number): string {
   return content.toString('utf8');
 }
 
+function shortLabel(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 120);
+}
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Imports metadata only. No install scripts or package manager commands are executed. */
-function importLockfile(path: string): Component[] {
+function importLockfile(path: string): { components: Component[]; warnings: string[] } {
   const lock: unknown = JSON.parse(readBounded(path, 20 * 1024 * 1024));
   if (!record(lock) || (lock.lockfileVersion !== 2 && lock.lockfileVersion !== 3) || !record(lock.packages)) {
     throw new Error(`Expected package-lock v2 or v3 with a packages map: ${path}`);
@@ -75,12 +214,24 @@ function importLockfile(path: string): Component[] {
   const entries = Object.entries(lock.packages);
   if (entries.length > 20_000) throw new Error(`Lockfile exceeds 20000 package entries: ${path}`);
   const components: Component[] = [];
+  const warnings: string[] = [];
   for (const [location, value] of entries) {
     if (!location || !record(value) || value.link === true) continue;
     const match = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(location);
     if (!match) continue;
-    const name = npmName.parse(value.name ?? match[1]);
-    const version = value.version === undefined ? undefined : shortText.parse(value.version);
+    // One entry this application cannot read must not hide every other dependency in the file.
+    let name: string;
+    let version: string | undefined;
+    try {
+      name = normalizePackageName('npm', z.string().parse(value.name ?? match[1]));
+      version = value.version === undefined ? undefined : shortText.parse(value.version);
+    } catch {
+      if (warnings.length < 50)
+        warnings.push(
+          `Lockfile entry ${shortLabel(location)}: unsupported package name or version; not imported.`,
+        );
+      continue;
+    }
     components.push({
       id: `lock:${location}`,
       ecosystem: 'npm',
@@ -88,7 +239,7 @@ function importLockfile(path: string): Component[] {
       ...(version === undefined ? {} : { version }),
     });
   }
-  return components;
+  return { components, warnings };
 }
 
 /** Load a local YAML/JSON inventory, checking its size and schema. */
@@ -98,7 +249,8 @@ export function loadInventory(path: string): Inventory {
   if (document.errors.length) throw new Error(`Invalid inventory YAML: ${document.errors[0]!.message}`);
   const parsed = inventorySchema.parse(document.toJS({ maxAliasCount: 0 }));
   const systemIds = new Set<string>();
-  const systems = parsed.systems.map(({ lockfile, libraries, ...system }) => {
+  const importWarnings: string[] = [];
+  const systems = parsed.systems.map(({ lockfile, libraries, sbom, ...system }) => {
     if (systemIds.has(system.id)) throw new Error(`Duplicate system ID: ${system.id}`);
     systemIds.add(system.id);
     if (libraries) {
@@ -115,13 +267,37 @@ export function loadInventory(path: string): Inventory {
           if (++count > 20_000) throw new Error(`System ${system.id} exceeds 20000 library entries`);
           const library = parseLibrary(entry, ecosystem);
           const key = JSON.stringify([library.ecosystem, library.name, library.version ?? null]);
-          if (added.has(key)) continue;
+          if (added.has(key)) {
+            // The same library listed twice keeps every place it was said to be used.
+            const existing = system.components.find(
+              (component) =>
+                JSON.stringify([component.ecosystem, component.name, component.version ?? null]) === key,
+            );
+            const note = existing && mergeNotes(existing.note, library.note);
+            if (existing && note) existing.note = note;
+            continue;
+          }
           added.add(key);
           system.components.push({ id: `library:${hash(key).slice(0, 24)}`, ...library });
         }
       }
     }
-    if (lockfile) system.components.push(...importLockfile(resolve(dirname(absolute), lockfile)));
+    if (sbom) {
+      const imported = importCycloneDx(resolve(dirname(absolute), sbom));
+      system.components.push(...imported.components);
+      if (imported.dependencies.length) {
+        system.sbom_dependencies = dependencyGraph.parse([
+          ...(system.sbom_dependencies ?? []),
+          ...imported.dependencies,
+        ]);
+      }
+      importWarnings.push(...imported.warnings.map((warning) => `${system.id}: ${warning}`));
+    }
+    if (lockfile) {
+      const imported = importLockfile(resolve(dirname(absolute), lockfile));
+      system.components.push(...imported.components);
+      importWarnings.push(...imported.warnings.map((warning) => `${system.id}: ${warning}`));
+    }
     if (system.components.length > 20_000) throw new Error(`System ${system.id} exceeds 20000 components`);
     const componentIds = new Set<string>();
     for (const component of system.components) {
@@ -137,5 +313,5 @@ export function loadInventory(path: string): Inventory {
     }
     return system;
   });
-  return { systems };
+  return { systems, ...(importWarnings.length ? { import_warnings: importWarnings } : {}) };
 }

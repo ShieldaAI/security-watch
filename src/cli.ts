@@ -1,29 +1,69 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, extname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stringify } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, parseConfig, missingCredentials } from './config.js';
 import { loadInventory } from './inventory.js';
-import { Store } from './store.js';
+import { importCycloneDx } from './sbom.js';
+import { refreshCoverage } from './coverage.js';
+import { Store, readPilotReport } from './store.js';
+import { PilotReportError } from './pilot-report.js';
 import { runScan, readFixture, healthFinding } from './engine.js';
-import { deliverPending } from './delivery.js';
+import { deliverPending, smtpProblem } from './delivery.js';
 import { safeHttp } from './http.js';
 import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
 import { checkHealth } from './health.js';
-import type { Assessment } from './types.js';
+import type { Assessment, Config } from './types.js';
 import { PROVIDERS, providerDefinition } from './providers.js';
 import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
 import { ECOSYSTEMS, parseLibraryList } from './ecosystems.js';
 import { HeartbeatMonitor } from './heartbeat.js';
 import { MaintenanceScheduler } from './operations.js';
-import { verifyBackup } from './maintenance.js';
+import { createPilotCasePacket, readPilotFeedback, scorePilotCases } from './pilot-cases.js';
+import { createPilotResponseTemplate, readPilotIncidentReference, scorePilotRecall } from './pilot-recall.js';
+import { readPilotResponseRegister, scorePilotResponses } from './pilot-responses.js';
+import { verifyBackup, readPilotBackupReport } from './maintenance.js';
+import { readRehearsal, runRehearsal, type RehearsalSink } from './rehearsal.js';
 
-const help = `Shielda Security Watch (experimental alpha)
+const pilotCommands = new Set([
+  'pilot-report',
+  'pilot-cases',
+  'pilot-score',
+  'pilot-recall',
+  'pilot-response-template',
+]);
+/**
+ * The first scan of a new database reads a day of recent advisories at a polite pace.
+ * Say so on the error stream, so a silent terminal is not mistaken for a hang.
+ */
+function firstScanNotice(config: Config, store: Store, offline: boolean): void {
+  if (offline || !config.sources.cve_now || store.checkpoints().cve_now !== undefined) return;
+  console.error(
+    'First scan: reading the last day of advisories from cve.now, about one request a second. ' +
+      'This can take 15 to 20 minutes; later scans usually take a minute or two. ' +
+      'A dry run saves nothing, so the next scan starts from the beginning again.',
+  );
+}
+
+/** The one place the version is defined is package.json, which ships beside the compiled files. */
+const VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+).version;
+const help = `Shielda Security Watch ${VERSION}
 
   security-watch init [--directory PATH] [--yes] [--systems nodejs,python]
     [--libraries PATH --ecosystem php] [--vendor-feeds nodejs,python,php] [--heartbeat]
@@ -34,14 +74,24 @@ const help = `Shielda Security Watch (experimental alpha)
   security-watch providers
   security-watch templates
   security-watch ecosystems
+  security-watch import-sbom --input PATH [--output PATH]
+  security-watch coverage | inventory-drift [--config PATH]
   security-watch normalize-libraries --input PATH [--ecosystem php] [--output PATH]
   security-watch scan [--dry-run] [--notify] [--fixture PATH] [--no-ai]
+  security-watch rehearse --config PATH --input SCENARIO.json [--sink disabled|accepted|failed|unknown] [--output NEW.json]
   security-watch start [--config PATH]
   security-watch findings | status | deliveries | budget
+  security-watch pilot-report (--database PATH | --backup PATH) --from YYYY-MM-DD --until YYYY-MM-DD [--output NEW.json]
+  security-watch pilot-recall --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --input INCIDENTS.json [--responses RESPONSES.json] [--output NEW.json]
+  security-watch pilot-cases --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --output NEW.json
+  security-watch pilot-response-template --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --input INCIDENTS.json --output NEW.json
+  security-watch pilot-score --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --input LABELS.json [--output NEW.json]
   security-watch health [--scan-only]
   security-watch explain FINDING_ID
   security-watch history FINDING_ID
-  security-watch acknowledge FINDING_ID
+  security-watch reviews [--all] [--limit 100] [--after CURSOR]
+  security-watch review FINDING_ID --revision N --disposition dismiss|investigate --reviewer NAME --reason TEXT
+  security-watch acknowledge FINDING_ID [--revision N]
   security-watch suppress FINDING_ID --hours 24 --reason TEXT
   security-watch retry DELIVERY_ID   (verify receipt before retrying unknown delivery)
   security-watch backup --output PATH
@@ -54,13 +104,18 @@ Default config: ./security-watch.yaml. scan records findings; --dry-run writes n
 disables models and sends nothing. --notify sends due jobs. start runs the foreground scheduler and
 configured notification routes. Model/feed requests can leave this machine; fixture
 mode performs no source or model requests. No packages are installed or patched.
-Commands using a config accept --credentials-file PATH. Existing environment values take precedence.
+Monitor commands accept --credentials-file PATH; rehearse uses no credentials.
+Existing environment values take precedence for monitor commands.
 `;
 function argumentsFromCommandLine() {
   return parseArgs({
     allowPositionals: true,
     options: {
       config: { type: 'string' },
+      database: { type: 'string' },
+      backup: { type: 'string' },
+      from: { type: 'string' },
+      until: { type: 'string' },
       directory: { type: 'string' },
       systems: { type: 'string' },
       libraries: { type: 'string' },
@@ -86,8 +141,16 @@ function argumentsFromCommandLine() {
       'no-ai': { type: 'boolean' },
       hours: { type: 'string' },
       reason: { type: 'string' },
+      revision: { type: 'string' },
+      disposition: { type: 'string' },
+      reviewer: { type: 'string' },
+      all: { type: 'boolean' },
+      limit: { type: 'string' },
+      after: { type: 'string' },
       output: { type: 'string' },
+      responses: { type: 'string' },
       channel: { type: 'string' },
+      sink: { type: 'string' },
       help: { type: 'boolean' },
       version: { type: 'boolean' },
       'scan-only': { type: 'boolean' },
@@ -98,7 +161,15 @@ const { values, positionals } = (() => {
   try {
     return argumentsFromCommandLine();
   } catch (error) {
-    console.error(error instanceof Error ? error.message : 'Invalid arguments');
+    console.error(
+      pilotCommands.has(process.argv[2] ?? '')
+        ? 'Invalid pilot-report arguments.'
+        : process.argv[2] === 'rehearse'
+          ? 'Invalid rehearsal arguments.'
+          : error instanceof Error
+            ? error.message
+            : 'Invalid arguments',
+    );
     process.exit(1);
   }
 })();
@@ -260,12 +331,19 @@ async function initialize(): Promise<void> {
         {
           id: libraries ? 'application' : 'example-api',
           name: libraries ? 'Application' : 'Example API',
+          note: 'Replace me: where this system runs and who to ask',
           environment: libraries ? 'unknown' : 'development',
           exposure: 'unknown',
           criticality: 'unknown',
           updated_at: new Date().toISOString(),
           components: libraries ?? [
-            { id: 'example-parser', ecosystem: 'npm', name: 'example-parser', version: '1.2.0' },
+            {
+              id: 'example-parser',
+              ecosystem: 'npm',
+              name: 'example-parser',
+              version: '1.2.0',
+              note: 'Replace me: where this library is used',
+            },
           ],
           products: [],
           keywords: [],
@@ -294,7 +372,7 @@ async function initialize(): Promise<void> {
 }
 async function main(): Promise<void> {
   if (values.version) {
-    console.log('0.1.0-alpha.0');
+    console.log(VERSION);
     return;
   }
   if (values.help || command === 'help') {
@@ -324,9 +402,18 @@ async function main(): Promise<void> {
     templates: [],
     ecosystems: [],
     'normalize-libraries': ['input', 'ecosystem', 'output'],
+    'import-sbom': ['input', 'output'],
+    coverage: ['config'],
+    'inventory-drift': ['config'],
     doctor: ['config', 'no-ai'],
     unlock: ['config'],
     scan: ['config', 'dry-run', 'notify', 'fixture', 'no-ai'],
+    rehearse: ['config', 'input', 'sink', 'output'],
+    'pilot-cases': ['backup', 'from', 'until', 'output'],
+    'pilot-response-template': ['backup', 'from', 'until', 'input', 'output'],
+    'pilot-recall': ['backup', 'from', 'until', 'input', 'responses', 'output'],
+    'pilot-score': ['backup', 'from', 'until', 'input', 'output'],
+    'pilot-report': ['database', 'backup', 'from', 'until', 'output'],
     start: ['config', 'no-ai'],
     findings: ['config'],
     status: ['config'],
@@ -335,7 +422,9 @@ async function main(): Promise<void> {
     health: ['config', 'scan-only'],
     explain: ['config', 'no-ai'],
     history: ['config'],
-    acknowledge: ['config'],
+    reviews: ['config', 'all', 'limit', 'after'],
+    review: ['config', 'revision', 'disposition', 'reviewer', 'reason'],
+    acknowledge: ['config', 'revision'],
     suppress: ['config', 'hours', 'reason'],
     retry: ['config'],
     backup: ['config', 'output'],
@@ -343,12 +432,12 @@ async function main(): Promise<void> {
     prune: ['config', 'apply'],
     'test-notification': ['config', 'channel'],
   };
-  for (const flags of Object.values(commandFlags))
-    if (flags.includes('config')) flags.push('credentials-file');
+  for (const [name, flags] of Object.entries(commandFlags))
+    if (name !== 'rehearse' && flags.includes('config')) flags.push('credentials-file');
   if (!commandFlags[command]) throw new Error(`Unknown command ${command}. Use --help.`);
   for (const flag of Object.keys(values))
     if (!commandFlags[command]!.includes(flag)) throw new Error(`--${flag} is not supported by ${command}.`);
-  const needsId = ['explain', 'history', 'acknowledge', 'suppress', 'retry'].includes(command);
+  const needsId = ['explain', 'history', 'review', 'acknowledge', 'suppress', 'retry'].includes(command);
   if (positionals.length > (needsId ? 2 : 1)) throw new Error('Unexpected positional arguments. Use --help.');
   if (command === 'init') {
     await initialize();
@@ -366,6 +455,18 @@ async function main(): Promise<void> {
     output(ECOSYSTEMS);
     return;
   }
+  if (command === 'import-sbom') {
+    if (!values.input) throw new Error('--input PATH required');
+    const report = importCycloneDx(resolve(values.input));
+    if (values.output)
+      writeFileSync(resolve(values.output), JSON.stringify(report, null, 2) + '\n', {
+        flag: 'wx',
+        mode: 0o600,
+      });
+    else output(report);
+    if (report.warnings.length) process.exitCode = 2;
+    return;
+  }
   if (command === 'normalize-libraries') {
     if (!values.input) throw new Error('--input PATH required');
     const components = libraryInput(values.input, values.ecosystem);
@@ -381,6 +482,72 @@ async function main(): Promise<void> {
   if (command === 'verify-backup') {
     if (!values.input) throw new Error('--input PATH required');
     output(await verifyBackup(resolve(values.input)));
+    return;
+  }
+  if (pilotCommands.has(command)) {
+    if (!values.from || !values.until || Boolean(values.database) === Boolean(values.backup))
+      throw new Error();
+    if ((command === 'pilot-cases' || command === 'pilot-response-template') && !values.output)
+      throw new Error();
+    if (command === 'pilot-response-template' && !values.input) throw new Error();
+    if ((command === 'pilot-score' || command === 'pilot-recall') && !values.input) throw new Error();
+    const destination = values.output === undefined ? undefined : resolve(values.output);
+    // Reject SQLite sidecar and worker lock filenames before opening either input.
+    if (destination && extname(destination).toLowerCase() !== '.json') throw new Error();
+    const window = { from: values.from, until: values.until };
+    let report;
+    if (command === 'pilot-cases') report = await createPilotCasePacket(values.backup!, window);
+    else if (command === 'pilot-response-template')
+      report = await createPilotResponseTemplate(
+        values.backup!,
+        window,
+        readPilotIncidentReference(values.input!),
+      );
+    else if (command === 'pilot-recall') {
+      const reference = readPilotIncidentReference(values.input!);
+      report =
+        values.responses === undefined
+          ? await scorePilotRecall(values.backup!, window, reference)
+          : await scorePilotResponses(
+              values.backup!,
+              window,
+              reference,
+              readPilotResponseRegister(values.responses),
+            );
+    } else if (command === 'pilot-score')
+      report = await scorePilotCases(values.backup!, window, readPilotFeedback(values.input!));
+    else
+      report = values.backup
+        ? await readPilotBackupReport(values.backup, window)
+        : readPilotReport(values.database!, window);
+    if (!destination) output(report);
+    else {
+      const directory = mkdtempSync(join(dirname(destination), '.pilot-report-'));
+      try {
+        const staged = join(directory, 'report.json');
+        writeFileSync(staged, JSON.stringify(report, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+        linkSync(staged, destination);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    return;
+  }
+  if (command === 'rehearse') {
+    if (!values.input) throw new Error('--input required');
+    const config = loadConfig(resolve(values.config ?? 'security-watch.yaml'));
+    const report = await runRehearsal({
+      config,
+      inventory: loadInventory(config.inventory),
+      scenario: readRehearsal(resolve(values.input)),
+      sink: (values.sink ?? 'disabled') as RehearsalSink,
+    });
+    if (values.output)
+      writeFileSync(resolve(values.output), JSON.stringify(report, null, 2) + '\n', {
+        flag: 'wx',
+        mode: 0o600,
+      });
+    else output(report);
     return;
   }
   if (values['credentials-file']) loadEnvFile(resolve(values['credentials-file']));
@@ -403,8 +570,27 @@ async function main(): Promise<void> {
       health: config.policy.health_channels,
     };
     const enabledChannels = [...new Set(Object.values(routes).flat())];
+    const smtp = config.notifications.email
+      ? process.env[config.notifications.email.smtp_url_env]
+      : undefined;
+    const problems = [
+      ...(smtp && smtpProblem(smtp)
+        ? [
+            `${config.notifications.email!.smtp_url_env}: ${smtpProblem(smtp)}. Write a literal % in a password as %25.`,
+          ]
+        : []),
+    ];
+    // Feed addresses can carry access tokens; show where each one points, not the whole address.
+    const feedHost = (value: string) => {
+      try {
+        return `${new URL(value).origin}/…`;
+      } catch {
+        return 'invalid URL';
+      }
+    };
     output({
-      ok: missing.length === 0,
+      ok: missing.length === 0 && problems.length === 0,
+      problems,
       systems: inventory.systems.length,
       components: inventory.systems.reduce((sum, s) => sum + s.components.length, 0),
       missing_environment_variables: missing,
@@ -412,7 +598,7 @@ async function main(): Promise<void> {
       models_enabled: config.models.enabled,
       poll_interval_minutes: config.poll_interval_minutes,
       news_lookback_minutes: config.news_lookback_minutes,
-      sources: config.sources,
+      sources: { ...config.sources, feeds: config.sources.feeds.map(feedHost) },
       feeds: config.sources.feeds.length + Number(config.sources.hacker_news),
       notification_routes: routes,
       notification_channels: enabledChannels,
@@ -469,11 +655,15 @@ async function main(): Promise<void> {
     'start',
     'findings',
     'status',
+    'coverage',
+    'inventory-drift',
     'deliveries',
     'budget',
     'health',
     'explain',
     'history',
+    'reviews',
+    'review',
     'acknowledge',
     'suppress',
     'retry',
@@ -487,7 +677,18 @@ async function main(): Promise<void> {
   if (dry) config.models.enabled = false;
   const readonly =
     (command === 'prune' && !values.apply) ||
-    ['findings', 'status', 'deliveries', 'budget', 'health', 'explain', 'history'].includes(command);
+    [
+      'findings',
+      'status',
+      'coverage',
+      'inventory-drift',
+      'deliveries',
+      'budget',
+      'health',
+      'explain',
+      'history',
+      'reviews',
+    ].includes(command);
   if (readonly && !existsSync(config.database)) {
     output({ status: 'not_started', message: 'No database exists yet. Run scan or start.' });
     if (command === 'health') process.exitCode = 2;
@@ -507,6 +708,73 @@ async function main(): Promise<void> {
     throw error;
   }
   try {
+    if (command === 'coverage' || command === 'inventory-drift') {
+      const saved = JSON.parse(
+        store.getMeta(command === 'coverage' ? 'source:coverage' : 'inventory:last_drift') ?? '[]',
+      );
+      output(command === 'coverage' ? refreshCoverage(saved) : saved);
+      return;
+    }
+    if (command === 'reviews') {
+      const limit = values.limit === undefined ? 100 : Number(values.limit);
+      let after;
+      if (values.after) {
+        if (values.after.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(values.after))
+          throw new Error('Invalid review cursor');
+        try {
+          after = JSON.parse(Buffer.from(values.after, 'base64url').toString('utf8'));
+          if (!after || typeof after !== 'object' || Array.isArray(after))
+            throw new Error('Invalid review cursor');
+        } catch {
+          throw new Error('Invalid review cursor');
+        }
+      }
+      const reviews = store.reviews({
+        includeResolved: Boolean(values.all),
+        limit,
+        ...(after ? { after } : {}),
+      });
+      const last = reviews.at(-1);
+      output({
+        reviews,
+        summary: store.reviewSummary(),
+        next_cursor:
+          reviews.length === limit && last
+            ? Buffer.from(
+                JSON.stringify({
+                  created_at: last.created_at,
+                  finding_id: last.finding_id,
+                  revision: last.revision,
+                }),
+              ).toString('base64url')
+            : null,
+      });
+      return;
+    }
+    if (command === 'review') {
+      if (
+        !id ||
+        !values.revision ||
+        !values.reviewer ||
+        !values.reason ||
+        !['dismiss', 'investigate'].includes(values.disposition ?? '')
+      )
+        throw new Error(
+          'Provide finding ID, --revision, --disposition dismiss|investigate, --reviewer and --reason',
+        );
+      store.reviewFinding(id, Number(values.revision), {
+        disposition: values.disposition as 'dismiss' | 'investigate',
+        reviewer: values.reviewer,
+        reason: values.reason,
+      });
+      output({
+        finding_id: id,
+        revision: Number(values.revision),
+        disposition: values.disposition,
+        delivery_sent: false,
+      });
+      return;
+    }
     if (command === 'findings') {
       output(store.findings());
       return;
@@ -532,7 +800,11 @@ async function main(): Promise<void> {
       const summary = store.summary();
       output({
         last_scan: JSON.parse(store.getMeta('last_scan') ?? 'null'),
+        coverage: refreshCoverage(JSON.parse(store.getMeta('source:coverage') ?? '[]')),
+        inventory_drift: JSON.parse(store.getMeta('inventory:last_drift') ?? '[]'),
         findings: summary.active_findings,
+        reviews: store.reviewSummary(),
+        ai_dismissal_policy: config.policy.ai_dismissals ?? 'review',
         delivery_states: summary.delivery_states,
         worker_lock: existsSync(`${config.database}.lock`),
         worker_lock_note:
@@ -556,6 +828,7 @@ async function main(): Promise<void> {
           modified_at: e.modified_at,
           fetched_at: e.fetched_at,
           withdrawn: e.withdrawn ?? false,
+          ...(e.cvss_v4 ? { cvss_v4: e.cvss_v4 } : {}),
         })),
         note: 'Applicability reflects the cited evidence as last fetched. Inspect monitoring health for source outages.',
       });
@@ -568,8 +841,11 @@ async function main(): Promise<void> {
     }
     if (command === 'acknowledge') {
       if (!id) throw new Error('Finding ID required');
-      store.acknowledge(id);
-      console.log('Finding acknowledged.');
+      const expected = values.revision === undefined ? undefined : Number(values.revision);
+      if (expected !== undefined && (!Number.isSafeInteger(expected) || expected < 1))
+        throw new Error('--revision must be a positive whole number');
+      const revision = store.acknowledge(id, expected);
+      console.log(`Finding acknowledged at revision ${revision}.`);
       return;
     }
     if (command === 'suppress') {
@@ -588,11 +864,14 @@ async function main(): Promise<void> {
     }
     if (command === 'backup') {
       if (!values.output) throw new Error('--output PATH required');
-      await store.backup(resolve(values.output));
-      const verification = await verifyBackup(
-        resolve(values.output),
-        config.maintenance?.backup ? { max_bytes: config.maintenance.backup.max_bytes } : undefined,
-      );
+      let verification: Awaited<ReturnType<typeof verifyBackup>> | undefined;
+      // Check the snapshot before it appears at the requested path; a failed check leaves nothing behind.
+      await store.backup(resolve(values.output), async (snapshot) => {
+        verification = await verifyBackup(
+          snapshot,
+          config.maintenance?.backup ? { max_bytes: config.maintenance.backup.max_bytes } : undefined,
+        );
+      });
       output({ backup_created: true, verification });
       return;
     }
@@ -654,6 +933,7 @@ async function main(): Promise<void> {
         delivery.failed += result.failed;
         delivery.unknown += result.unknown;
       };
+      firstScanNotice(config, store, Boolean(values.fixture));
       const report = await runScan({
         config,
         inventory,
@@ -723,6 +1003,7 @@ async function main(): Promise<void> {
     process.on('SIGTERM', shutdown);
     console.log('Security Watch is running in the foreground. Configured routes are active.');
     try {
+      firstScanNotice(config, store, false);
       while (!stop) {
         if (Date.now() - lastHeartbeat >= 15_000) heartbeat('running');
         if (!scanning && !maintaining && Date.now() >= nextScan) {
@@ -819,7 +1100,17 @@ async function main(): Promise<void> {
   }
 }
 main().catch((error) => {
-  if (error instanceof z.ZodError)
+  if (pilotCommands.has(command))
+    console.error(
+      error instanceof PilotReportError
+        ? error.message
+        : 'Pilot report failed. Supply one database or backup, a UTC date window and a new .json output path.',
+    );
+  else if (command === 'rehearse')
+    console.error(
+      'Rehearsal failed. Check input, bounds, sink mode and a new output path; no external delivery was attempted.',
+    );
+  else if (error instanceof z.ZodError)
     console.error(
       'Validation failed: ' + error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
     );

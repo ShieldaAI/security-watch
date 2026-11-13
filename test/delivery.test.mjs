@@ -268,6 +268,7 @@ test('a failed or uncertain destination does not stop other queued notifications
       const result = await deliverPending(store, config, http, 1000, sender);
       assert.equal(result.accepted, 1);
       assert.equal(result.failed + result.unknown, 1);
+      assert.equal(store.jobs().filter((job) => job.accepted_at !== undefined).length, 1);
       assert(!store.jobs().some((job) => ['pending', 'sending'].includes(job.status)));
     });
   }
@@ -453,6 +454,8 @@ test('email URL cannot disable TLS through query options', async (t) => {
 
 test('due digests batch up to five findings into one send and retain individual stable IDs', async (t) => {
   const store = setup(t, []);
+  let clock = 2000;
+  t.mock.method(Date, 'now', () => clock);
   for (let i = 0; i < 7; i++)
     store.saveAssessment(
       {
@@ -476,14 +479,31 @@ test('due digests batch up to five findings into one send and retain individual 
       assert.equal((text.match(/Delivery: /g) ?? []).length, 5);
     }
     assert(text.length <= 3000);
+    clock = calls === 1 ? 2400 : 3800;
     return { status: 200, body: 'ok', headers: {} };
   };
   assert.deepEqual(await deliverPending(store, config, http, 2000), { accepted: 5, failed: 0, unknown: 0 });
   assert.equal(calls, 1);
   assert.equal(store.jobs().filter((j) => j.status === 'pending').length, 2);
+  assert.equal(store.jobs().filter((j) => j.accepted_at === 2400).length, 5);
+  clock = 3000;
   assert.deepEqual(await deliverPending(store, config, http, 3000), { accepted: 2, failed: 0, unknown: 0 });
   assert.equal(calls, 2);
   assert.equal(store.jobs().filter((j) => j.status === 'accepted').length, 7);
+  assert.equal(store.jobs().filter((j) => j.accepted_at === 3800).length, 2);
+});
+
+test('an email acknowledged after a clock rollback keeps its accepted status with unknown time', async (t) => {
+  const store = setup(t, ['email']);
+  let clock = 1000;
+  t.mock.method(Date, 'now', () => clock);
+  const result = await deliverPending(store, config, noHttp, clock, async ({ to }) => {
+    clock = 990;
+    return { accepted: to, rejected: [] };
+  });
+  assert.equal(result.accepted, 1);
+  assert.equal(store.jobs()[0].status, 'accepted');
+  assert.equal(store.jobs()[0].accepted_at, undefined);
 });
 
 test('large Slack digests split without dropping IDs or charging unsent entries', async (t) => {

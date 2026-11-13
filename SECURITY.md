@@ -1,6 +1,6 @@
 # Security policy and boundaries
 
-Security Watch is an experimental monitoring tool without an independent security audit or a patch-response SLA. Validate findings against your deployment before using them to make remediation decisions.
+Security Watch is a monitoring tool without an independent security audit. Security reports are handled on a best-effort basis by a single maintainer, with no guaranteed response time; fixes are released for the latest 1.x version. Validate findings against your deployment before using them to make remediation decisions.
 
 ## Report a vulnerability
 
@@ -27,7 +27,13 @@ Models can misinterpret sources, feeds can omit important facts, and advisories 
 
 ## Data handling
 
-cve.now stack requests reveal deduplicated npm package names and exact versions through URL query parameters; lockfiles and system/deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP request metadata. Optional OSV requests reveal library ecosystem, package name and the installed version when supplied. Official vendor feeds receive normal request metadata. Other enabled advisory/feed servers receive normal request metadata, and GitHub may receive the configured API token. The configured AI provider receives selected relevant inventory entries and deployment context from the matched system plus selected evidence. Notifications disclose finding context and source links to Slack or the configured email recipients. There is no automatic application telemetry. An optional, operator-configured heartbeat endpoint receives bodyless success pings and normal request metadata. It receives no inventory, finding content or logs.
+cve.now stack requests reveal deduplicated npm package names and exact versions through URL query parameters; lockfiles and system/deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP request metadata. Optional OSV requests reveal library ecosystem, package name and the installed version when supplied. Official vendor feeds receive normal request metadata. Other enabled advisory/feed servers receive normal request metadata, and GitHub may receive the configured API token.
+
+Each configured AI model defaults to the `minimal` disclosure profile. It receives selected relevant package ecosystem/name/version and product name/version, request-local IDs and inventory freshness status, plus target event and selected evidence fields/excerpts. Original inventory IDs, system name/owner, repository URLs, provenance, dependency graphs, verification declarations, remediation records and operator identities are excluded. `deployment-context` opts that specific model into environment/exposure/criticality and evidence-matching keywords, never other inventory metadata. The verifier applies its own profile independently. Allowed names and evidence text are not secret-redacted; do not place private content there unless the endpoint is approved to receive it. Full contracts and migration behavior are in [model disclosure configuration](docs/configuration.md#data-sent-to-models).
+
+Inventory notes (the `note` field on systems, libraries and products) are the operator's own pointers to where something runs. They are stored in the local database and shown in notifications together with the system name and owner. They are never sent to advisory sources and are excluded from model requests under both disclosure profiles. Do not put secrets in a note.
+
+Notifications disclose formatted finding context, the inventory names and notes above, and source links to Slack or the configured email recipients under separate routing policy; model disclosure settings do not filter notification payloads or public inventory queries. There is no automatic application telemetry. An optional, operator-configured heartbeat endpoint receives bodyless success pings and normal request metadata. It receives no inventory, finding content or logs.
 
 Credential values are read from environment variables, not placed in model prompts or intentionally persisted in SQLite. Do not insert keys into model names, feed URLs, inventory text or configuration substitutions. Use your service manager or secret manager to supply credentials; the CLI does not automatically load `.env` files. Do not commit configuration, database files, backups or `.env` files to source control.
 
@@ -35,13 +41,21 @@ SQLite stores evidence, finding revisions, model analysis excerpts, caches, budg
 
 ## Coverage limitations
 
-- Library inventory supports 12 ecosystems. Only npm uses supported version-range evaluation and exclusions. Other ecosystems require a positive exact OSV query or an explicitly listed affected version; a missing version, unmatched result or unsupported range stays unknown. Lockfile entries include dependencies that may not be present in production.
+- Library inventory supports 12 ecosystems. npm and a bounded PyPI final-release subset use supported version-range evaluation and exclusions; complex PEP 440 forms remain unknown. Other ecosystems require a positive exact OSV query or an explicitly listed affected version; a missing version, unmatched result or unsupported range stays unknown. Lockfile entries include dependencies that may not be present in production.
 - Generic products, operating systems and SaaS services have name/keyword candidate matching plus optional AI news/impact analysis. AI impact is an evidence-backed opinion, not a deterministic product-version result. Vendor backports, enabled features and exploit reachability are not automatically established.
 - Missing versions, unknown constraints and stale inventory remain uncertain. An empty advisory search does not establish that a system has no vulnerabilities.
-- CVSS v3.0/v3.1 calculation and supplied source labels/scores are supported; CVSS v4 vectors are not calculated in this alpha.
+- CVSS v3.0/v3.1 calculation and supplied source labels/scores are supported. For OSV and GitHub records, CVSS v4 base vectors are scored with the pinned FIRST reference calculator; threat and environmental metrics are not applied, and unsupported vectors are counted and left unknown. See [CVSS v4 support](docs/cvss-v4-support.md).
 - Source requests and model inputs have size and request limits. Incomplete collection or analysis reports degraded monitoring and requires review.
 - Recent cve.now entry collection, tracked/news-cited refreshes and exact npm stack queries do not establish exhaustive historical coverage for every product. The Hacker News may block article access; the feed excerpt remains available for review without a confident impact conclusion.
-- There is no general SBOM ingestion, authenticated web crawling, automatic remediation, distributed lock, multi-host worker or independent penetration-test certification.
+- CycloneDX JSON 1.4–1.6 package metadata import is supported, but not general SBOM/VEX ingestion, attestation verification or live deployment discovery. There is no authenticated web crawling, automatic remediation, distributed lock, multi-host worker or independent penetration-test certification.
 - Notifications are not exactly-once delivery. A timeout can occur after a destination accepts a message. Verify receipt before retrying an `unknown` job.
 
 Review `status`, `deliveries`, source-health findings and service logs. Optional external success pings stop when monitoring is unhealthy, but the receiving service must be configured to detect missing pings. Loss of the host or every delivery channel cannot be reported through that same failed infrastructure.
+
+Inventory origin, digest, provenance, observation and configuration fields are operator declarations. They do not authenticate artifact origin or establish a deployed fix. Baselines are stored locally for drift comparison; do not include secrets. Coverage receipts describe bounded collection and must not be interpreted as an exhaustive vulnerability scan. Configuration-dependent remediation guidance remains subject to operator verification.
+
+## Local AI dismissal review
+
+Both AI-only quiet routes require review by default. `policy.ai_dismissals: record` explicitly opts out. Review and notification delivery are separate: sending a digest does not approve a dismissal, and no configured channel is required for the local queue. A human verdict binds the finding revision, reviewed source content and installed/model context. Source changes invalidate stale verdicts even before a scan completes reassessment.
+
+CLI review commands rely on private local database/OS access. The reviewer string is an operator-declared audit label, not an identity-provider assertion. Review notes stay local and in backups. Generic retention protects review history and its evidence; review-specific expiry is not implemented. A local dismissal can cancel pending delivery but cannot recall an in-flight message. Review never changes authoritative version applicability.

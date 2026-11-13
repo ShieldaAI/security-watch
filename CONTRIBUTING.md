@@ -1,6 +1,6 @@
 # Contributing
 
-Security Watch uses TypeScript and requires Node.js 24 or newer. Keep source evidence, version applicability, contextual priority and notification policy separate when adding features.
+Security Watch uses TypeScript and requires Node.js 24.10 or newer. Keep source evidence, version applicability, contextual priority and notification policy separate when adding features.
 
 ## Local development
 
@@ -81,7 +81,7 @@ Use fixture-based affected/fixed pairs, conflicting sources, malformed input, so
 
 ## Releases
 
-The package is `@shieldaai/security-watch`; releases currently use the `alpha` tag. Before publishing, commit the reviewed changes, run `npm run check`, and inspect the output of `npm pack --dry-run`. The check command installs the tarball in a clean consumer and verifies the CLI, types and runtime exports. `prepublishOnly` repeats the checks and requires a clean checkout.
+The package is `@shieldaai/security-watch`. Stable versions publish under `latest` and prereleases (release candidates) under `next`; `prepublishOnly` refuses any other combination. The version is defined once, in `package.json`; `test/public-api.test.mjs` checks that the lockfile, `compose.yaml` and `CHANGELOG.md` agree with it and that the exported names match `scripts/public-api.json`. A change to that list is a compatibility decision: record it in the changelog and follow the [compatibility policy](docs/compatibility.md). Before publishing, commit the reviewed changes, run `npm run check`, and inspect the output of `npm pack --dry-run`. The check command installs the tarball in a clean consumer and verifies the CLI, types and runtime exports. `prepublishOnly` repeats the checks and requires a clean checkout.
 
 Only repository administrators can create `v*` release tags. These tags cannot be changed or deleted, including by administrators.
 

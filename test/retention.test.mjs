@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { removeAcceptanceSchema } from './helpers/legacy-notifications.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -217,7 +218,7 @@ test('recent delivery receipts keep an otherwise old inactive finding and its au
   oldEvidence(store, 'recent-receipt');
   store.saveAssessment(finding('recent-receipt'), notify, OLD);
   const job = store.claimDue(OLD);
-  store.completeJob(job.id, 'accepted', NOW);
+  store.completeJob(job.id, 'accepted', OLD, undefined, NOW);
   store.saveAssessment(
     finding('recent-receipt', { active: false, applicability: 'not_affected' }),
     record,
@@ -273,6 +274,7 @@ test('schema 4 migration starts unknown cache ages conservatively and records th
   oldEvidence(store, 'legacy');
   store.close();
   const legacy = new DatabaseSync(path);
+  removeAcceptanceSchema(legacy);
   legacy.exec(`DROP INDEX metadata_age; DROP INDEX evidence_age; DROP INDEX findings_age;
     DROP INDEX evidence_revisions_age; DROP INDEX finding_revisions_age;
     ALTER TABLE metadata DROP COLUMN updated_at; ALTER TABLE evidence DROP COLUMN content_hash;

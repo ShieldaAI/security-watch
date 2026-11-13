@@ -12,9 +12,16 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Assessment, Config, Decision, Evidence, Notification } from './types.js';
-import { hash } from './util.js';
+import type { AiReview, Assessment, Config, Decision, Evidence, Notification } from './types.js';
+import { hash, canonicalHash } from './util.js';
 import { decide } from './assessment.js';
+import {
+  aggregatePilotReport,
+  validatePilotWindow,
+  PilotReportError,
+  type PilotWindow,
+  type PilotReport,
+} from './pilot-report.js';
 import {
   validateRetentionPolicy,
   type PruneCounts,
@@ -23,7 +30,7 @@ import {
 } from './maintenance.js';
 
 type Row = Record<string, unknown>;
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 7;
 function verifyFile(path: string): void {
   // Closing any descriptor for a live SQLite inode releases this process's POSIX locks.
   // Inspect existing files without opening them, including when another Store is already open.
@@ -64,11 +71,13 @@ function notification(row: Row): Notification {
   return {
     id: String(row.id),
     finding_id: String(row.finding_id),
+    revision: Number(row.revision),
     channel: row.channel as Notification['channel'],
     payload: String(row.payload),
     status: row.status as Notification['status'],
     attempts: Number(row.attempts),
     available_at: Number(row.available_at),
+    ...(row.accepted_at == null ? {} : { accepted_at: Number(row.accepted_at) }),
     ...(row.last_error == null ? {} : { last_error: String(row.last_error) }),
   };
 }
@@ -92,6 +101,13 @@ function fingerprint(a: Assessment, decision: Decision): string {
     withdrawn: a.withdrawn ?? false,
     active: a.active !== false,
     fix: a.fix ?? null,
+    remediation: a.remediation
+      ? {
+          status: a.remediation.status,
+          artifact_digest: a.remediation.artifact_digest,
+          configuration: a.remediation.configuration,
+        }
+      : null,
     action: decision.action,
   });
 }
@@ -100,6 +116,31 @@ function fingerprint(a: Assessment, decision: Decision): string {
 export class Store {
   readonly #db: DatabaseSync;
   readonly #path: string;
+  /** Collect one consistent read-only snapshot from an existing local database. */
+  static readPilotReport(database: string, window: PilotWindow): PilotReport {
+    const now = Date.now();
+    const range = validatePilotWindow(window, now);
+    if (typeof database !== 'string' || !database || database === ':memory:')
+      throw new PilotReportError('database');
+    let reader: Store | undefined;
+    try {
+      reader = new Store(database, { readOnly: true });
+      reader.#db.exec('PRAGMA query_only=ON; PRAGMA trusted_schema=OFF; BEGIN');
+      const report = aggregatePilotReport(reader.#db, range, now);
+      reader.#db.exec('COMMIT');
+      return report;
+    } catch (error) {
+      if (error instanceof PilotReportError) throw error;
+      throw new PilotReportError('database');
+    } finally {
+      // Closing also releases an unfinished read transaction on failure.
+      try {
+        reader?.close();
+      } catch {
+        throw new PilotReportError('database');
+      }
+    }
+  }
   constructor(path: string, options: { readOnly?: boolean; migrate?: boolean } = {}) {
     this.#path = path === ':memory:' ? path : resolve(path);
     if (this.#path !== ':memory:') {
@@ -118,8 +159,8 @@ export class Store {
       if (version < SCHEMA_VERSION && (options.readOnly || options.migrate === false))
         throw new Error('Database migration required; stop the worker and run scan or start first');
       if (!options.readOnly) this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;');
-      if (version === 0)
-        this.#transaction(() => {
+      if (version < SCHEMA_VERSION)
+        this.#migrate(1, () => {
           this.#db.exec(`
           CREATE TABLE evidence (source TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source,id));
           CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -135,8 +176,8 @@ export class Store {
           PRAGMA user_version = 1;
         `);
         });
-      if (version < 2)
-        this.#transaction(() => {
+      if (version < SCHEMA_VERSION)
+        this.#migrate(2, () => {
           this.#db
             .exec(`CREATE TABLE finding_revisions (finding_id TEXT NOT NULL REFERENCES findings(id), revision INTEGER NOT NULL,
           payload TEXT NOT NULL, decision TEXT NOT NULL, recorded_at INTEGER NOT NULL, PRIMARY KEY(finding_id,revision));
@@ -144,8 +185,8 @@ export class Store {
             SELECT id,revision,payload,'{"action":"record","channels":[],"reason":"Imported from schema 1"}',0 FROM findings;
           PRAGMA user_version = 2;`);
         });
-      if (version < 3)
-        this.#transaction(() => {
+      if (version < SCHEMA_VERSION)
+        this.#migrate(3, () => {
           this.#db
             .exec(`CREATE TABLE evidence_revisions (source TEXT NOT NULL, id TEXT NOT NULL, content_hash TEXT NOT NULL,
           payload TEXT NOT NULL, recorded_at INTEGER NOT NULL, PRIMARY KEY(source,id,content_hash));`);
@@ -164,14 +205,14 @@ export class Store {
           }
           this.#db.exec('PRAGMA user_version = 3;');
         });
-      if (version < 4)
-        this.#transaction(() => {
+      if (version < SCHEMA_VERSION)
+        this.#migrate(4, () => {
           this.#db.exec(
             'CREATE INDEX IF NOT EXISTS evidence_by_id ON evidence(id); PRAGMA user_version = 4;',
           );
         });
-      if (version < 5)
-        this.#transaction(() => {
+      if (version < SCHEMA_VERSION)
+        this.#migrate(5, () => {
           this.#db.exec(`
             ALTER TABLE metadata ADD COLUMN updated_at INTEGER;
             ALTER TABLE evidence ADD COLUMN content_hash TEXT;
@@ -205,6 +246,28 @@ export class Store {
           }
           this.#db.exec('PRAGMA user_version = 5');
         });
+      if (version < SCHEMA_VERSION)
+        this.#migrate(6, () => {
+          this.#db.exec(`CREATE TABLE IF NOT EXISTS ai_reviews (
+            finding_id TEXT NOT NULL REFERENCES findings(id), revision INTEGER NOT NULL,
+            reason TEXT NOT NULL CHECK(reason IN ('ai_general_news','ai_not_affected','ai_irrelevant')),
+            status TEXT NOT NULL CHECK(status IN ('pending','investigate','dismissed','superseded')),
+            evidence_refs TEXT NOT NULL, created_at INTEGER NOT NULL,
+            reviewed_at INTEGER, reviewer TEXT, note TEXT,
+            PRIMARY KEY(finding_id,revision),
+            FOREIGN KEY(finding_id,revision) REFERENCES finding_revisions(finding_id,revision));
+            CREATE INDEX IF NOT EXISTS ai_reviews_queue ON ai_reviews(status,created_at,finding_id);
+            PRAGMA user_version = 6;`);
+        });
+      if (version < SCHEMA_VERSION)
+        this.#migrate(7, () => {
+          // available_at records scheduling. Old accepted notifications have no observed receipt time.
+          this.#db.exec(`ALTER TABLE notifications ADD COLUMN accepted_at INTEGER
+            CHECK (accepted_at IS NULL OR (status='accepted' AND typeof(accepted_at)='integer'
+            AND accepted_at BETWEEN 1 AND 8640000000000000));
+            CREATE INDEX notifications_by_acceptance ON notifications(accepted_at) WHERE accepted_at IS NOT NULL;
+            PRAGMA user_version = 7;`);
+        });
       if (!options.readOnly) this.#privateSidecars();
     } catch (error) {
       this.#db.close();
@@ -216,6 +279,18 @@ export class Store {
       verifyFile(this.#path);
       existingSidecars(this.#path);
     }
+  }
+  /**
+   * Run one schema step unless another process already applied it. The version is read again inside
+   * the write transaction, so two processes opening an old database cannot repeat or undo a step.
+   */
+  #migrate(target: number, step: () => void): void {
+    this.#transaction(() => {
+      const current = Number((this.#db.prepare('PRAGMA user_version').get() as Row).user_version);
+      if (current > SCHEMA_VERSION)
+        throw new Error(`Database schema ${current} is newer than supported schema ${SCHEMA_VERSION}`);
+      if (current < target) step();
+    });
   }
   #transaction<T>(fn: () => T): T {
     this.#db.exec('BEGIN IMMEDIATE');
@@ -299,7 +374,13 @@ export class Store {
         .map((r) => [String(r.key).slice('checkpoint:'.length), String(r.value)]),
     );
   }
-  saveAssessment(assessment: Assessment, decision: Decision, now = Date.now(), digestMs = 86_400_000): void {
+  saveAssessment(
+    assessment: Assessment,
+    decision: Decision,
+    now = Date.now(),
+    digestMs = 86_400_000,
+    reviewBasis?: string,
+  ): void {
     if (
       !Number.isSafeInteger(now) ||
       !Number.isSafeInteger(digestMs) ||
@@ -309,7 +390,30 @@ export class Store {
       throw new Error('Invalid notification time');
     this.#transaction(() => {
       const old = this.#db.prepare('SELECT * FROM findings WHERE id=?').get(assessment.id) as Row | undefined;
-      const signature = fingerprint(assessment, decision);
+      const references = decision.review
+        ? this.#db
+            .prepare(
+              'SELECT source,id,content_hash FROM evidence WHERE id IN (SELECT value FROM json_each(?)) ORDER BY source,id',
+            )
+            .all(JSON.stringify(assessment.evidence_ids))
+            .map((row) => ({
+              source: String(row.source),
+              id: String(row.id),
+              content_hash: String(row.content_hash),
+            }))
+        : [];
+      const { updated_at: _updated, ...reviewedAssessment } = assessment;
+      // Ordinary alert deduplication stays semantic. A human review instead binds the exact
+      // supplied conclusion, source content and host inventory/model context, excluding scan time.
+      const signature = decision.review
+        ? canonicalHash({
+            finding: fingerprint(assessment, decision),
+            review: decision.review,
+            assessment: reviewedAssessment,
+            evidence: references,
+            basis: reviewBasis ?? null,
+          })
+        : fingerprint(assessment, decision);
       const changed = !old || signature !== old.fingerprint;
       const revision = old ? Number(old.revision) + (changed ? 1 : 0) : 1;
       this.#db
@@ -330,6 +434,19 @@ export class Store {
             'INSERT INTO finding_revisions(finding_id,revision,payload,decision,recorded_at) VALUES(?,?,?,?,?)',
           )
           .run(assessment.id, revision, JSON.stringify(assessment), JSON.stringify(decision), now);
+      if (changed || !decision.review)
+        this.#db
+          .prepare(
+            "UPDATE ai_reviews SET status='superseded' WHERE finding_id=? AND status IN ('pending','investigate')",
+          )
+          .run(assessment.id);
+      if (decision.review && assessment.active !== false && !assessment.withdrawn)
+        this.#db
+          .prepare(
+            `INSERT INTO ai_reviews(finding_id,revision,reason,status,evidence_refs,created_at)
+          VALUES(?,?,?,'pending',?,?) ON CONFLICT(finding_id,revision) DO NOTHING`,
+          )
+          .run(assessment.id, revision, decision.review, JSON.stringify(references), now);
       if (changed)
         this.#db
           .prepare(
@@ -369,6 +486,151 @@ export class Store {
           WHERE notifications.status='failed' AND notifications.last_error='Notification policy no longer selects this destination'`,
           )
           .run(randomUUID(), assessment.id, revision, channel, payload, availableAt);
+    });
+  }
+  /** Bounded local queue. Cursor is the stable (created_at, finding_id, revision) tuple. */
+  reviews(
+    options: {
+      includeResolved?: boolean;
+      limit?: number;
+      after?: { created_at: number; finding_id: string; revision: number };
+    } = {},
+  ): AiReview[] {
+    const limit = options.limit ?? 100;
+    if (
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 1000 ||
+      (options.includeResolved !== undefined && typeof options.includeResolved !== 'boolean')
+    )
+      throw new Error('Invalid review list options');
+    const after = options.after;
+    if (
+      after &&
+      (!Number.isSafeInteger(after.created_at) ||
+        !Number.isSafeInteger(after.revision) ||
+        after.revision < 1 ||
+        typeof after.finding_id !== 'string' ||
+        !after.finding_id.length)
+    )
+      throw new Error('Invalid review cursor');
+    return this.#db
+      .prepare(
+        `SELECT r.*,h.payload FROM ai_reviews r JOIN finding_revisions h
+      ON h.finding_id=r.finding_id AND h.revision=r.revision
+      WHERE ${options.includeResolved ? '1' : "r.status IN ('pending','investigate')"}
+      ${after ? 'AND (r.created_at,r.finding_id,r.revision) > (?,?,?)' : ''}
+      ORDER BY r.created_at,r.finding_id,r.revision LIMIT ?`,
+      )
+      .all(...(after ? [after.created_at, after.finding_id, after.revision] : []), limit)
+      .map((row) => ({
+        finding_id: String(row.finding_id),
+        revision: Number(row.revision),
+        reason: row.reason as AiReview['reason'],
+        status: row.status as AiReview['status'],
+        created_at: Number(row.created_at),
+        reviewed_at: row.reviewed_at === null ? null : Number(row.reviewed_at),
+        reviewer: row.reviewer === null ? null : String(row.reviewer),
+        note: row.note === null ? null : String(row.note),
+        evidence: JSON.parse(String(row.evidence_refs)),
+        assessment: JSON.parse(String(row.payload)),
+      }));
+  }
+  reviewSummary(now = Date.now()): {
+    pending: number;
+    investigate: number;
+    oldest_open_at: number | null;
+    oldest_open_age_ms: number | null;
+  } {
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid review timestamp');
+    const row = this.#db
+      .prepare(
+        `SELECT SUM(status='pending') AS pending,SUM(status='investigate') AS investigate,
+      MIN(created_at) AS oldest FROM ai_reviews WHERE status IN ('pending','investigate')`,
+      )
+      .get()!;
+    const oldest = row.oldest == null ? null : Number(row.oldest);
+    return {
+      pending: Number(row.pending ?? 0),
+      investigate: Number(row.investigate ?? 0),
+      oldest_open_at: oldest,
+      oldest_open_age_ms: oldest === null ? null : Math.max(0, now - oldest),
+    };
+  }
+  /** OS/private database access authenticates this local operation; reviewer is a declared label. */
+  reviewFinding(
+    id: string,
+    revision: number,
+    decision: { disposition: 'dismiss' | 'investigate'; reviewer: string; reason: string },
+    now = Date.now(),
+  ): void {
+    const text = (value: unknown, max: number) =>
+      typeof value === 'string' &&
+      value.trim().length > 0 &&
+      value.length <= max &&
+      !/[\u0000-\u001f\u007f]/u.test(value);
+    if (
+      !text(id, 500) ||
+      !Number.isSafeInteger(revision) ||
+      revision < 1 ||
+      !Number.isSafeInteger(now) ||
+      now < 0 ||
+      !decision ||
+      !['dismiss', 'investigate'].includes(decision.disposition) ||
+      !text(decision.reviewer, 200) ||
+      !text(decision.reason, 2000)
+    )
+      throw new Error('Review requires a current revision, disposition, reviewer and bounded reason');
+    this.#transaction(() => {
+      const row = this.#db
+        .prepare(
+          `SELECT r.status,r.evidence_refs,f.revision AS current_revision,f.payload FROM ai_reviews r
+        JOIN findings f ON f.id=r.finding_id WHERE r.finding_id=? AND r.revision=?`,
+        )
+        .get(id, revision);
+      if (
+        !row ||
+        row.current_revision !== revision ||
+        !['pending', 'investigate'].includes(String(row.status))
+      )
+        throw new Error('Review is stale or already resolved; read the current review queue');
+      const finding = JSON.parse(String(row.payload)) as Assessment;
+      if (finding.active === false || finding.withdrawn || finding.applicability === 'not_affected')
+        throw new Error('Review is no longer current');
+      const currentEvidence = this.#db
+        .prepare(
+          'SELECT source,id,content_hash FROM evidence WHERE id IN (SELECT value FROM json_each(?)) ORDER BY source,id',
+        )
+        .all(JSON.stringify(finding.evidence_ids))
+        .map((item) => ({
+          source: String(item.source),
+          id: String(item.id),
+          content_hash: String(item.content_hash),
+        }));
+      if (hash(currentEvidence) !== hash(JSON.parse(String(row.evidence_refs))))
+        throw new Error('Review evidence is stale; wait for reassessment and read the current review queue');
+      this.#db
+        .prepare(
+          'UPDATE ai_reviews SET status=?,reviewed_at=?,reviewer=?,note=? WHERE finding_id=? AND revision=?',
+        )
+        .run(
+          decision.disposition === 'dismiss' ? 'dismissed' : 'investigate',
+          now,
+          decision.reviewer.trim(),
+          decision.reason.trim(),
+          id,
+          revision,
+        );
+      if (decision.disposition === 'dismiss') {
+        this.#db
+          .prepare('UPDATE findings SET acknowledged_revision=? WHERE id=? AND revision=?')
+          .run(revision, id, revision);
+        this.#db
+          .prepare(
+            "UPDATE notifications SET status='failed',last_error='Finding acknowledged before delivery' WHERE finding_id=? AND revision=? AND status='pending'",
+          )
+          .run(id, revision);
+      }
     });
   }
   findings(): Assessment[] {
@@ -497,6 +759,7 @@ export class Store {
       notification,
     );
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   claimDue(now = Date.now(), excludedChannels: Notification['channel'][] = []): Notification | undefined {
     return this.#transaction(() => {
       const row = this.#db
@@ -516,6 +779,7 @@ export class Store {
       return { ...notification(row), status: 'sending', attempts: Number(row.attempts) + 1 };
     });
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   claimAdditionalDigest(channel: Notification['channel'], now = Date.now(), limit = 4): Notification[] {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 4)
       throw new Error('Digest batch limit must be 0–4 additional findings');
@@ -541,19 +805,46 @@ export class Store {
       }));
     });
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   completeJob(
     id: string,
     status: 'accepted' | 'unknown' | 'failed' | 'pending',
     nextAt: number,
     error?: string,
+    acceptedAt?: number,
   ): void {
+    if (
+      acceptedAt !== undefined &&
+      (status !== 'accepted' ||
+        !Number.isSafeInteger(acceptedAt) ||
+        acceptedAt <= 0 ||
+        acceptedAt > 8_640_000_000_000_000)
+    )
+      throw new Error('Invalid notification acceptance time');
     const changed = this.#db
       .prepare(
-        "UPDATE notifications SET status=?,available_at=?,last_error=? WHERE id=? AND status='sending'",
+        "UPDATE notifications SET status=?,available_at=?,last_error=?,accepted_at=? WHERE id=? AND status='sending'",
       )
-      .run(status, nextAt, error ?? null, id);
+      .run(status, nextAt, error ?? null, acceptedAt ?? null, id);
     if (Number(changed.changes) !== 1) throw new Error('Notification is not in flight');
   }
+  /**
+   * Persist one destination response for the whole claimed digest, including the shared receipt time.
+   * @internal Used by the scan and delivery workers; not part of the public API.
+   */
+  completeBatch(
+    ids: readonly string[],
+    status: 'accepted' | 'unknown' | 'failed',
+    nextAt: number,
+    error?: string,
+    acceptedAt?: number,
+  ): void {
+    if (ids.length < 1 || ids.length > 5) throw new Error('Invalid notification batch size');
+    this.#transaction(() => {
+      for (const id of ids) this.completeJob(id, status, nextAt, error, acceptedAt);
+    });
+  }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   deferJob(id: string, nextAt: number, reason = 'Waiting for destination rate limit'): void {
     const changed = this.#db
       .prepare(
@@ -585,6 +876,7 @@ export class Store {
         .run(now, id);
     });
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   recoverSending(now = Date.now()): void {
     this.#db
       .prepare(
@@ -592,15 +884,41 @@ export class Store {
       )
       .run(now);
   }
-  acknowledge(id: string): void {
+  /** The current revision number of a finding, or undefined when it does not exist. */
+  revisionOf(id: string): number | undefined {
+    const row = this.#db.prepare('SELECT revision FROM findings WHERE id=?').get(id) as Row | undefined;
+    return row ? Number(row.revision) : undefined;
+  }
+  /**
+   * A send whose result could not be recorded may have reached its destination: never resend it unasked.
+   * @internal Used by the scan and delivery workers; not part of the public API.
+   */
+  markUncertain(ids: readonly string[], error: string): void {
     this.#transaction(() => {
-      if (!this.#db.prepare('UPDATE findings SET acknowledged_revision=revision WHERE id=?').run(id).changes)
-        throw new Error('Finding not found');
+      for (const id of ids)
+        this.#db
+          .prepare(
+            "UPDATE notifications SET status='unknown',last_error=? WHERE id=? AND status IN ('pending','sending')",
+          )
+          .run(error, id);
+    });
+  }
+  /** Acknowledge the current revision. Pass the revision that was read to refuse a newer, unseen one. */
+  acknowledge(id: string, revision?: number): number {
+    return this.#transaction(() => {
+      const current = this.revisionOf(id);
+      if (current === undefined) throw new Error('Finding not found');
+      if (revision !== undefined && revision !== current)
+        throw new Error(
+          `Finding is now at revision ${current}, not ${revision}; read the current revision before acknowledging it`,
+        );
+      this.#db.prepare('UPDATE findings SET acknowledged_revision=revision WHERE id=?').run(id);
       this.#db
         .prepare(
           "UPDATE notifications SET status='failed',last_error='Finding acknowledged before delivery' WHERE finding_id=? AND status='pending'",
         )
         .run(id);
+      return current;
     });
   }
   suppress(id: string, until: number, reason: string): void {
@@ -620,9 +938,11 @@ export class Store {
         .run(until, id);
     });
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   getMeta(key: string): string | undefined {
     return this.#db.prepare('SELECT value FROM metadata WHERE key=?').get(key)?.value as string | undefined;
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   setMeta(key: string, value: string, now = Date.now()): void {
     if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid metadata timestamp');
     this.#db
@@ -666,7 +986,7 @@ export class Store {
     };
     // Inactive means absent from the current assessment, not remediated. Uncertain or affected
     // findings stay protected until authoritative exclusion, withdrawal, or confirmed general news.
-    const resolved = `COALESCE((json_type(f.payload,'$.active')='false' AND (
+    const resolved = `COALESCE((NOT EXISTS (SELECT 1 FROM ai_reviews review WHERE review.finding_id=f.id) AND json_type(f.payload,'$.active')='false' AND (
       json_extract(f.payload,'$.applicability')='not_affected' OR json_type(f.payload,'$.withdrawn')='true' OR
       (json_extract(f.payload,'$.ai.status')='complete' AND json_extract(f.payload,'$.news_analysis.classification')='general_news' AND json_extract(f.payload,'$.news_analysis.impact')='not_applicable')
     ) AND NOT EXISTS (SELECT 1 FROM notifications pending WHERE pending.finding_id=f.id AND pending.status<>'accepted')),0)`;
@@ -681,10 +1001,11 @@ export class Store {
         [],
         'analysis_cache',
       );
+      const receiptTime = 'COALESCE(n.accepted_at,n.available_at)';
       const accepted = take(
         'notifications',
         `SELECT n.rowid FROM notifications n JOIN findings f ON f.id=n.finding_id WHERE n.status='accepted' AND (${resolved}) AND
-        (n.available_at < ${cutoff(limits.accepted_delivery_days)} OR ((${inactive}) AND n.available_at < ${cutoff(limits.inactive_findings_days)})) ORDER BY n.available_at,n.rowid`,
+        (${receiptTime} < ${cutoff(limits.accepted_delivery_days)} OR ((${inactive}) AND ${receiptTime} < ${cutoff(limits.inactive_findings_days)})) ORDER BY ${receiptTime},n.rowid`,
         [],
         'accepted_deliveries',
       );
@@ -750,6 +1071,7 @@ export class Store {
       throw error;
     }
   }
+  /** @internal Used by the scan and delivery workers; not part of the public API. */
   reserveBudget(
     day: string,
     maxRequests: number,
@@ -810,7 +1132,11 @@ export class Store {
         };
       });
   }
-  async backup(path: string): Promise<void> {
+  /**
+   * Write a snapshot and publish it at `path`. When `verify` is given it checks the snapshot first,
+   * and a snapshot that fails is removed instead of being left at the destination.
+   */
+  async backup(path: string, verify?: (snapshot: string) => Promise<void>): Promise<void> {
     const destination = resolve(path);
     if (existsSync(destination)) throw new Error('Backup destination already exists');
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
@@ -819,6 +1145,7 @@ export class Store {
     try {
       privateFile(snapshot);
       await sqliteBackup(this.#db, snapshot);
+      if (verify) await verify(snapshot);
       // Publish a complete snapshot atomically, and never overwrite a file that appeared during backup.
       linkSync(snapshot, destination);
     } finally {
@@ -826,3 +1153,5 @@ export class Store {
     }
   }
 }
+
+export const readPilotReport = Store.readPilotReport;

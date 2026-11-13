@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "mode": "offline_rehearsal",
+  "sink": "accepted",
+  "safety": {
+    "models_disabled": true,
+    "sources_disabled": true,
+    "network_requests": 0,
+    "external_deliveries": 0,
+    "live_database_opened": false,
+    "credentials_loaded": false
+  },
+  "frames": [
+    {
+      "index": 0,
+      "ingest": {
+        "kind": "fixture",
+        "ref": "3d8913615f4a6fccd3d7aa43661d49a35cca7cf27808f300575be5f157e40758",
+        "evidence_refs": ["8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0"]
+      },
+      "scan_ms": 20,
+      "degraded": false,
+      "evidence": [
+        {
+          "ref": "8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0",
+          "kind": "advisory",
+          "retained": true,
+          "fetched_age_ms": 0,
+          "modified_age_ms": 0
+        }
+      ],
+      "findings": [
+        {
+          "ref": "bbcfd59bc592948a08865c42def2781845bae93535d687ec6a91c2201cf95c66",
+          "revision": 1,
+          "active": true,
+          "category": "library",
+          "applicability": "affected",
+          "source_severity": "critical",
+          "priority": "critical",
+          "evidence_refs": ["8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0"],
+          "decision": "notify",
+          "channels": ["slack"]
+        }
+      ],
+      "deliveries": [
+        {
+          "ref": "a4e7fe71bf914c0d09f7e011adafe50f3ae281b916164021ef1b58204ce77cc8",
+          "finding_ref": "bbcfd59bc592948a08865c42def2781845bae93535d687ec6a91c2201cf95c66",
+          "revision": 1,
+          "channel": "slack",
+          "status": "accepted",
+          "attempts": 1,
+          "scheduled_in_ms": 0
+        }
+      ],
+      "counters": {
+        "findings": 1,
+        "active_findings": 1,
+        "decisions": {
+          "record": 0,
+          "digest": 0,
+          "notify": 1
+        },
+        "delivery_states": {
+          "pending": 0,
+          "sending": 0,
+          "accepted": 1,
+          "failed": 0,
+          "unknown": 0
+        }
+      },
+      "review_backlog": 0,
+      "oldest_review_age_ms": null
+    },
+    {
+      "index": 1,
+      "ingest": {
+        "kind": "fixture",
+        "ref": "c84477334f2bbe2366008adc493394e3973bf91a907da6fda1a1acf5e486de95",
+        "evidence_refs": ["8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0"]
+      },
+      "scan_ms": 2,
+      "degraded": false,
+      "evidence": [
+        {
+          "ref": "8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0",
+          "kind": "advisory",
+          "retained": true,
+          "fetched_age_ms": 60000,
+          "modified_age_ms": 60000
+        }
+      ],
+      "findings": [
+        {
+          "ref": "bbcfd59bc592948a08865c42def2781845bae93535d687ec6a91c2201cf95c66",
+          "revision": 1,
+          "active": true,
+          "category": "library",
+          "applicability": "affected",
+          "source_severity": "critical",
+          "priority": "critical",
+          "evidence_refs": ["8fb8a6e21b8f3e83be220b54883614d0c7a6e8ba7056c6a2e4b6285fdf589ac0"],
+          "decision": "notify",
+          "channels": ["slack"]
+        }
+      ],
+      "deliveries": [
+        {
+          "ref": "a4e7fe71bf914c0d09f7e011adafe50f3ae281b916164021ef1b58204ce77cc8",
+          "finding_ref": "bbcfd59bc592948a08865c42def2781845bae93535d687ec6a91c2201cf95c66",
+          "revision": 1,
+          "channel": "slack",
+          "status": "accepted",
+          "attempts": 1,
+          "scheduled_in_ms": 0
+        }
+      ],
+      "counters": {
+        "findings": 1,
+        "active_findings": 1,
+        "decisions": {
+          "record": 0,
+          "digest": 0,
+          "notify": 1
+        },
+        "delivery_states": {
+          "pending": 0,
+          "sending": 0,
+          "accepted": 1,
+          "failed": 0,
+          "unknown": 0
+        }
+      },
+      "review_backlog": 0,
+      "oldest_review_age_ms": null
+    }
+  ],
+  "summary": {
+    "findings": 1,
+    "active_findings": 1,
+    "decisions": {
+      "record": 0,
+      "digest": 0,
+      "notify": 1
+    },
+    "delivery_states": {
+      "pending": 0,
+      "sending": 0,
+      "accepted": 1,
+      "failed": 0,
+      "unknown": 0
+    },
+    "sink_calls": 1,
+    "model_requests": 0,
+    "model_usd": 0
+  },
+  "recovery": {
+    "reopened": true,
+    "backup_verified": true,
+    "restored": true,
+    "receipts_preserved": true,
+    "automatically_dispatched": 0,
+    "dispatcher_probe": "passed",
+    "terminal_receipts_not_retried": true,
+    "probe_sink_calls": 0
+  },
+  "unmeasured": {
+    "source_coverage": null,
+    "ai_shadow": null,
+    "urgent_recall": null,
+    "false_alert_rate": null,
+    "analyst_latency_ms": null
+  }
+}

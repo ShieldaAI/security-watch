@@ -1,12 +1,39 @@
 # Release review
 
-Review date: 2026-10-24. Package: `@shieldaai/security-watch`, `0.1.0-alpha.0`.
+This file is kept in the repository only; it is not part of the npm package.
+
+## 1.0.0-rc.1 review, 2026-11-13
+
+The release candidate was reviewed in three independent passes over collection and HTTP, assessment and models, and storage, delivery and the command line. Twenty-five defects were reproduced against the built code and fixed, each with a regression test; they are listed in the [changelog](../CHANGELOG.md). The change that users see most is the `note` field, which puts "where to look" into every notification.
+
+Checked on macOS with Node.js 26.12.0:
+
+- `npm run check`: formatting, the full test suite with no skipped tests, and the packed-package consumer check.
+- Line coverage of the built code is about 97%.
+- `npm audit` reports no known vulnerabilities in production or development dependencies.
+- The offline alert-outcome evaluation gate passes on its 72 synthetic trials.
+
+Not checked, and required before `1.0.0`:
+
+- Hosted CI on the release commit, including Node.js 24.10.0 and the Docker stages. The candidate has not been committed.
+- The human-labelled evaluation. The prepared 120-case sample has no reviewed cases; routing changes in this candidate can move cases in it, so score it on this build.
+- A representative observation period, and a real Slack and email delivery.
+- Windows. The private-file permission checks are skipped there.
+- Live provider calls other than the OpenAI and Anthropic checks of 2026-10-24.
+
+Schema 7 is current. Upgrading from the alpha migrates through schemas 5 to 7; see the changelog for the steps.
+
+## Baseline review of 0.1.0-alpha.0, 2026-10-24
+
+The rest of this file is the review of the first alpha, kept as history. Test counts, the Node.js 24.0.0 minimum, schema 5 and the statements about defaults describe that release, not the current one.
+
+Package: `@shieldaai/security-watch`, `0.1.0-alpha.0`.
 
 The alpha supports small installations with library inventories across 12 ecosystems, cve.now/OSV advisories, security and vendor news, optional model analysis, and Slack/SMTP delivery from one host. The checks below cover that scope. Product backports, runtime reachability, large fleets and distributed workers are outside it.
 
-## Changes covered
+### Changes covered
 
-### Sources and assessment
+#### Sources and assessment
 
 - New configurations use cve.now and The Hacker News. OSV, GitHub, CISA KEV and RSS/Atom adapters remain optional. Official Node.js, Python and PHP feeds can be selected explicitly; article extraction stays within fixed vendor hosts and content limits.
 - Library lists accept ecosystem aliases and optional exact versions across npm, PyPI, Packagist, Go, Maven, crates.io, RubyGems, NuGet, Hex, Pub, Hackage and SwiftURL. Only npm has range ordering/exclusion support; other ecosystems need exact positive OSV or listed-version evidence. Missing versions and unsupported constraints remain uncertain. Library checks do not require a model.
@@ -20,7 +47,7 @@ The alpha supports small installations with library inventories across 12 ecosys
 - Newer source revisions take precedence. Future timestamps fail collection, and unchanged KEV records retain their content revision when the catalog changes.
 - The scan interval and news discovery window are independent. RSS/Atom and The Hacker News filter new stories by publication or modification time before fetching articles. Successful checkpoints allow catch-up after downtime; tracked findings and authoritative package matches remain in scope. Undated entries produce a health warning, and unchanged undated content does not create duplicate revisions or model calls.
 
-### Model analysis
+#### Model analysis
 
 - A shared catalog defines 22 provider profiles: 17 cloud services, four local/gateway profiles and a generic Chat Completions adapter. Provider-specific authentication, request formats, output limits and response validation cover six protocol families. The CLI can list the catalog without configuration or network access. Models select source excerpt IDs; the application resolves them to exact quotations and rejects unsupported claims. Installed-version constraints apply to fresh responses and cached results.
 - Structured output defaults follow each provider's API, including native JSON Schema for OpenAI and Anthropic, with explicit overrides for model-specific capabilities. Incomplete, refused, asynchronous and unexpected tool/code responses are rejected. Model failures do not silently switch providers or weaken evidence validation.
@@ -32,7 +59,7 @@ The alpha supports small installations with library inventories across 12 ecosys
 - General coverage remains historical when its article, inventory and model settings are unchanged. Current affected or excluded impact claims require fresh evidence.
 - `evaluate:models` runs source-derived synthetic scenarios through the production analyzer. Reports separate acceptance, coverage, reference-label agreement, false exclusions and disagreements. The corpus labels remain `pending_human_review`; this is not an independently labeled production benchmark. Live provider calls require explicit opt-in, credentials, model IDs and bounded request settings.
 
-### Setup and operations
+#### Setup and operations
 
 - `init` accepts common-system templates or a library list, provider/model selection, vendor feeds, external heartbeat setup and independent scan/news timing. The default generated schedule is 30 minutes with a 40-minute news window. Templates do not invent installed versions or deployment details.
 - `--credentials-file` explicitly loads dotenv data with existing environment values taking precedence. Reads are bounded to 128 KiB; Unix permissions, file type and runtime-variable checks happen before environment changes. The flag avoids Node’s startup handling of `--env-file`.
@@ -47,7 +74,7 @@ The alpha supports small installations with library inventories across 12 ecosys
 - Backups are restored and migrated only in a private temporary copy, then checked for SQLite integrity, relationships, schema and readable saved JSON. Automatic rotation and retention follow successful verification. Verification establishes structural restorability, not the semantic accuracy of saved security claims.
 - Builds clean `dist` before compiling. Package checks install the tarball in a fresh consumer and verify the CLI version, public types and runtime exports.
 
-## Validation
+### Validation
 
 All **639 tests** pass on Node 26.12.0 and Node 24.22.1 in the Linux Docker test stage. They cover news windows, source recovery, package identity/version boundaries, model evidence validation, notification retries, concurrent SQLite readers and worker-lock contention. Maintenance tests cover read-only previews, bounded atomic pruning, protected records, migration, temporary restore verification and damaged-backup rejection. Provider protocol tests use real loopback HTTP with simulated responses; they do not establish hosted-model accuracy. `npm run check` also passes formatting, strict compilation and clean-package consumer checks.
 
@@ -73,7 +100,7 @@ Earlier live model checks on 2026-10-24 used a fictional security bulletin throu
 
 Each request had a 2,048-output-token cap and a 60-second timeout. No private inventory, tools, verification calls or notifications were involved. Both model IDs were checked against the providers' current documentation: [OpenAI](https://developers.openai.com/api/docs/models/gpt-6-luna) and [Anthropic](https://platform.claude.com/docs/en/models/haiku-5-5/overview). These checks establish compatibility for the tested models and credentials at review time, not general model accuracy. The remaining 20 provider profiles have simulated transport coverage only. No real Slack/email messages were sent.
 
-### Expanded source checks, 2026-10-24
+#### Expanded source checks, 2026-10-24
 
 A public sample with exact versions from all 12 ecosystems, plus name-only Python and PHP entries, completed 129 OSV requests and retained 128 advisory records without coverage errors. Every exact-version sample returned at least one advisory. Both name-only samples produced candidates with unknown applicability and no affected or unaffected conclusions. Advisory aliases can refer to the same underlying vulnerability, so these record counts are not unique CVE counts.
 
@@ -81,7 +108,7 @@ Live checks exposed OSV spelling differences for Rust, NuGet and Swift that simu
 
 The official Node.js, Python and PHP feeds completed 11 requests over a seven-day window and returned eight full article extracts with no source errors: one Node.js article, one Python article and six PHP articles. PHP's historical feed needs its own bounded entry allowance. Updated vendor articles can be shorter than an older feed excerpt; the extractor verifies the complete article wrapper, title and body instead of treating length alone as completeness.
 
-### Expanded model evaluation, 2026-10-24
+#### Expanded model evaluation, 2026-10-24
 
 A later run of `evaluate:models` made 20 requests against the source-derived synthetic corpus. OpenAI `gpt-6-luna` produced accepted output for all ten cases and matched both provisional classification and impact labels in seven; the other three answers were more uncertain. No false exclusions were recorded against those reference labels.
 
@@ -89,7 +116,7 @@ All ten Anthropic `claude-haiku-5-5` requests returned HTTP 401 with the credent
 
 The corpus labels are still `pending_human_review`. These figures describe a small synthetic exercise, not production accuracy or an independently reviewed benchmark.
 
-## Before deployment
+### Before deployment
 
 A real-article evaluation used the sample inventory of 24 common systems with no installed versions. The initial run completed only two of 19 assessments. The final test used the same 19 target/event pairs from the successful paced source scan, with native JSON Schema output from OpenAI and Anthropic. Nine assessments completed, seven had conflicting classifications, and three were rejected for unsupported extracted claims. All 36 API requests returned HTTP 200; there were no JSON-format or quotation-reference failures. The clock was fixed at the source capture time for this evaluation. This is a small operational sample, not an accuracy benchmark.
 

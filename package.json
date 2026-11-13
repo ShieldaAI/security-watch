@@ -1,11 +1,11 @@
 {
   "name": "@shieldaai/security-watch",
-  "version": "0.1.0-alpha.0",
-  "description": "Evidence-led security advisory and news monitoring for your systems",
+  "version": "1.0.0-rc.1",
+  "description": "Know quickly which new vulnerabilities and security news affect your stack. Self-hosted advisory monitoring with Slack or email alerts.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.10.0"
   },
   "bin": {
     "security-watch": "dist/cli.js"
@@ -20,7 +20,10 @@
     "dist",
     "examples",
     "docs",
+    "!docs/agent-best-practices-plan.md",
+    "!docs/quality-review.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "SECURITY.md",
     "CONTRIBUTING.md"
@@ -28,6 +31,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=88 --test-coverage-functions=95 --test-coverage-exclude=test/** test/*.test.mjs",
     "check": "npm run format:check && npm test && node scripts/check-package.mjs",
     "check:package": "node scripts/check-package.mjs",
     "check:models": "npm run build && node scripts/check-models.mjs",
@@ -38,10 +42,12 @@
     "check:docker": "node scripts/check-docker.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "evaluate:outcomes": "npm run build && node scripts/evaluate-alerts.mjs"
   },
   "dependencies": {
-    "fast-xml-parser": "5.11.2",
+    "@renovatebot/pep440": "6.0.0",
+    "fast-xml-parser": "5.12.1",
     "ipaddr.js": "2.5.0",
     "nodemailer": "10.2.1",
     "parse5": "8.0.1",
@@ -58,7 +64,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "tag": "alpha"
+    "tag": "next"
   },
   "repository": {
     "type": "git",
@@ -67,5 +73,16 @@
   "bugs": {
     "url": "https://github.com/ShieldaAI/security-watch/issues"
   },
-  "homepage": "https://github.com/ShieldaAI/security-watch#readme"
+  "homepage": "https://github.com/ShieldaAI/security-watch#readme",
+  "keywords": [
+    "security-advisories",
+    "dependency-monitoring",
+    "vulnerability-monitoring",
+    "cve",
+    "osv",
+    "npm",
+    "slack",
+    "self-hosted",
+    "typescript"
+  ]
 }

@@ -1,0 +1,2935 @@
+{
+  "version": 1,
+  "kind": "offline-alert-outcome-evaluation",
+  "corpus_sha256": "6b94cd8588f4c3e7aea4332a54190acf9d186d5c73757c3fb824f0a4e04de122",
+  "corpus_version": 1,
+  "prompt_version": "security-watch-10",
+  "scenario_type": "Original synthetic cases with fictional inventories and deterministic model replays; not a production model accuracy benchmark.",
+  "run_configuration": {
+    "modes": ["deterministic", "single-model", "verifier"],
+    "repeats": 2,
+    "selected_cases": [
+      "parser-vulnerable",
+      "parser-fixed",
+      "comet-vulnerable",
+      "comet-fixed",
+      "maple-release",
+      "willow-outage",
+      "orchid-injection",
+      "larch-exploitation",
+      "aspen-release",
+      "hazel-critical",
+      "oak-excerpt",
+      "elm-false-exclusion"
+    ],
+    "model": "offline-fixture",
+    "verification_model": "offline-verifier",
+    "request_cap": 72,
+    "now": "2026-11-04T12:00:00.000Z"
+  },
+  "metrics": {
+    "trials": 72,
+    "complete": 72,
+    "errors": 0,
+    "unique_cases": 12,
+    "unique_families": 10,
+    "coverage": 1,
+    "must_review_or_urgent_trials": 48,
+    "scored_risk_trials": 48,
+    "incomplete_risk_trials": 0,
+    "all_case_safe_visibility_ratio": 1,
+    "false_dismissals": 0,
+    "false_dismissal_rate": 0,
+    "model_false_exclusions": 12,
+    "benign_trials": 24,
+    "scored_benign_trials": 24,
+    "unnecessary_immediate_alert_trials": 0,
+    "unnecessary_immediate_alert_rate": 0,
+    "nonactionable_immediate_notifications": 0,
+    "nonactionable_digest_notifications": 18,
+    "nonactionable_total_notifications": 18,
+    "urgent_trials": 18,
+    "urgent_missed_immediate": 0,
+    "immediate_notifications": 22,
+    "digest_notifications": 44,
+    "local_review_items": 16,
+    "review_workload_trials": 44,
+    "benign_review_workload_trials": 18,
+    "model_status_counts": {
+      "disabled": 28,
+      "complete": 36,
+      "unavailable": 4,
+      "conflicting": 4
+    },
+    "abstentions": 32,
+    "requests": 64,
+    "p95_latency_ms": 5.9667499999999905,
+    "cost": {
+      "paid_requests": 0,
+      "synthetic_transport_cost": 0,
+      "production_cost_per_useful_finding": null
+    },
+    "false_alerts_per_inventory_week": null,
+    "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+  },
+  "modes": {
+    "deterministic": {
+      "trials": 24,
+      "complete": 24,
+      "errors": 0,
+      "unique_cases": 12,
+      "unique_families": 10,
+      "coverage": 1,
+      "must_review_or_urgent_trials": 16,
+      "scored_risk_trials": 16,
+      "incomplete_risk_trials": 0,
+      "all_case_safe_visibility_ratio": 1,
+      "false_dismissals": 0,
+      "false_dismissal_rate": 0,
+      "model_false_exclusions": 0,
+      "benign_trials": 8,
+      "scored_benign_trials": 8,
+      "unnecessary_immediate_alert_trials": 0,
+      "unnecessary_immediate_alert_rate": 0,
+      "nonactionable_immediate_notifications": 0,
+      "nonactionable_digest_notifications": 6,
+      "nonactionable_total_notifications": 6,
+      "urgent_trials": 6,
+      "urgent_missed_immediate": 0,
+      "immediate_notifications": 6,
+      "digest_notifications": 16,
+      "local_review_items": 0,
+      "review_workload_trials": 16,
+      "benign_review_workload_trials": 6,
+      "model_status_counts": {
+        "disabled": 24
+      },
+      "abstentions": 20,
+      "requests": 0,
+      "p95_latency_ms": 4.840750000000014,
+      "cost": {
+        "paid_requests": 0,
+        "synthetic_transport_cost": 0,
+        "production_cost_per_useful_finding": null
+      },
+      "false_alerts_per_inventory_week": null,
+      "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+    },
+    "single-model": {
+      "trials": 24,
+      "complete": 24,
+      "errors": 0,
+      "unique_cases": 12,
+      "unique_families": 10,
+      "coverage": 1,
+      "must_review_or_urgent_trials": 16,
+      "scored_risk_trials": 16,
+      "incomplete_risk_trials": 0,
+      "all_case_safe_visibility_ratio": 1,
+      "false_dismissals": 0,
+      "false_dismissal_rate": 0,
+      "model_false_exclusions": 8,
+      "benign_trials": 8,
+      "scored_benign_trials": 8,
+      "unnecessary_immediate_alert_trials": 0,
+      "unnecessary_immediate_alert_rate": 0,
+      "nonactionable_immediate_notifications": 0,
+      "nonactionable_digest_notifications": 6,
+      "nonactionable_total_notifications": 6,
+      "urgent_trials": 6,
+      "urgent_missed_immediate": 0,
+      "immediate_notifications": 8,
+      "digest_notifications": 14,
+      "local_review_items": 10,
+      "review_workload_trials": 14,
+      "benign_review_workload_trials": 6,
+      "model_status_counts": {
+        "complete": 20,
+        "disabled": 2,
+        "unavailable": 2
+      },
+      "abstentions": 4,
+      "requests": 22,
+      "p95_latency_ms": 7.7966249999999775,
+      "cost": {
+        "paid_requests": 0,
+        "synthetic_transport_cost": 0,
+        "production_cost_per_useful_finding": null
+      },
+      "false_alerts_per_inventory_week": null,
+      "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+    },
+    "verifier": {
+      "trials": 24,
+      "complete": 24,
+      "errors": 0,
+      "unique_cases": 12,
+      "unique_families": 10,
+      "coverage": 1,
+      "must_review_or_urgent_trials": 16,
+      "scored_risk_trials": 16,
+      "incomplete_risk_trials": 0,
+      "all_case_safe_visibility_ratio": 1,
+      "false_dismissals": 0,
+      "false_dismissal_rate": 0,
+      "model_false_exclusions": 4,
+      "benign_trials": 8,
+      "scored_benign_trials": 8,
+      "unnecessary_immediate_alert_trials": 0,
+      "unnecessary_immediate_alert_rate": 0,
+      "nonactionable_immediate_notifications": 0,
+      "nonactionable_digest_notifications": 6,
+      "nonactionable_total_notifications": 6,
+      "urgent_trials": 6,
+      "urgent_missed_immediate": 0,
+      "immediate_notifications": 8,
+      "digest_notifications": 14,
+      "local_review_items": 6,
+      "review_workload_trials": 14,
+      "benign_review_workload_trials": 6,
+      "model_status_counts": {
+        "complete": 16,
+        "disabled": 2,
+        "unavailable": 2,
+        "conflicting": 4
+      },
+      "abstentions": 8,
+      "requests": 42,
+      "p95_latency_ms": 4.61845900000003,
+      "cost": {
+        "paid_requests": 0,
+        "synthetic_transport_cost": 0,
+        "production_cost_per_useful_finding": null
+      },
+      "false_alerts_per_inventory_week": null,
+      "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+    }
+  },
+  "gate": {
+    "passed": true,
+    "complete_matrix": true,
+    "expected_trials": 72,
+    "thresholds": {
+      "false_dismissals": 0,
+      "unnecessary_immediate_alert_trials": 0,
+      "urgent_missed_immediate": 0
+    },
+    "digest_and_review_burden_threshold": null,
+    "scope": "Synthetic regression gate; benign digest/review workload is reported but needs operational calibration.",
+    "controls_valid": true
+  },
+  "controls": {
+    "always-record": {
+      "metrics": {
+        "trials": 72,
+        "complete": 72,
+        "errors": 0,
+        "unique_cases": 12,
+        "unique_families": 10,
+        "coverage": 1,
+        "must_review_or_urgent_trials": 48,
+        "scored_risk_trials": 48,
+        "incomplete_risk_trials": 0,
+        "all_case_safe_visibility_ratio": 0,
+        "false_dismissals": 48,
+        "false_dismissal_rate": 1,
+        "model_false_exclusions": 12,
+        "benign_trials": 24,
+        "scored_benign_trials": 24,
+        "unnecessary_immediate_alert_trials": 0,
+        "unnecessary_immediate_alert_rate": 0,
+        "nonactionable_immediate_notifications": 0,
+        "nonactionable_digest_notifications": 0,
+        "nonactionable_total_notifications": 0,
+        "urgent_trials": 18,
+        "urgent_missed_immediate": 18,
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_review_items": 0,
+        "review_workload_trials": 0,
+        "benign_review_workload_trials": 0,
+        "model_status_counts": {
+          "disabled": 28,
+          "complete": 36,
+          "unavailable": 4,
+          "conflicting": 4
+        },
+        "abstentions": 32,
+        "requests": 64,
+        "p95_latency_ms": 5.9667499999999905,
+        "cost": {
+          "paid_requests": 0,
+          "synthetic_transport_cost": 0,
+          "production_cost_per_useful_finding": null
+        },
+        "false_alerts_per_inventory_week": null,
+        "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+      },
+      "gate": {
+        "passed": false,
+        "complete_matrix": true,
+        "expected_trials": 72,
+        "thresholds": {
+          "false_dismissals": 0,
+          "unnecessary_immediate_alert_trials": 0,
+          "urgent_missed_immediate": 0
+        },
+        "digest_and_review_burden_threshold": null,
+        "scope": "Synthetic regression gate; benign digest/review workload is reported but needs operational calibration."
+      }
+    },
+    "always-alert": {
+      "metrics": {
+        "trials": 72,
+        "complete": 72,
+        "errors": 0,
+        "unique_cases": 12,
+        "unique_families": 10,
+        "coverage": 1,
+        "must_review_or_urgent_trials": 48,
+        "scored_risk_trials": 48,
+        "incomplete_risk_trials": 0,
+        "all_case_safe_visibility_ratio": 1,
+        "false_dismissals": 0,
+        "false_dismissal_rate": 0,
+        "model_false_exclusions": 12,
+        "benign_trials": 24,
+        "scored_benign_trials": 24,
+        "unnecessary_immediate_alert_trials": 24,
+        "unnecessary_immediate_alert_rate": 1,
+        "nonactionable_immediate_notifications": 24,
+        "nonactionable_digest_notifications": 0,
+        "nonactionable_total_notifications": 24,
+        "urgent_trials": 18,
+        "urgent_missed_immediate": 0,
+        "immediate_notifications": 72,
+        "digest_notifications": 0,
+        "local_review_items": 0,
+        "review_workload_trials": 0,
+        "benign_review_workload_trials": 0,
+        "model_status_counts": {
+          "disabled": 28,
+          "complete": 36,
+          "unavailable": 4,
+          "conflicting": 4
+        },
+        "abstentions": 32,
+        "requests": 64,
+        "p95_latency_ms": 5.9667499999999905,
+        "cost": {
+          "paid_requests": 0,
+          "synthetic_transport_cost": 0,
+          "production_cost_per_useful_finding": null
+        },
+        "false_alerts_per_inventory_week": null,
+        "uncertainty": "Deterministic synthetic trials; repetitions are not independent observations. Production rates and confidence bounds are unmeasured."
+      },
+      "gate": {
+        "passed": false,
+        "complete_matrix": true,
+        "expected_trials": 72,
+        "thresholds": {
+          "false_dismissals": 0,
+          "unnecessary_immediate_alert_trials": 0,
+          "urgent_missed_immediate": 0
+        },
+        "digest_and_review_burden_threshold": null,
+        "scope": "Synthetic regression gate; benign digest/review workload is reported but needs operational calibration."
+      }
+    }
+  },
+  "repeat_consistency": {
+    "groups": 36,
+    "consistent_groups": 36,
+    "results": [
+      {
+        "case": "parser-vulnerable",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "parser-vulnerable",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "parser-vulnerable",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "parser-fixed",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "parser-fixed",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "parser-fixed",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-vulnerable",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-vulnerable",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-vulnerable",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-fixed",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-fixed",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "comet-fixed",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "maple-release",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "maple-release",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "maple-release",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "willow-outage",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "willow-outage",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "willow-outage",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "orchid-injection",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "orchid-injection",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "orchid-injection",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "larch-exploitation",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "larch-exploitation",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "larch-exploitation",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "aspen-release",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "aspen-release",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "aspen-release",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "hazel-critical",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "hazel-critical",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "hazel-critical",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "oak-excerpt",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "oak-excerpt",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "oak-excerpt",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "elm-false-exclusion",
+        "mode": "deterministic",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "elm-false-exclusion",
+        "mode": "single-model",
+        "trials": 2,
+        "distinct_outcomes": 1
+      },
+      {
+        "case": "elm-false-exclusion",
+        "mode": "verifier",
+        "trials": 2,
+        "distinct_outcomes": 1
+      }
+    ]
+  },
+  "labels": {
+    "resolved_cases": 0,
+    "unresolved_cases": 12,
+    "status": "agent_authored_pending_human_review"
+  },
+  "production_readiness": {
+    "ready": false,
+    "reserved_reviewed_cases": 0,
+    "reserved_reviewed_risk_cases": 0,
+    "required_cases": 100,
+    "required_risk_cases": 60,
+    "reasons": [
+      "fewer_than_100_independently_reviewed_reserved_cases",
+      "fewer_than_60_reviewed_risk_cases",
+      "reserved_synthetic_fixtures_are_not_a_sealed_holdout",
+      "representative_inventory_time_cost_and_workload_targets_not_calibrated"
+    ]
+  },
+  "results": [
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 20.875291000000004
+    },
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 3.0124169999999992
+    },
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 7.7966249999999775
+    },
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 4.157249999999976
+    },
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 4.61845900000003
+    },
+    {
+      "case": "parser-vulnerable",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "affected",
+        "classification": "not_applicable",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "1ea887a5081672e96df601b3a97744be5a37ef426a46c2b363f27f63a023762d",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 3.770500000000027
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 2.5648329999999646
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 2.54033400000003
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 3.243666000000019
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 2.553000000000054
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 2.3199579999999855
+    },
+    {
+      "case": "parser-fixed",
+      "family": "parser-advisory",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "not_affected",
+        "classification": "not_applicable",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional parser-advisory scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b7a8069e695689fcf93838bb9ca04eb6b506b6ea9e85fbb34c5c6ea675d503d1",
+      "status": "complete",
+      "outcome": {
+        "decision": "record",
+        "immediate_notifications": 0,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": false,
+        "quiet": true
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": false,
+      "latency_ms": 2.340082999999993
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.55416699999995
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.6205420000000004
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "affected"
+      },
+      "abstained": false,
+      "latency_ms": 5.7041659999999865
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.631834000000026
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.7484590000000253
+    },
+    {
+      "case": "comet-vulnerable",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "6caa4c44f0105bc84ef6f52f9dcfe76e899dbf9146f0e9a6f7642bda9feccb4b",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.546958000000018
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 4.840750000000014
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 4.007165999999984
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 12.136707999999999
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.114915999999994
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.224917000000005
+    },
+    {
+      "case": "comet-fixed",
+      "family": "comet-news",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional comet-news scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "bf258285b4392b39be19d41a7d0633d617ae7579a9e5e57aa9963415eb4a23ac",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.067165999999986
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.0962499999999977
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.41616700000003
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.421958000000018
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 2.9698339999999916
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.1268330000000333
+    },
+    {
+      "case": "maple-release",
+      "family": "maple-release",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional maple-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "e468cbe1316b492ed9d0f1bc4f4dc2e72ca13d8efac875d8fd5948919816bf6f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.410000000000025
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.194749999999999
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.4942500000000223
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "unavailable",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 2.579667000000029
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "unavailable",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.5977079999999546
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "unavailable",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.2292909999999893
+    },
+    {
+      "case": "willow-outage",
+      "family": "willow-outage",
+      "split": "development",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional willow-outage scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "153f5c28643b35c0a9f825eff01f466b14004a8d8c078aa4055e6f07500be556",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "unavailable",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.622291999999959
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 4.12133300000005
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.5312920000000076
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 2.878832999999986
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.066958999999997
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "conflicting",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.1274159999999824
+    },
+    {
+      "case": "orchid-injection",
+      "family": "orchid-injection",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional orchid-injection scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "4a30809a6d41d92bc07397a8e81bf27c485740b5006a22ff09f8cca571f07058",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "conflicting",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 2.9897080000000074
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.4509590000000117
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.7308330000000183
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "known_vulnerability_update",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 2.9492079999999987
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "known_vulnerability_update",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.300958000000037
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "known_vulnerability_update",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.495166999999981
+    },
+    {
+      "case": "larch-exploitation",
+      "family": "larch-exploitation",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "known_vulnerability_update",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional larch-exploitation scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "61e3f5f33be15e2c1926390ab85587c0acd974adbc6dd6bf50c3d72176f085a1",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "known_vulnerability_update",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.3952500000000327
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.076917000000037
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.5837920000000167
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 4.155625000000043
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.429957999999999
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.5846669999999676
+    },
+    {
+      "case": "aspen-release",
+      "family": "aspen-release",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "benign",
+        "authoritative_applicability": "unknown",
+        "classification": "general_news",
+        "expected_route": "no_immediate_alert",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional aspen-release scenario: no immediate page is warranted by the described installed context."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "b28692ab19ee0a311e20d29cf9359fe3764aaf1ba27c4d8ac906f19f65be3fe3",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.8258749999999964
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.4402919999999995
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.5267500000000496
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 2.851415999999972
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 2.7897500000000264
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.8886660000000006
+    },
+    {
+      "case": "hazel-critical",
+      "family": "hazel-critical",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "urgent",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional hazel-critical scenario: urgent source evidence must remain immediately eligible."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "74e4f7cbf0763630d01964558da470eddc0ed4447ab0820d9348098286785f50",
+      "status": "complete",
+      "outcome": {
+        "decision": "notify",
+        "immediate_notifications": 1,
+        "digest_notifications": 0,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "general_news",
+        "impact": "not_applicable"
+      },
+      "abstained": false,
+      "latency_ms": 3.2690000000000055
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.029875000000004
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.4446669999999813
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 2.9362500000000296
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.8843330000000265
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.177415999999994
+    },
+    {
+      "case": "oak-excerpt",
+      "family": "oak-excerpt",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional oak-excerpt scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "fa9be69678971c234c14c0ede180bcfc14ace11bac331c76e159d875b6cbc17b",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 5.9667499999999905
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 3.0887910000000147
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "deterministic",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 0,
+      "model_status": "disabled",
+      "predicted": null,
+      "abstained": true,
+      "latency_ms": 2.363584000000003
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 2.9461670000000026
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "single-model",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 1,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 1,
+      "model_status": "complete",
+      "predicted": {
+        "classification": "new_vulnerability",
+        "impact": "not_affected"
+      },
+      "abstained": false,
+      "latency_ms": 3.736459000000025
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 1,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "conflicting",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.4012080000000537
+    },
+    {
+      "case": "elm-false-exclusion",
+      "family": "elm-exclusion",
+      "split": "reserved",
+      "mode": "verifier",
+      "trial": 2,
+      "reference": {
+        "risk": "must_review",
+        "authoritative_applicability": "unknown",
+        "classification": "new_vulnerability",
+        "expected_route": "review_or_notify",
+        "evidence_support": "synthetic_source",
+        "reason": "Original fictional elm-exclusion scenario: a potentially affected deployment must remain visible for review."
+      },
+      "label_source": "agent_authored_synthetic",
+      "case_sha256": "ef29533aab8ad851bc25a55c24537246fa36ae413bae811785b180e0ef8ec21f",
+      "status": "complete",
+      "outcome": {
+        "decision": "digest",
+        "immediate_notifications": 0,
+        "digest_notifications": 1,
+        "local_reviews": 0,
+        "visible": true,
+        "quiet": false
+      },
+      "requests": 2,
+      "model_status": "conflicting",
+      "predicted": {
+        "classification": "unknown",
+        "impact": "unknown"
+      },
+      "abstained": true,
+      "latency_ms": 3.1664579999999773
+    }
+  ]
+}

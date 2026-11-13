@@ -13,3 +13,16 @@ export function timestamp(now = Date.now()): string {
 export function cleanText(value: string, max = 4000): string {
   return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, max);
 }
+
+/** A review binds JSON content independently of object insertion order. Array order is retained. */
+export function canonicalHash(value: unknown): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify(value, (_key, item) =>
+        item && typeof item === 'object' && !Array.isArray(item)
+          ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)))
+          : item,
+      ),
+    )
+    .digest('hex');
+}

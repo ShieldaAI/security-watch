@@ -678,9 +678,9 @@ test('OSV uses supplied database severity and CVSS base scores while unsupported
     ['scope-changed', { severity: [{ score: 'CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:C/C:H/I:H/A:H' }] }, 'high'],
     ['invalid', { severity: [{ score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:INVALID/I:H/A:H' }] }, 'unknown'],
     [
-      'unsupported',
+      'cvss-v4-base',
       { severity: [{ score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' }] },
-      'unknown',
+      'critical',
     ],
   ];
   for (const [name, extra, expected] of cases)

@@ -24,6 +24,8 @@ export class PartialSourceError extends SourceError {
   constructor(
     message: string,
     public readonly evidence: Evidence[],
+    /** How far an ordered collection got. The source continues from here on its next run. */
+    public readonly resume?: string,
   ) {
     super(message);
   }

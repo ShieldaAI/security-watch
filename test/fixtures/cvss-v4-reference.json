@@ -1,0 +1,2055 @@
+{
+  "source": "FIRSTdotorg/cvss-v4-calculator",
+  "commit": "c5b0d409ae9f57c44264c6ce5f27d89298e1d32a",
+  "description": "512 deterministic mixed-radix samples scored by the unmodified pinned browser implementation in an isolated VM. This is adaptation parity, supplemented by published FIRST examples in the test.",
+  "cases": [
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+      "score": 10
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:P/VC:L/VI:H/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:A/VC:N/VI:H/VA:H/SC:H/SI:H/SA:H",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:P/VC:L/VI:L/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:A/VC:N/VI:L/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:N/VC:L/VI:N/VA:H/SC:H/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:A/VC:N/VI:N/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:N/VC:L/VI:H/VA:L/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:N/VI:H/VA:L/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:N/VC:L/VI:L/VA:L/SC:H/SI:H/SA:H",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:P/VC:N/VI:L/VA:L/SC:H/SI:H/SA:H",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:L/SC:H/SI:H/SA:H",
+      "score": 6.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:P/VC:N/VI:N/VA:L/SC:H/SI:H/SA:H",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:N/VC:L/VI:H/VA:N/SC:H/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:P/VC:N/VI:H/VA:N/SC:H/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:A/VC:H/VI:L/VA:N/SC:H/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:P/VC:N/VI:L/VA:N/SC:H/SI:H/SA:H",
+      "score": 6.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:A/VC:H/VI:N/VA:N/SC:H/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:P/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:A/VC:H/VI:H/VA:H/SC:L/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:N/VC:N/VI:H/VA:H/SC:L/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:A/VC:H/VI:L/VA:H/SC:L/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:N/VC:N/VI:L/VA:H/SC:L/SI:H/SA:H",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:A/VC:H/VI:N/VA:H/SC:L/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:N/VA:H/SC:L/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:P/VC:H/VI:H/VA:L/SC:L/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:N/VC:N/VI:H/VA:L/SC:L/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:P/VC:H/VI:L/VA:L/SC:L/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:L/VA:L/SC:L/SI:H/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:P/VC:H/VI:N/VA:L/SC:L/SI:H/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:A/VC:L/VI:N/VA:L/SC:L/SI:H/SA:H",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:P/VC:H/VI:H/VA:N/SC:L/SI:H/SA:H",
+      "score": 8.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:A/VC:L/VI:H/VA:N/SC:L/SI:H/SA:H",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:P/VC:H/VI:L/VA:N/SC:L/SI:H/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:A/VC:L/VI:L/VA:N/SC:L/SI:H/SA:H",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:N/VC:H/VI:N/VA:N/SC:L/SI:H/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:A/VC:L/VI:N/VA:N/SC:L/SI:H/SA:H",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:N/VC:H/VI:H/VA:H/SC:N/SI:H/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:A/VC:L/VI:H/VA:H/SC:N/SI:H/SA:H",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:N/VC:H/VI:L/VA:H/SC:N/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:P/VC:L/VI:L/VA:H/SC:N/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:N/VC:H/VI:N/VA:H/SC:N/SI:H/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:P/VC:L/VI:N/VA:H/SC:N/SI:H/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:L/SC:N/SI:H/SA:H",
+      "score": 9.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:P/VC:L/VI:H/VA:L/SC:N/SI:H/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:A/VC:N/VI:H/VA:L/SC:N/SI:H/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:P/VC:L/VI:L/VA:L/SC:N/SI:H/SA:H",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:A/VC:N/VI:L/VA:L/SC:N/SI:H/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:L/VI:N/VA:L/SC:N/SI:H/SA:H",
+      "score": 6.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:A/VC:N/VI:N/VA:L/SC:N/SI:H/SA:H",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:N/VC:L/VI:H/VA:N/SC:N/SI:H/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:A/VC:N/VI:H/VA:N/SC:N/SI:H/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:N/SC:N/SI:H/SA:H",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:P/VC:N/VI:L/VA:N/SC:N/SI:H/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:H/SA:H",
+      "score": 6.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:P/VC:N/VI:N/VA:N/SC:N/SI:H/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:L/VI:H/VA:H/SC:H/SI:L/SA:H",
+      "score": 9.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:P/VC:N/VI:H/VA:H/SC:H/SI:L/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:H/VI:L/VA:H/SC:H/SI:L/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:P/VC:N/VI:L/VA:H/SC:H/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:A/VC:H/VI:N/VA:H/SC:H/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:P/VC:N/VI:N/VA:H/SC:H/SI:L/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:A/VC:H/VI:H/VA:L/SC:H/SI:L/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:N/VC:N/VI:H/VA:L/SC:H/SI:L/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:A/VC:H/VI:L/VA:L/SC:H/SI:L/SA:H",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:N/VC:N/VI:L/VA:L/SC:H/SI:L/SA:H",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:A/VC:H/VI:N/VA:L/SC:H/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:N/VC:N/VI:N/VA:L/SC:H/SI:L/SA:H",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:P/VC:H/VI:H/VA:N/SC:H/SI:L/SA:H",
+      "score": 8.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:N/VC:N/VI:H/VA:N/SC:H/SI:L/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:P/VC:H/VI:L/VA:N/SC:H/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:H/SI:L/SA:H",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:P/VC:H/VI:N/VA:N/SC:H/SI:L/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:A/VC:L/VI:N/VA:N/SC:H/SI:L/SA:H",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:P/VC:H/VI:H/VA:H/SC:L/SI:L/SA:H",
+      "score": 8.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:A/VC:L/VI:H/VA:H/SC:L/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:H/VI:L/VA:H/SC:L/SI:L/SA:H",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:A/VC:L/VI:L/VA:H/SC:L/SI:L/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:N/VC:H/VI:N/VA:H/SC:L/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:A/VC:L/VI:N/VA:H/SC:L/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:L/SC:L/SI:L/SA:H",
+      "score": 9.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:A/VC:L/VI:H/VA:L/SC:L/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:N/VC:H/VI:L/VA:L/SC:L/SI:L/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:P/VC:L/VI:L/VA:L/SC:L/SI:L/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:L/SC:L/SI:L/SA:H",
+      "score": 9.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:P/VC:L/VI:N/VA:L/SC:L/SI:L/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:L/SI:L/SA:H",
+      "score": 9.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:P/VC:L/VI:H/VA:N/SC:L/SI:L/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:A/VC:N/VI:H/VA:N/SC:L/SI:L/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:P/VC:L/VI:L/VA:N/SC:L/SI:L/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:A/VC:N/VI:L/VA:N/SC:L/SI:L/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:P/VC:L/VI:N/VA:N/SC:L/SI:L/SA:H",
+      "score": 6.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:A/VC:N/VI:N/VA:N/SC:L/SI:L/SA:H",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:N/VC:L/VI:H/VA:H/SC:N/SI:L/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:A/VC:N/VI:H/VA:H/SC:N/SI:L/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:H/SC:N/SI:L/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:N/VI:L/VA:H/SC:N/SI:L/SA:H",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:H/SC:N/SI:L/SA:H",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:P/VC:N/VI:N/VA:H/SC:N/SI:L/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:P/VC:N/VI:H/VA:L/SC:N/SI:L/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:A/VC:H/VI:L/VA:L/SC:N/SI:L/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:P/VC:N/VI:L/VA:L/SC:N/SI:L/SA:H",
+      "score": 4.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:A/VC:H/VI:N/VA:L/SC:N/SI:L/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:L/SC:N/SI:L/SA:H",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:A/VC:H/VI:H/VA:N/SC:N/SI:L/SA:H",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:N/VC:N/VI:H/VA:N/SC:N/SI:L/SA:H",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:A/VC:H/VI:L/VA:N/SC:N/SI:L/SA:H",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:N/VC:N/VI:L/VA:N/SC:N/SI:L/SA:H",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:A/VC:H/VI:N/VA:N/SC:N/SI:L/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:N/VC:N/VI:N/VA:N/SC:N/SI:L/SA:H",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:P/VC:H/VI:H/VA:H/SC:H/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:H/SC:H/SI:N/SA:H",
+      "score": 8.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:P/VC:H/VI:L/VA:H/SC:H/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:N/VC:N/VI:L/VA:H/SC:H/SI:N/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:P/VC:H/VI:N/VA:H/SC:H/SI:N/SA:H",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:H/SC:H/SI:N/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:P/VC:H/VI:H/VA:L/SC:H/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:A/VC:L/VI:H/VA:L/SC:H/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:P/VC:H/VI:L/VA:L/SC:H/SI:N/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:A/VC:L/VI:L/VA:L/SC:H/SI:N/SA:H",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:N/VC:H/VI:N/VA:L/SC:H/SI:N/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:A/VC:L/VI:N/VA:L/SC:H/SI:N/SA:H",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:N/SC:H/SI:N/SA:H",
+      "score": 9.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:A/VC:L/VI:H/VA:N/SC:H/SI:N/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:N/VC:H/VI:L/VA:N/SC:H/SI:N/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:P/VC:L/VI:L/VA:N/SC:H/SI:N/SA:H",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:H/SI:N/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:P/VC:L/VI:N/VA:N/SC:H/SI:N/SA:H",
+      "score": 6.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:N/SA:H",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:P/VC:L/VI:H/VA:H/SC:L/SI:N/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:A/VC:N/VI:H/VA:H/SC:L/SI:N/SA:H",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:P/VC:L/VI:L/VA:H/SC:L/SI:N/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:A/VC:N/VI:L/VA:H/SC:L/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:P/VC:L/VI:N/VA:H/SC:L/SI:N/SA:H",
+      "score": 8.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:A/VC:N/VI:N/VA:H/SC:L/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:N/VC:L/VI:H/VA:L/SC:L/SI:N/SA:H",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:A/VC:N/VI:H/VA:L/SC:L/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:L/SC:L/SI:N/SA:H",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:A/VC:N/VI:L/VA:L/SC:L/SI:N/SA:H",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:N/VC:L/VI:N/VA:L/SC:L/SI:N/SA:H",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:P/VC:N/VI:N/VA:L/SC:L/SI:N/SA:H",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:N/VC:L/VI:H/VA:N/SC:L/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:P/VC:N/VI:H/VA:N/SC:L/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:L/SI:N/SA:H",
+      "score": 7.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:P/VC:N/VI:L/VA:N/SC:L/SI:N/SA:H",
+      "score": 4.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:A/VC:H/VI:N/VA:N/SC:L/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:N/SC:L/SI:N/SA:H",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:A/VC:H/VI:H/VA:H/SC:N/SI:N/SA:H",
+      "score": 8.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:H",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:A/VC:H/VI:L/VA:H/SC:N/SI:N/SA:H",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:N/VC:N/VI:L/VA:H/SC:N/SI:N/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:H/VI:N/VA:H/SC:N/SI:N/SA:H",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:H",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:P/VC:H/VI:H/VA:L/SC:N/SI:N/SA:H",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:L/SC:N/SI:N/SA:H",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:P/VC:H/VI:L/VA:L/SC:N/SI:N/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:N/VC:N/VI:L/VA:L/SC:N/SI:N/SA:H",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:P/VC:H/VI:N/VA:L/SC:N/SI:N/SA:H",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:L/SC:N/SI:N/SA:H",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:P/VC:H/VI:H/VA:N/SC:N/SI:N/SA:H",
+      "score": 9.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:A/VC:L/VI:H/VA:N/SC:N/SI:N/SA:H",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:P/VC:H/VI:L/VA:N/SC:N/SI:N/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:A/VC:L/VI:L/VA:N/SC:N/SI:N/SA:H",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:H",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:H",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:L",
+      "score": 9.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:A/VC:L/VI:H/VA:H/SC:H/SI:H/SA:L",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:H/VI:L/VA:H/SC:H/SI:H/SA:L",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:P/VC:L/VI:L/VA:H/SC:H/SI:H/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:H/SC:H/SI:H/SA:L",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:P/VC:L/VI:N/VA:H/SC:H/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:H/VA:L/SC:H/SI:H/SA:L",
+      "score": 9.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:P/VC:L/VI:H/VA:L/SC:H/SI:H/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:A/VC:N/VI:H/VA:L/SC:H/SI:H/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:P/VC:L/VI:L/VA:L/SC:H/SI:H/SA:L",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:A/VC:N/VI:L/VA:L/SC:H/SI:H/SA:L",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:P/VC:L/VI:N/VA:L/SC:H/SI:H/SA:L",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:A/VC:N/VI:N/VA:L/SC:H/SI:H/SA:L",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:N/VC:L/VI:H/VA:N/SC:H/SI:H/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:A/VC:N/VI:H/VA:N/SC:H/SI:H/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:N/SC:H/SI:H/SA:L",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:A/VC:N/VI:L/VA:N/SC:H/SI:H/SA:L",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:H/SI:H/SA:L",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:P/VC:N/VI:N/VA:N/SC:H/SI:H/SA:L",
+      "score": 5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:N/VC:L/VI:H/VA:H/SC:L/SI:H/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:P/VC:N/VI:H/VA:H/SC:L/SI:H/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:L/SI:H/SA:L",
+      "score": 8.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:P/VC:N/VI:L/VA:H/SC:L/SI:H/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:A/VC:H/VI:N/VA:H/SC:L/SI:H/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:L/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:A/VC:H/VI:H/VA:L/SC:L/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:L/SC:L/SI:H/SA:L",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:A/VC:H/VI:L/VA:L/SC:L/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:N/VC:N/VI:L/VA:L/SC:L/SI:H/SA:L",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:A/VC:H/VI:N/VA:L/SC:L/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:N/VI:N/VA:L/SC:L/SI:H/SA:L",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:P/VC:H/VI:H/VA:N/SC:L/SI:H/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:N/SC:L/SI:H/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:P/VC:H/VI:L/VA:N/SC:L/SI:H/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:L/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:P/VC:H/VI:N/VA:N/SC:L/SI:H/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:N/SC:L/SI:H/SA:L",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:P/VC:H/VI:H/VA:H/SC:N/SI:H/SA:L",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:A/VC:L/VI:H/VA:H/SC:N/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:P/VC:H/VI:L/VA:H/SC:N/SI:H/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:A/VC:L/VI:L/VA:H/SC:N/SI:H/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:N/VC:H/VI:N/VA:H/SC:N/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:A/VC:L/VI:N/VA:H/SC:N/SI:H/SA:L",
+      "score": 8.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:L/SC:N/SI:H/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:A/VC:L/VI:H/VA:L/SC:N/SI:H/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:N/VC:H/VI:L/VA:L/SC:N/SI:H/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:P/VC:L/VI:L/VA:L/SC:N/SI:H/SA:L",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:L/SC:N/SI:H/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:P/VC:L/VI:N/VA:L/SC:N/SI:H/SA:L",
+      "score": 4.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:H/SA:L",
+      "score": 8.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:P/VC:L/VI:H/VA:N/SC:N/SI:H/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:A/VC:N/VI:H/VA:N/SC:N/SI:H/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:P/VC:L/VI:L/VA:N/SC:N/SI:H/SA:L",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:A/VC:N/VI:L/VA:N/SC:N/SI:H/SA:L",
+      "score": 4.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:L/VI:N/VA:N/SC:N/SI:H/SA:L",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:A/VC:N/VI:N/VA:N/SC:N/SI:H/SA:L",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:N/VC:L/VI:H/VA:H/SC:H/SI:L/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:A/VC:N/VI:H/VA:H/SC:H/SI:L/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:L/VI:L/VA:H/SC:H/SI:L/SA:L",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:A/VC:N/VI:L/VA:H/SC:H/SI:L/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:N/VC:L/VI:N/VA:H/SC:H/SI:L/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:P/VC:N/VI:N/VA:H/SC:H/SI:L/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:L/VI:H/VA:L/SC:H/SI:L/SA:L",
+      "score": 9.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:P/VC:N/VI:H/VA:L/SC:H/SI:L/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:H/SI:L/SA:L",
+      "score": 6.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:P/VC:N/VI:L/VA:L/SC:H/SI:L/SA:L",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:A/VC:H/VI:N/VA:L/SC:H/SI:L/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:P/VC:N/VI:N/VA:L/SC:H/SI:L/SA:L",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:A/VC:H/VI:H/VA:N/SC:H/SI:L/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:H/SI:L/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:A/VC:H/VI:L/VA:N/SC:H/SI:L/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:N/VC:N/VI:L/VA:N/SC:H/SI:L/SA:L",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:A/VC:H/VI:N/VA:N/SC:H/SI:L/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:N/VC:N/VI:N/VA:N/SC:H/SI:L/SA:L",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L",
+      "score": 8.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:H/SC:L/SI:L/SA:L",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:P/VC:H/VI:L/VA:H/SC:L/SI:L/SA:L",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:H/SC:L/SI:L/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:P/VC:H/VI:N/VA:H/SC:L/SI:L/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:H/SC:L/SI:L/SA:L",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:P/VC:H/VI:H/VA:L/SC:L/SI:L/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:A/VC:L/VI:H/VA:L/SC:L/SI:L/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:H/VI:L/VA:L/SC:L/SI:L/SA:L",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:A/VC:L/VI:L/VA:L/SC:L/SI:L/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:N/VC:H/VI:N/VA:L/SC:L/SI:L/SA:L",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:A/VC:L/VI:N/VA:L/SC:L/SI:L/SA:L",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:N/VC:H/VI:H/VA:N/SC:L/SI:L/SA:L",
+      "score": 7.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:A/VC:L/VI:H/VA:N/SC:L/SI:L/SA:L",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:N/VC:H/VI:L/VA:N/SC:L/SI:L/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:P/VC:L/VI:L/VA:N/SC:L/SI:L/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:L/SI:L/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:P/VC:L/VI:N/VA:N/SC:L/SI:L/SA:L",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:L/SA:L",
+      "score": 7.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:P/VC:L/VI:H/VA:H/SC:N/SI:L/SA:L",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:A/VC:N/VI:H/VA:H/SC:N/SI:L/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:P/VC:L/VI:L/VA:H/SC:N/SI:L/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:A/VC:N/VI:L/VA:H/SC:N/SI:L/SA:L",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:P/VC:L/VI:N/VA:H/SC:N/SI:L/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:A/VC:N/VI:N/VA:H/SC:N/SI:L/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:N/VC:L/VI:H/VA:L/SC:N/SI:L/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:A/VC:N/VI:H/VA:L/SC:N/SI:L/SA:L",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:N/VC:L/VI:L/VA:L/SC:N/SI:L/SA:L",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:A/VC:N/VI:L/VA:L/SC:N/SI:L/SA:L",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:N/VC:L/VI:N/VA:L/SC:N/SI:L/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:P/VC:N/VI:N/VA:L/SC:N/SI:L/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:N/VC:L/VI:H/VA:N/SC:N/SI:L/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:P/VC:N/VI:H/VA:N/SC:N/SI:L/SA:L",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:N/SI:L/SA:L",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:P/VC:N/VI:L/VA:N/SC:N/SI:L/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:A/VC:H/VI:N/VA:N/SC:N/SI:L/SA:L",
+      "score": 4.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:P/VC:N/VI:N/VA:N/SC:N/SI:L/SA:L",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:A/VC:H/VI:H/VA:H/SC:H/SI:N/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:H/SC:H/SI:N/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:A/VC:H/VI:L/VA:H/SC:H/SI:N/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:N/VC:N/VI:L/VA:H/SC:H/SI:N/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:A/VC:H/VI:N/VA:H/SC:H/SI:N/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:N/VI:N/VA:H/SC:H/SI:N/SA:L",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:L/SC:H/SI:N/SA:L",
+      "score": 9.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:N/VC:N/VI:H/VA:L/SC:H/SI:N/SA:L",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:P/VC:H/VI:L/VA:L/SC:H/SI:N/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:L/SC:H/SI:N/SA:L",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:P/VC:H/VI:N/VA:L/SC:H/SI:N/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:H/SI:N/SA:L",
+      "score": 7.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:P/VC:H/VI:H/VA:N/SC:H/SI:N/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:A/VC:L/VI:H/VA:N/SC:H/SI:N/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:P/VC:H/VI:L/VA:N/SC:H/SI:N/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:A/VC:L/VI:L/VA:N/SC:H/SI:N/SA:L",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:N/VC:H/VI:N/VA:N/SC:H/SI:N/SA:L",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:A/VC:L/VI:N/VA:N/SC:H/SI:N/SA:L",
+      "score": 4.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:L/SI:N/SA:L",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:L/VI:H/VA:H/SC:L/SI:N/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:N/VC:H/VI:L/VA:H/SC:L/SI:N/SA:L",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:P/VC:L/VI:L/VA:H/SC:L/SI:N/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:H/SC:L/SI:N/SA:L",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:P/VC:L/VI:N/VA:H/SC:L/SI:N/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:N/VC:H/VI:H/VA:L/SC:L/SI:N/SA:L",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:P/VC:L/VI:H/VA:L/SC:L/SI:N/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:A/VC:N/VI:H/VA:L/SC:L/SI:N/SA:L",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:P/VC:L/VI:L/VA:L/SC:L/SI:N/SA:L",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:A/VC:N/VI:L/VA:L/SC:L/SI:N/SA:L",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:P/VC:L/VI:N/VA:L/SC:L/SI:N/SA:L",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:A/VC:N/VI:N/VA:L/SC:L/SI:N/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:N/VC:L/VI:H/VA:N/SC:L/SI:N/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:A/VC:N/VI:H/VA:N/SC:L/SI:N/SA:L",
+      "score": 4.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:N/VC:L/VI:L/VA:N/SC:L/SI:N/SA:L",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:A/VC:N/VI:L/VA:N/SC:L/SI:N/SA:L",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:N/SC:L/SI:N/SA:L",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:P/VC:N/VI:N/VA:N/SC:L/SI:N/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:N/VC:L/VI:H/VA:H/SC:N/SI:N/SA:L",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:P/VC:N/VI:H/VA:H/SC:N/SI:N/SA:L",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:P/VC:N/VI:L/VA:H/SC:N/SI:N/SA:L",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:A/VC:H/VI:N/VA:H/SC:N/SI:N/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:A/VC:H/VI:H/VA:L/SC:N/SI:N/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:P/VC:N/VI:H/VA:L/SC:N/SI:N/SA:L",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:A/VC:H/VI:L/VA:L/SC:N/SI:N/SA:L",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:N/VC:N/VI:L/VA:L/SC:N/SI:N/SA:L",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:A/VC:H/VI:N/VA:L/SC:N/SI:N/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:N/SC:N/SI:N/SA:L",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:L",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:P/VC:H/VI:L/VA:N/SC:N/SI:N/SA:L",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:L",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:P/VC:H/VI:N/VA:N/SC:N/SI:N/SA:L",
+      "score": 4.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:L",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:P/VC:H/VI:H/VA:H/SC:H/SI:H/SA:N",
+      "score": 8.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:A/VC:L/VI:H/VA:H/SC:H/SI:H/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:P/VC:H/VI:L/VA:H/SC:H/SI:H/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:A/VC:L/VI:L/VA:H/SC:H/SI:H/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:H/VI:N/VA:H/SC:H/SI:H/SA:N",
+      "score": 8.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:A/VC:L/VI:N/VA:H/SC:H/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:N/VC:H/VI:H/VA:L/SC:H/SI:H/SA:N",
+      "score": 8.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:A/VC:L/VI:H/VA:L/SC:H/SI:H/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:H/VI:L/VA:L/SC:H/SI:H/SA:N",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:P/VC:L/VI:L/VA:L/SC:H/SI:H/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:L/SC:H/SI:H/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:P/VC:L/VI:N/VA:L/SC:H/SI:H/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:H/SI:H/SA:N",
+      "score": 9.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:P/VC:L/VI:H/VA:N/SC:H/SI:H/SA:N",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:N/VI:H/VA:N/SC:H/SI:H/SA:N",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:P/VC:L/VI:L/VA:N/SC:H/SI:H/SA:N",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:A/VC:N/VI:L/VA:N/SC:H/SI:H/SA:N",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:P/VC:L/VI:N/VA:N/SC:H/SI:H/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:A/VC:N/VI:N/VA:N/SC:H/SI:H/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:N/VC:L/VI:H/VA:H/SC:L/SI:H/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:A/VC:N/VI:H/VA:H/SC:L/SI:H/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:N/VC:L/VI:L/VA:H/SC:L/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:A/VC:N/VI:L/VA:H/SC:L/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:H/SC:L/SI:H/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:P/VC:N/VI:N/VA:H/SC:L/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:N/VC:L/VI:H/VA:L/SC:L/SI:H/SA:N",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:P/VC:N/VI:H/VA:L/SC:L/SI:H/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:L/SI:H/SA:N",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:P/VC:N/VI:L/VA:L/SC:L/SI:H/SA:N",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:A/VC:H/VI:N/VA:L/SC:L/SI:H/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:P/VC:N/VI:N/VA:L/SC:L/SI:H/SA:N",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:A/VC:H/VI:H/VA:N/SC:L/SI:H/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:L/SI:H/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:A/VC:H/VI:L/VA:N/SC:L/SI:H/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:N/VC:N/VI:L/VA:N/SC:L/SI:H/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:A/VC:H/VI:N/VA:N/SC:L/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:N/VI:N/VA:N/SC:L/SI:H/SA:N",
+      "score": 6.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:H/SC:N/SI:H/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:N/VC:N/VI:H/VA:H/SC:N/SI:H/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:P/VC:H/VI:L/VA:H/SC:N/SI:H/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:N/VI:L/VA:H/SC:N/SI:H/SA:N",
+      "score": 9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:P/VC:H/VI:N/VA:H/SC:N/SI:H/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:H/SA:N",
+      "score": 8.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:P/VC:H/VI:H/VA:L/SC:N/SI:H/SA:N",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:A/VC:L/VI:H/VA:L/SC:N/SI:H/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:P/VC:H/VI:L/VA:L/SC:N/SI:H/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:A/VC:L/VI:L/VA:L/SC:N/SI:H/SA:N",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:P/VC:H/VI:N/VA:L/SC:N/SI:H/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:A/VC:L/VI:N/VA:L/SC:N/SI:H/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:N/VC:H/VI:H/VA:N/SC:N/SI:H/SA:N",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:A/VC:L/VI:H/VA:N/SC:N/SI:H/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:N/VC:H/VI:L/VA:N/SC:N/SI:H/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:N/SC:N/SI:H/SA:N",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:H/SA:N",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:P/VC:L/VI:N/VA:N/SC:N/SI:H/SA:N",
+      "score": 1.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:L/SA:N",
+      "score": 8.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:P/VC:L/VI:H/VA:H/SC:H/SI:L/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:A/VC:N/VI:H/VA:H/SC:H/SI:L/SA:N",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:P/VC:L/VI:L/VA:H/SC:H/SI:L/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:A/VC:N/VI:L/VA:H/SC:H/SI:L/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:L/VI:N/VA:H/SC:H/SI:L/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:A/VC:N/VI:N/VA:H/SC:H/SI:L/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:N/VC:L/VI:H/VA:L/SC:H/SI:L/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:A/VC:N/VI:H/VA:L/SC:H/SI:L/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:N/VC:L/VI:L/VA:L/SC:H/SI:L/SA:N",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:A/VC:N/VI:L/VA:L/SC:H/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:L/SC:H/SI:L/SA:N",
+      "score": 4.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:P/VC:N/VI:N/VA:L/SC:H/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:N/SC:H/SI:L/SA:N",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:P/VC:N/VI:H/VA:N/SC:H/SI:L/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:N/SC:H/SI:L/SA:N",
+      "score": 4.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:P/VC:N/VI:L/VA:N/SC:H/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:A/VC:H/VI:N/VA:N/SC:H/SI:L/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:P/VC:N/VI:N/VA:N/SC:H/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:A/VC:H/VI:H/VA:H/SC:L/SI:L/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:P/VC:N/VI:H/VA:H/SC:L/SI:L/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:A/VC:H/VI:L/VA:H/SC:L/SI:L/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:N/VC:N/VI:L/VA:H/SC:L/SI:L/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:A/VC:H/VI:N/VA:H/SC:L/SI:L/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:N/VC:N/VI:N/VA:H/SC:L/SI:L/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:A/VC:H/VI:H/VA:L/SC:L/SI:L/SA:N",
+      "score": 7.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:N/VC:N/VI:H/VA:L/SC:L/SI:L/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:P/VC:H/VI:L/VA:L/SC:L/SI:L/SA:N",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:N/VC:N/VI:L/VA:L/SC:L/SI:L/SA:N",
+      "score": 2.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:P/VC:H/VI:N/VA:L/SC:L/SI:L/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:L/SI:L/SA:N",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:P/VC:H/VI:H/VA:N/SC:L/SI:L/SA:N",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:A/VC:L/VI:H/VA:N/SC:L/SI:L/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:P/VC:H/VI:L/VA:N/SC:L/SI:L/SA:N",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:A/VC:L/VI:L/VA:N/SC:L/SI:L/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:P/VC:H/VI:N/VA:N/SC:L/SI:L/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:A/VC:L/VI:N/VA:N/SC:L/SI:L/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:N/VC:H/VI:H/VA:H/SC:N/SI:L/SA:N",
+      "score": 7.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:A/VC:L/VI:H/VA:H/SC:N/SI:L/SA:N",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:H/VI:L/VA:H/SC:N/SI:L/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:H/SC:N/SI:L/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:N/VC:H/VI:N/VA:H/SC:N/SI:L/SA:N",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:P/VC:L/VI:N/VA:H/SC:N/SI:L/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:L/SC:N/SI:L/SA:N",
+      "score": 7.5
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:P/VC:L/VI:H/VA:L/SC:N/SI:L/SA:N",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:L/SC:N/SI:L/SA:N",
+      "score": 8.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:P/VC:L/VI:L/VA:L/SC:N/SI:L/SA:N",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:A/VC:N/VI:L/VA:L/SC:N/SI:L/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:P/VC:L/VI:N/VA:L/SC:N/SI:L/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:A/VC:N/VI:N/VA:L/SC:N/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:N/VC:L/VI:H/VA:N/SC:N/SI:L/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:A/VC:N/VI:H/VA:N/SC:N/SI:L/SA:N",
+      "score": 5.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:N/VC:L/VI:L/VA:N/SC:N/SI:L/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:A/VC:N/VI:L/VA:N/SC:N/SI:L/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:L/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:P/VC:N/VI:N/VA:N/SC:N/SI:L/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:H/SC:H/SI:N/SA:N",
+      "score": 8.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:P/VC:N/VI:H/VA:H/SC:H/SI:N/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:N/VC:L/VI:L/VA:H/SC:H/SI:N/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:P/VC:N/VI:L/VA:H/SC:H/SI:N/SA:N",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:A/VC:H/VI:N/VA:H/SC:H/SI:N/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:P/VC:N/VI:N/VA:H/SC:H/SI:N/SA:N",
+      "score": 8.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:A/VC:H/VI:H/VA:L/SC:H/SI:N/SA:N",
+      "score": 8.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:P/VC:N/VI:H/VA:L/SC:H/SI:N/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:A/VC:H/VI:L/VA:L/SC:H/SI:N/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:N/VC:N/VI:L/VA:L/SC:H/SI:N/SA:N",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:A/VC:H/VI:N/VA:L/SC:H/SI:N/SA:N",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:N/VC:N/VI:N/VA:L/SC:H/SI:N/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:A/VC:H/VI:H/VA:N/SC:H/SI:N/SA:N",
+      "score": 8.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:H/SI:N/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:P/VC:H/VI:L/VA:N/SC:H/SI:N/SA:N",
+      "score": 5.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:H/SI:N/SA:N",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:P/VC:H/VI:N/VA:N/SC:H/SI:N/SA:N",
+      "score": 6.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:N/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:P/VC:H/VI:H/VA:H/SC:L/SI:N/SA:N",
+      "score": 5.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:A/VC:L/VI:H/VA:H/SC:L/SI:N/SA:N",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:P/VC:H/VI:L/VA:H/SC:L/SI:N/SA:N",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:A/VC:L/VI:L/VA:H/SC:L/SI:N/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:N/UI:P/VC:H/VI:N/VA:H/SC:L/SI:N/SA:N",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:L/UI:A/VC:L/VI:N/VA:H/SC:L/SI:N/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:H/UI:N/VC:H/VI:H/VA:L/SC:L/SI:N/SA:N",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:A/VC:L/VI:H/VA:L/SC:L/SI:N/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:L/UI:N/VC:H/VI:L/VA:L/SC:L/SI:N/SA:N",
+      "score": 4.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:N/UI:A/VC:L/VI:L/VA:L/SC:L/SI:N/SA:N",
+      "score": 4.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:N/VC:H/VI:N/VA:L/SC:L/SI:N/SA:N",
+      "score": 5.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:H/UI:P/VC:L/VI:N/VA:L/SC:L/SI:N/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:L/SI:N/SA:N",
+      "score": 5.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:P/VC:L/VI:H/VA:N/SC:L/SI:N/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:N/UI:N/VC:H/VI:L/VA:N/SC:L/SI:N/SA:N",
+      "score": 7.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:L/UI:P/VC:L/VI:L/VA:N/SC:L/SI:N/SA:N",
+      "score": 2.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:H/UI:A/VC:N/VI:L/VA:N/SC:L/SI:N/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:N/UI:P/VC:L/VI:N/VA:N/SC:L/SI:N/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:L/UI:A/VC:N/VI:N/VA:N/SC:L/SI:N/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:L/VI:H/VA:H/SC:N/SI:N/SA:N",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:L/UI:A/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+      "score": 5.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:H/UI:N/VC:L/VI:L/VA:H/SC:N/SI:N/SA:N",
+      "score": 5.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:N/UI:A/VC:N/VI:L/VA:H/SC:N/SI:N/SA:N",
+      "score": 5.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:L/VI:N/VA:H/SC:N/SI:N/SA:N",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:P/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+      "score": 4.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:L/SC:N/SI:N/SA:N",
+      "score": 6.9
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:H/UI:P/VC:N/VI:H/VA:L/SC:N/SI:N/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+      "score": 6.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:L/UI:P/VC:N/VI:L/VA:L/SC:N/SI:N/SA:N",
+      "score": 1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:H/VI:N/VA:L/SC:N/SI:N/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:L/UI:P/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:H/UI:A/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N",
+      "score": 7
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:N/UI:P/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N",
+      "score": 4.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:L/UI:A/VC:H/VI:L/VA:N/SC:N/SI:N/SA:N",
+      "score": 4.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:H/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
+      "score": 2
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:A/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+      "score": 6.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:N/PR:H/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
+      "score": 0
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:N/PR:N/UI:A/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+      "score": 8.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:P/PR:L/UI:N/VC:N/VI:H/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:H/UI:P/VC:H/VI:L/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:P/PR:N/UI:N/VC:N/VI:L/VA:H/SC:H/SI:H/SA:H",
+      "score": 6
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:H/UI:P/VC:H/VI:N/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:H/SI:H/SA:H",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:L/UI:P/VC:H/VI:H/VA:L/SC:H/SI:H/SA:H",
+      "score": 8.8
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:L/AT:P/PR:H/UI:A/VC:L/VI:H/VA:L/SC:H/SI:H/SA:H",
+      "score": 6.1
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:N/UI:P/VC:H/VI:L/VA:L/SC:H/SI:H/SA:H",
+      "score": 7.2
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:L/AT:N/PR:H/UI:A/VC:L/VI:L/VA:L/SC:H/SI:H/SA:H",
+      "score": 4.7
+    },
+    {
+      "vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:P/VC:H/VI:N/VA:L/SC:H/SI:H/SA:H",
+      "score": 7.3
+    },
+    {
+      "vector": "CVSS:4.0/AV:P/AC:H/AT:N/PR:L/UI:A/VC:L/VI:N/VA:L/SC:H/SI:H/SA:H",
+      "score": 2.4
+    },
+    {
+      "vector": "CVSS:4.0/AV:L/AC:L/AT:P/PR:H/UI:N/VC:H/VI:H/VA:N/SC:H/SI:H/SA:H",
+      "score": 8.6
+    },
+    {
+      "vector": "CVSS:4.0/AV:A/AC:H/AT:P/PR:N/UI:A/VC:L/VI:H/VA:N/SC:H/SI:H/SA:H",
+      "score": 7.1
+    }
+  ]
+}

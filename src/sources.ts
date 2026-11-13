@@ -1,8 +1,10 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { defaultTreeAdapter, parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5';
 import { compare, valid } from 'semver';
+import { cvssV4BaseScore } from './cvss4.js';
 import type {
   Config,
+  CoverageReceipt,
   Evidence,
   HttpClient,
   Inventory,
@@ -37,6 +39,7 @@ const HACKER_NEWS = 'https://feeds.feedburner.com/TheHackersNews';
 const MAX_PAGES = 50;
 const MAX_ADVISORIES = 5_000;
 const MAX_FEED_ENTRIES = 500;
+const LATE_ENTRY_DAYS = 7;
 const HOUR = 3_600_000;
 type RecordValue = Record<string, unknown>;
 
@@ -135,6 +138,35 @@ function vectorSeverity(vector: unknown): Severity {
   const rounded = integer % 10_000 === 0 ? integer / 100_000 : (Math.floor(integer / 10_000) + 1) / 10;
   return scoreSeverity(rounded);
 }
+
+/** At most 32 v4 candidates per advisory. Overflow fails collection instead of truncating a severity floor. */
+function vectorCollector(): {
+  score: (vector: unknown, declaredType?: unknown) => Severity;
+  details: () => Pick<Evidence, 'cvss_v4'>;
+} {
+  const details: NonNullable<Evidence['cvss_v4']> = { base_scores: [], unsupported_vectors: 0 };
+  let candidates = 0;
+  return {
+    score(vector, declaredType) {
+      const v4 = declaredType === 'CVSS_V4' || (typeof vector === 'string' && vector.startsWith('CVSS:4'));
+      if (!v4) return vectorSeverity(vector);
+      if (++candidates > 32)
+        throw new SourceError('CVSS v4 candidate limit exceeded; advisory not accepted.');
+      const scored =
+        declaredType === undefined || declaredType === 'CVSS_V4' ? cvssV4BaseScore(vector) : undefined;
+      if (!scored) {
+        details.unsupported_vectors++;
+        return 'unknown';
+      }
+      if (!details.base_scores.some((item) => item.vector === scored.vector))
+        details.base_scores.push(scored);
+      return scoreSeverity(scored.score);
+    },
+    details() {
+      return candidates ? { cvss_v4: details } : {};
+    },
+  };
+}
 function optionalRecord(value: unknown): RecordValue {
   return value === undefined || value === null ? {} : record(value);
 }
@@ -184,7 +216,9 @@ function sourcePackage(ecosystem: string, name: string): { ecosystem: string; na
   try {
     return { ecosystem: normalized, name: normalizePackageName(normalized, name) };
   } catch {
-    throw new SourceError('Source returned an invalid package identity.');
+    // Keep the published spelling. A name this application cannot normalise matches no inventory
+    // entry; rejecting it would discard the advisory's other packages and hold back the checkpoint.
+    return { ecosystem: normalized, name };
   }
 }
 function osvRanges(value: unknown): string | undefined {
@@ -249,9 +283,12 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
   const data = record(raw);
   if (string(data.id) !== expectedId) throw new SourceError('OSV returned a mismatched advisory ID.');
   const packageClaims: PackageClaim[] = [];
+  const vectors = vectorCollector();
   const severities: Severity[] = [severity(optionalRecord(data.database_specific).severity)];
-  for (const rawSeverity of array(data.severity, true))
-    severities.push(vectorSeverity(record(rawSeverity).score));
+  for (const rawSeverity of array(data.severity, true)) {
+    const item = record(rawSeverity);
+    severities.push(vectors.score(item.score, item.type));
+  }
   for (const rawAffected of array(data.affected, true)) {
     const affected = record(rawAffected);
     // OSV can include a separate Git-only entry beside registry package entries.
@@ -292,8 +329,10 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
       ...(fixed.length ? { fixed: [...new Set(fixed)].join(', ') } : {}),
     });
     severities.push(severity(optionalRecord(affected.database_specific).severity));
-    for (const rawSeverity of array(affected.severity, true))
-      severities.push(vectorSeverity(record(rawSeverity).score));
+    for (const rawSeverity of array(affected.severity, true)) {
+      const item = record(rawSeverity);
+      severities.push(vectors.score(item.score, item.type));
+    }
   }
   // Queries identify the package even when details omit it. Only a versioned query proves impact.
   for (const query of matches)
@@ -325,6 +364,7 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     ),
     aliases: aliases([expectedId, ...aliasStrings(data.aliases)]),
     severity: highest(...severities),
+    ...vectors.details(),
     modified_at: date(data.modified),
     fetched_at: timestamp(now),
     ...(data.published ? { published_at: date(data.published) } : {}),
@@ -432,6 +472,10 @@ async function osv(
     const allIds = [...ids];
     let failures = 0;
     let firstFailure: string | undefined;
+    // A stored record that OSV no longer serves is gone, not a failed request: its stored copy ages
+    // out as stale evidence, and it must not stop the refresh of the records after it.
+    const gone = (id: string, reason: unknown) =>
+      !matched.has(id) && reason instanceof SourceHttpError && reason.status === 404;
     for (let index = 0; index < allIds.length; index += 4) {
       const batch = allIds.slice(index, index + 4);
       const settled = await Promise.allSettled(
@@ -444,12 +488,17 @@ async function osv(
           ),
         ),
       );
-      const rejected = settled.filter((item) => item.status === 'rejected');
-      const canceled = rejected.find(({ reason }) => sourceCanceled(reason));
+      const rejected = settled.filter(
+        (item, position): item is PromiseRejectedResult =>
+          item.status === 'rejected' && !gone(batch[position]!, item.reason),
+      );
+      const canceled = settled.find(
+        (item): item is PromiseRejectedResult => item.status === 'rejected' && sourceCanceled(item.reason),
+      );
       if (canceled) throw canceled.reason;
-      for (const item of settled) {
+      for (const [position, item] of settled.entries()) {
         if (item.status === 'fulfilled') results.push(item.value);
-        else {
+        else if (!gone(batch[position]!, item.reason)) {
           failures++;
           firstFailure ??=
             item.reason instanceof SourceError ? item.reason.message : 'Source request failed.';
@@ -501,9 +550,19 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
   });
   const cvss = optionalRecord(data.cvss);
   const cvssVersions = optionalRecord(data.cvss_severities);
-  const ratings = [severity(data.severity), scoreSeverity(cvss.score), vectorSeverity(cvss.vector_string)];
-  for (const value of Object.values(cvssVersions))
-    if (value) ratings.push(scoreSeverity(record(value).score));
+  const vectors = vectorCollector();
+  const ratings = [severity(data.severity), scoreSeverity(cvss.score), vectors.score(cvss.vector_string)];
+  for (const [version, value] of Object.entries(cvssVersions))
+    if (value) {
+      const item = record(value);
+      ratings.push(scoreSeverity(item.score));
+      ratings.push(
+        vectors.score(
+          item.vector_string,
+          version === 'cvss_v4' ? 'CVSS_V4' : version === 'cvss_v3' ? 'CVSS_V3' : version,
+        ),
+      );
+    }
   return {
     id: `github:${id}`,
     source: `github:${type}`,
@@ -517,6 +576,7 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
       ...array(data.identifiers, true).map((item) => string(record(item).value)),
     ]),
     severity: highest(...ratings),
+    ...vectors.details(),
     modified_at: modified,
     fetched_at: timestamp(now),
     published_at: date(data.published_at),
@@ -581,8 +641,20 @@ async function github(
   const invalid = new SourceItemFailures();
   try {
     for (let page = 0; next; page++) {
-      if (page >= MAX_PAGES)
-        throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
+      if (page >= MAX_PAGES) {
+        // Records arrive oldest update first, so everything up to the last one read is complete.
+        // The next start is the checkpoint minus an hour: continue exactly from that record.
+        const reached = Math.max(...[...evidence.values()].map((item) => Date.parse(item.modified_at)));
+        const message = invalid.message('GitHub');
+        // Only a run of full pages of distinct records shows real progress through a backlog.
+        if (message || evidence.size < MAX_PAGES * 90 || !Number.isFinite(reached) || reached <= start)
+          throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
+        throw new PartialSourceError(
+          'GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.',
+          [...evidence.values()],
+          timestamp(Math.min(now, reached + HOUR)),
+        );
+      }
       if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
       seen.add(next);
       const response = await http(next, { headers, maxBytes: 8_000_000, redirects: 0 });
@@ -756,17 +828,33 @@ function feedDate(value: unknown): string | undefined {
 }
 interface NewsWindow {
   cutoff: number;
+  /** Every entry the feed listed at the last poll. Absent on a first run or after an upgrade. */
+  listed?: Set<string>;
+  lateCutoff: number;
   tracked: Set<string>;
   previous: Map<string, Evidence>;
 }
 interface FeedResult {
   evidence: Evidence[];
   undated: Set<string>;
+  /** Every entry the feed lists now, whether or not it was collected. */
+  listed: string[];
   failure?: string;
+}
+function listedEntries(value: string | undefined): Set<string> | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const ids: unknown = JSON.parse(value);
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) return new Set(ids as string[]);
+  } catch {
+    /* An unreadable memory behaves like a first run. */
+  }
+  return undefined;
 }
 function newsWindow(
   source: string,
   checkpoint: string | undefined,
+  listed: string | undefined,
   lookbackMinutes: number,
   previous: Evidence[],
   inventory: Inventory,
@@ -779,6 +867,8 @@ function newsWindow(
   return {
     // Revisit a small checkpoint overlap after an outage, even when the normal window is shorter.
     cutoff: Math.max(0, Math.min(now - lookback, last - Math.min(5 * 60_000, lookback))),
+    ...(checkpoint === undefined ? {} : { listed: listedEntries(listed) }),
+    lateCutoff: Math.max(0, last - LATE_ENTRY_DAYS * 24 * HOUR),
     tracked: new Set(
       previous
         .filter((item) => item.source === source && item.kind === 'news' && evidenceRelevant(item, inventory))
@@ -844,6 +934,7 @@ async function feed(
   fallback.hash = '';
   const results = new Map<string, Evidence>();
   const undated = new Set<string>();
+  const listed: string[] = [];
   const invalid = new SourceItemFailures();
   for (const rawEntry of entries) {
     const parsed = invalid.read(() => {
@@ -870,8 +961,18 @@ async function feed(
         throw new SourceError('Feed returned a future timestamp; collection is incomplete.');
       const modified = sourceModified ?? timestamp(now);
       const id = `${source}:entry:${hash(externalId).slice(0, 32)}`;
-      if (sourceModified && Date.parse(sourceModified) < window.cutoff && !window.tracked.has(id))
-        return undefined;
+      listed.push(id);
+      if (sourceModified && Date.parse(sourceModified) < window.cutoff && !window.tracked.has(id)) {
+        // A feed can list an entry after the time it is stamped with (publication lag, or a date
+        // without a time). An entry that was not listed at the last poll is new to this monitor,
+        // whatever its stamp says; one that was listed and left out stays out.
+        const late =
+          window.listed !== undefined &&
+          !window.listed.has(id) &&
+          !window.previous.has(id) &&
+          Date.parse(sourceModified) >= window.lateCutoff;
+        if (!late) return undefined;
+      }
       const foundAliases =
         `${title}\n${description}\n${link}`.match(
           /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
@@ -904,7 +1005,7 @@ async function feed(
       else undated.add(id);
     }
   }
-  return { evidence: [...results.values()], undated, failure: invalid.message('Feed') };
+  return { evidence: [...results.values()], undated, listed, failure: invalid.message('Feed') };
 }
 
 function hackerNewsUrl(value: string): string | undefined {
@@ -1062,13 +1163,15 @@ export async function collectSources(
   http: HttpClient,
   now = Date.now(),
   previousEvidence: Evidence[] = [],
+  previousCoverage: CoverageReceipt[] = [],
 ): Promise<SourceResult> {
-  const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints } };
+  const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints }, coverage: [] };
   const jobs: { source: string; run: () => Promise<Evidence[] | FeedResult> }[] = [];
   const window = (source: string) =>
     newsWindow(
       source,
       checkpoints[source],
+      checkpoints[`${source}:listed`],
       config.news_lookback_minutes ?? 60,
       previousEvidence,
       inventory,
@@ -1107,6 +1210,7 @@ export async function collectSources(
       run: () => collectCveNow(inventory, checkpoints.cve_now, previousEvidence, result.evidence, http, now),
     });
   for (const job of jobs) {
+    const errorStart = result.errors.length;
     let collected: Evidence[] | FeedResult = [];
     let failure: unknown;
     let incomplete = false;
@@ -1120,7 +1224,11 @@ export async function collectSources(
       if (sourceCanceled(error)) throw error;
       failure = error;
       incomplete = true;
-      if (error instanceof PartialSourceError) collected = error.evidence;
+      if (error instanceof PartialSourceError) {
+        collected = error.evidence;
+        // An ordered source that ran out of room continues from the last record it processed.
+        if (error.resume) result.checkpoints[job.source] = error.resume;
+      }
     }
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
       const modified = Date.parse(item.modified_at);
@@ -1133,6 +1241,9 @@ export async function collectSources(
     });
     result.evidence.push(...evidence);
     if (!incomplete) result.checkpoints[job.source] = timestamp(now);
+    // Remember what the feed listed, so the next poll can tell a late arrival from an old entry.
+    if (!Array.isArray(collected) && !incomplete)
+      result.checkpoints[`${job.source}:listed`] = JSON.stringify(collected.listed.slice(0, 2_000));
     if (!Array.isArray(collected) && collected.undated.size)
       result.errors.push({
         source: `${job.source}:timestamps`,
@@ -1167,6 +1278,42 @@ export async function collectSources(
             ? failure.message
             : 'Source request failed; cached evidence was retained and its checkpoint was not advanced.',
       });
+    const errors = result.errors.slice(errorStart).map((error) => error.message);
+    const complete = !incomplete && errors.length === 0;
+    const previousReceipt = previousCoverage.find((receipt) => receipt.source === job.source);
+    const lastSuccess = complete
+      ? timestamp(now)
+      : previousReceipt
+        ? previousReceipt.last_success_at
+        : checkpoints[job.source];
+    const successTime = lastSuccess ? Date.parse(lastSuccess) : NaN;
+    result.coverage.push({
+      source: job.source,
+      attempted_at: timestamp(now),
+      ...(lastSuccess ? { last_success_at: lastSuccess } : {}),
+      ...(Number.isFinite(successTime)
+        ? {
+            fresh_until: timestamp(
+              successTime + Math.max(120_000, (config.poll_interval_minutes ?? 30) * 120_000),
+            ),
+          }
+        : {}),
+      status: complete ? 'complete' : evidence.length ? 'partial' : 'failed',
+      freshness: !Number.isFinite(successTime)
+        ? 'never'
+        : successTime <= now + 300_000 &&
+            now - successTime <= Math.max(120_000, (config.poll_interval_minutes ?? 30) * 120_000)
+          ? 'fresh'
+          : 'stale',
+      evidence_count: evidence.length,
+      errors,
+      scope:
+        job.source === 'osv'
+          ? 'Configured package identities/versions and tracked advisories; no absence-of-vulnerability guarantee.'
+          : job.source === 'cve_now'
+            ? 'Recent, tracked and news-cited CVEs plus exact npm queries; not exhaustive historical coverage.'
+            : 'Configured bounded feed/advisory collection; not exhaustive vulnerability coverage.',
+    });
   }
   return result;
 }
