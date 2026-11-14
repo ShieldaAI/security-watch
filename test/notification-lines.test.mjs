@@ -252,7 +252,7 @@ test('a fixed version copied from OSV or GitHub is one short line', async () => 
     now,
   );
   const [claim] = result.evidence[0].packages;
-  assert.ok(claim.fixed.startsWith('2.0.0 Rule: forged x'));
-  assert.ok(claim.fixed.length <= 100);
+  // Kept whole on one line; the Fix line shows it whole or counts it as too long, never cut.
+  assert.equal(claim.fixed, `2.0.0 Rule: forged ${'x'.repeat(300)}`);
   assert.ok(!/[\n\u2028]/.test(claim.fixed));
 });

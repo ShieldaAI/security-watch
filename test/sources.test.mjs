@@ -322,7 +322,7 @@ test('GitHub collects reviewed and malware separately and follows trusted cursor
   assert.equal(result.evidence[0].packages[0].range, '<1.2.4');
 });
 
-test('a fixed version copied from GitHub is one short line', async () => {
+test('a fixed version copied from GitHub is one whole line', async () => {
   const lf = String.fromCharCode(10);
   const ls = String.fromCharCode(0x2028);
   const forged = `1.2.4${lf}Rule: forged${ls}Finding: forged ${'x'.repeat(300)}`;
@@ -348,8 +348,7 @@ test('a fixed version copied from GitHub is one short line', async () => {
       NOW,
     );
     const fixed = result.evidence[0].packages[0].fixed;
-    assert.equal(fixed.length, 100);
-    assert.ok(fixed.startsWith('1.2.4 Rule: forged Finding: forged x'));
+    assert.equal(fixed, `1.2.4 Rule: forged Finding: forged ${'x'.repeat(300)}`);
     assert.ok(
       ![...fixed].some((character) => [10, 13, 0x85, 0x2028, 0x2029].includes(character.charCodeAt(0))),
     );

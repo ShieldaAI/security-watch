@@ -96,3 +96,46 @@ export function untrackedPackedFiles(packed, tracked) {
   const known = new Set(tracked);
   return packed.filter((path) => !path.startsWith('dist/') && !known.has(path));
 }
+
+/**
+ * The checks `npm publish` runs before it packs (`prepublishOnly`). `run(command, args, options)`
+ * runs a program in the package directory and returns its output; it throws when the program fails.
+ * Throws the reason the publish must stop.
+ */
+export function releaseChecks({ root, env, manifest, run }) {
+  const clean = () =>
+    !run('git', ['status', '--porcelain', '--untracked-files=all'], { encoding: 'utf8' }).trim();
+  if (!clean()) throw new Error('Publish only from a clean committed checkout.');
+  if (!env.npm_execpath) throw new Error('Run through npm run release.');
+  const npm = (args, options = {}) =>
+    run(process.execPath, [env.npm_execpath, ...args], { encoding: 'utf8', ...options });
+  // What npm itself is configured with, as the publish it starts would see it.
+  const configured = (key) => npm(['config', 'get', key]).trim();
+  const problem =
+    releaseEnvironmentProblem(env) ??
+    registryProblem({ registry: configured('registry'), scoped: configured('@shieldaai:registry') }) ??
+    releaseProblem(manifest, env);
+  if (problem) throw new Error(problem);
+  // The publish command's own options reach this script as npm_config_* variables and would be
+  // inherited by every npm command the checks run: under `--dry-run` the package check's `npm pack`
+  // would write no tarball. The checks run as they do from a plain `npm run check`.
+  const checkEnvironment = { ...env };
+  for (const key of Object.keys(checkEnvironment))
+    if (['npm_config_dry_run', 'npm_config_tag', 'npm_config_otp'].includes(key.toLowerCase()))
+      delete checkEnvironment[key];
+  npm(['run', 'check'], { stdio: 'inherit', env: checkEnvironment, encoding: undefined });
+  // Everything packed apart from the build output must be a tracked file: an ignored file left in a
+  // published directory does not show in `git status`.
+  const [packed] = JSON.parse(
+    npm(['pack', '--dry-run', '--json', '--ignore-scripts'], { env: checkEnvironment }),
+  );
+  const tracked = run('git', ['ls-files', '-z'], { encoding: 'utf8' }).split('\0');
+  const stray = untrackedPackedFiles(
+    packed.files.map((file) => file.path),
+    tracked,
+  );
+  if (stray.length)
+    throw new Error(`The package would include files that are not in git: ${stray.join(', ')}`);
+  if (!clean()) throw new Error('Release checks changed source.');
+  return root;
+}

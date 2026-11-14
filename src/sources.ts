@@ -330,8 +330,9 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     ];
     const fixed = array(affected.ranges, true)
       .flatMap((rawRange) => array(record(rawRange).events, true))
-      // A fixed version is shown on the notification's Fix line: keep it short and on one line.
-      .map((rawEvent) => singleLine(optionalString(record(rawEvent).fixed) ?? '', 100))
+      // Kept whole on one line: the notification's Fix line shows a version whole or counts it as
+      // too long to show, never a cut one, which would be another version.
+      .map((rawEvent) => singleLine(optionalString(record(rawEvent).fixed) ?? ''))
       .filter((v) => v.length > 0);
     packageClaims.push({
       ecosystem,
@@ -555,7 +556,6 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
       (typeof patched === 'object' && patched !== null
         ? optionalString(record(patched).identifier)
         : optionalString(patched)) ?? '',
-      100,
     );
     return {
       ...sourcePackage(string(pkg.ecosystem), string(pkg.name)),

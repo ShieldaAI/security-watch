@@ -235,12 +235,12 @@ function listLine(label: string, items: string[], length: number): string {
 function locationLines(a: Assessment, length: number): string[] {
   const where = a.location;
   if (!where) return [];
+  // With no room for notes (length 0) the names alone are shown.
+  const note = (value: string | undefined) => (value && length ? ` - ${single(value, length)}` : '');
   return [
-    `Where to look: ${single(where.system, 120)}${where.owner ? ` (owner: ${single(where.owner, 80)})` : ''}${where.system_note ? ` - ${single(where.system_note, length)}` : ''}`,
+    `Where to look: ${single(where.system, 120)}${where.owner ? ` (owner: ${single(where.owner, 80)})` : ''}${note(where.system_note)}`,
     ...(where.component
-      ? [
-          `Affected item: ${single(where.component, 160)}${where.component_note ? ` - ${single(where.component_note, length)}` : ''}`,
-        ]
+      ? [`Affected item: ${single(where.component, 160)}${note(where.component_note)}`]
       : []),
   ];
 }
@@ -264,8 +264,10 @@ function fixLine(fix: string): string {
   const shown: string[] = [];
   let length = 0;
   for (const version of versions) {
-    // A version is never shown cut: one that is too long on its own is counted with the rest.
-    if (version.length > 120 || (shown.length && length + version.length + 2 > 300)) break;
+    // A version is never shown cut: one that is too long on its own is counted with the rest, and
+    // the shorter ones after it are still shown.
+    if (version.length > 120) continue;
+    if (length + version.length + 2 > 300) break;
     shown.push(version);
     length += version.length + 2;
   }
@@ -279,17 +281,20 @@ export function notificationText(job: Notification): { subject: string; text: st
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
   const urls = a.urls.filter(webUrl);
-  // In the order they give way when the text is too long for one Slack section: the last of these
-  // lines are dropped first, and a line is never cut in the middle.
-  const body = [
+  /** The lines every message keeps: what, where, how it applies and the summary. */
+  const head = (notes: boolean) => [
     subject,
     `Finding: ${single(a.id, 200)}`,
     `Delivery: ${single(job.id, 200)}`,
     `System: ${single(a.system_id, 200)}${a.component_id ? ` / ${single(a.component_id, 200)}` : ''}`,
-    ...locationLines(a, 300),
+    ...locationLines(a, notes ? 300 : 0),
     `Applicability: ${single(a.applicability, 40)}; source severity: ${single(a.source_severity, 40)}; priority: ${single(a.priority, 40)}`,
     ...(a.exploited ? ['Known exploitation reported.'] : []),
     `Summary: ${single(a.summary, 750)}`,
+  ];
+  // In the order they give way when the text is too long for one Slack section: the last of these
+  // lines are dropped first, and a line is never cut in the middle.
+  const extra = [
     ...(a.news_analysis
       ? [
           `AI news classification: ${single(a.news_analysis.classification, 60)}; reported system impact: ${single(a.news_analysis.impact, 60)}`,
@@ -302,29 +307,44 @@ export function notificationText(job: Notification): { subject: string; text: st
     // Every reason: when there are more than fit, the last ones are left out with the note below.
     ...a.reasons.map((r) => `• ${single(r, 180)}`),
   ];
-  // The fix, the rule that sent the message, the time and the sources close every message, whole.
-  const closing = [
+  // The fix, the rule that sent the message and the time close every message, whole, followed by
+  // up to three source links.
+  const tail = [
     ...(a.fix ? [fixLine(a.fix)] : []),
     `Rule: ${single(reason, 180)}`,
     `Assessment time: ${single(a.updated_at, 40)}`,
-    ...urls
-      .map(link)
-      .filter((value): value is string => value !== undefined)
-      .slice(0, 3),
-  ].join('\n');
+  ];
+  const links = urls
+    .map(link)
+    .filter((value): value is string => value !== undefined)
+    .slice(0, 3);
   const SHORTENED = '(Message shortened; run explain for the full finding.)';
-  const room = MESSAGE_LIMIT - closing.length - 1;
+  const size = (lines: string[]) => lines.reduce((total, line) => total + line.length + 1, 0) - 1;
+  const full = [...head(true), ...extra, ...tail, ...links];
   // Everything fits: no note.
-  if (body.join('\n').length <= room) return { subject, text: [...body, closing].join('\n') };
-  // Otherwise whole lines are kept while they fit with the note that says the rest was left out.
-  const kept: string[] = [];
-  let left = room - (SHORTENED.length + 1);
-  for (const line of body) {
-    if (line.length + 1 > left) break;
-    kept.push(line);
-    left -= line.length + 1;
-  }
-  return { subject, text: [...kept, SHORTENED, closing].join('\n') };
+  if (size(full) <= MESSAGE_LIMIT) return { subject, text: full.join('\n') };
+  // Otherwise the analysis and reasons give way first, whole lines from the end. Only when the
+  // lines every message keeps still do not fit do the source links go, the last first, and then the
+  // inventory notes. The length limits of those lines keep them, without notes and links, well
+  // inside one section (at most about 2,800 characters; pinned by a test).
+  for (const notes of [true, false])
+    for (let count = links.length; count >= 0; count--) {
+      const fixed = [...head(notes), SHORTENED, ...tail, ...links.slice(0, count)];
+      let left = MESSAGE_LIMIT - size(fixed);
+      if (left < 0 && (notes || count)) continue;
+      const kept: string[] = [];
+      for (const line of extra) {
+        if (line.length + 1 > left) break;
+        kept.push(line);
+        left -= line.length + 1;
+      }
+      return {
+        subject,
+        text: [...head(notes), ...kept, SHORTENED, ...tail, ...links.slice(0, count)].join('\n'),
+      };
+    }
+  /* The loop above always returns on its last round. */
+  throw new Error('unreachable');
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;

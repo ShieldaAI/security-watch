@@ -85,16 +85,22 @@ function namedAsPackage(
   const install = INSTALL[ecosystem];
   // One entry of a list of package names. Words that join a sentence are never one: "npm packages
   // that send", "PyPI packages which steal".
-  const item =
-    '(?!(?:that|which|who|whose|to|are|were|was|is|be|been|being|have|has|had|and|or|but|with|from|for|in|on|of|the|a|an|this|these|those|not|no|it|its|they|their|as|by|at|into|than|then|so|such|also|now|designed|found|used|named|called|published|uploaded|removed)(?![\\p{L}\\p{N}]))[\\p{L}\\p{N}@/._-]+';
+  const joining =
+    'that|which|who|whose|to|are|were|was|is|be|been|being|have|has|had|and|or|but|with|from|for|in|on|of|the|a|an|this|these|those|not|no|it|its|they|their|as|by|at|into|than|then|so|such|also|now|designed|found|used|named|called|published|uploaded|removed';
+  const item = `(?!(?:${joining})(?![\\p{L}\\p{N}]))[\\p{L}\\p{N}@/._-]+`;
+  // A package named like one of those words is not taken from a list either, unless quoted.
+  const joiningWord = new RegExp(`^(?:${joining})$`, 'iu');
   const quote = '["\'`‘’“”]?';
   const { before, after } = boundary;
   const patterns: RegExp[] = [];
   for (let offset = 0; offset < unique.length; offset += 400) {
-    const name = `(?:${unique
-      .slice(offset, offset + 400)
-      .map(escape)
-      .join('|')})`;
+    const chunk = unique.slice(offset, offset + 400);
+    const name = `(?:${chunk.map(escape).join('|')})`;
+    const listed = chunk.filter((value) => !joiningWord.test(value));
+    // In a list a name must be quoted when it is one of the joining words.
+    const listName = listed.length
+      ? `(?:${quote}(?:${listed.map(escape).join('|')})${quote}|["'\`‘’“”]${name}["'\`‘’“”])`
+      : `(?:["'\`‘’“”]${name}["'\`‘’“”])`;
     patterns.push(
       new RegExp(
         [
@@ -113,10 +119,10 @@ function namedAsPackage(
           // between the entries: "the npm packages chalk, colors and debug", "the npm libraries
           // colors and faker", "Chalk and Debug npm Packages". One word after or before the plural
           // is not a list: "npm packages that send", "six npm packages".
-          `${before}${registry} ${kinds} (?:${item}, ){0,4}${quote}${name}${quote}(?:, ${item}){0,4},? and ${item}${after}`,
-          `${before}${registry} ${kinds} (?:${item}, ){0,4}${item},? and ${quote}${name}${after}`,
-          `${before}(?:${item}, ){0,4}${quote}${name}${quote}(?:, ${item}){0,4},? and ${item} ${registry} ${kinds}${after}`,
-          `${before}(?:${item}, ){0,4}${item},? and ${quote}${name}${quote} ${registry} ${kinds}${after}`,
+          `${before}${registry} ${kinds} (?:${item}, ){0,4}${listName}(?:, ${item}){0,4},? and ${item}${after}`,
+          `${before}${registry} ${kinds} (?:${item}, ){0,4}${item},? and ${listName}${after}`,
+          `${before}(?:${item}, ){0,4}${listName}(?:, ${item}){0,4},? and ${item} ${registry} ${kinds}${after}`,
+          `${before}(?:${item}, ){0,4}${item},? and ${listName} ${registry} ${kinds}${after}`,
         ].join('|'),
         'iu',
       ),
