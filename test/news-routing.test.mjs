@@ -157,15 +157,14 @@ test('generic products retain AI news filtering when a cited CVE is also collect
 test('multi-product news keeps each configured product even when a package is mentioned', () => {
   const configured = structuredClone(inventory);
   configured.systems[0].components = [
-    { id: 'parser', ecosystem: 'npm', name: 'example-parser', version: '1.0.0' },
+    { id: 'parser', ecosystem: 'npm', name: 'xlsx-parser', version: '1.0.0' },
   ];
   const findings = assess(
     configured,
     [
       {
         ...story,
-        description:
-          'CVE-2026-10001 affects example-parser. Example Database also has a newly disclosed flaw.',
+        description: 'CVE-2026-10001 affects xlsx-parser. Example Database also has a newly disclosed flaw.',
         aliases: ['CVE-2026-10001'],
       },
     ],

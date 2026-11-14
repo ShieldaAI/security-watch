@@ -118,7 +118,7 @@ test('a story about the package still matches an English-word name', () => {
     // Not English: the name is the package wherever it is written.
     ['npm', 'lodash', 'a flaw in lodash lets attackers pollute prototypes'],
     ['npm', 'axios', 'Axios 1.8.2 fixes SSRF'],
-    ['npm', 'left-pad', 'Attackers abuse left-pad in the wild.'],
+    ['npm', 'qrlib-pad', 'Attackers abuse qrlib-pad in the wild.'],
     ['npm', '@acme/sdk', 'Attackers abuse @acme/sdk in the wild.'],
   ])
     assert.equal(mentioned(ecosystem, name, text), true, `${name}: ${text}`);

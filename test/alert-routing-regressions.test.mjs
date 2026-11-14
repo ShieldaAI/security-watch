@@ -30,7 +30,7 @@ const system = (extra = {}, updated = now) => ({
   keywords: [],
   ...extra,
 });
-const leftPad = { id: 'lp', ecosystem: 'npm', name: 'left-pad', version: '1.3.0' };
+const leftPad = { id: 'lp', ecosystem: 'npm', name: 'qrlib-pad', version: '1.3.0' };
 const story = {
   id: 'hacker_news:entry:abc',
   source: 'hacker_news',
@@ -38,7 +38,7 @@ const story = {
   title: 'Ivanti Connect Secure zero-day CVE-2026-20001 exploited in the wild',
   url: 'https://example.com/a',
   description:
-    'Attackers exploit CVE-2026-20001 in Ivanti Connect Secure appliances; left-pad is also abused.',
+    'Attackers exploit CVE-2026-20001 in Ivanti Connect Secure appliances; qrlib-pad is also abused.',
   aliases: ['CVE-2026-20001'],
   severity: 'unknown',
   modified_at: iso(),
@@ -79,8 +79,8 @@ const loudness = { record: 0, digest: 1, notify: 2 };
 test('a validated AI impact claim is never quieter than an uncertain or unclassified news finding', () => {
   const targets = [
     system({ components: [leftPad] }),
-    system({ products: [{ name: 'left-pad', version: '1.3.0', keywords: [] }] }),
-    system({ keywords: ['left-pad'] }),
+    system({ products: [{ name: 'qrlib-pad', version: '1.3.0', keywords: [] }] }),
+    system({ keywords: ['qrlib-pad'] }),
   ];
   const modelsOn = { ...config, models: { ...config.models, enabled: true } };
   for (const target of targets) {
@@ -233,7 +233,7 @@ test('npm ranges outside the comparator subset cannot exclude an installed versi
     );
 });
 
-test('incomplete source coverage holds one stable revision and one alert across scans', async () => {
+test('an exclusion whose own record is read holds while another record of the source keeps failing', async () => {
   const osvConfig = parseConfig({
     version: 1,
     sources: { cve_now: false, hacker_news: false, osv: true, github: false, kev: false },
@@ -309,17 +309,17 @@ test('incomplete source coverage holds one stable revision and one alert across 
     assert.ok(result.coverage.some((receipt) => receipt.status !== 'complete'));
     const [finding] = result.findings.filter((item) => item.category !== 'health');
     id = finding.id;
-    assert.equal(finding.applicability, 'unknown');
-    assert.equal(result.decisions[id].action, 'notify');
-    const job = store.claimDue(time);
-    if (job) store.completeJob(job.id, 'accepted', time, undefined, time);
+    // The advisory record behind the exclusion is read on every scan: its range is current, and
+    // what the source missed concerns other findings.
+    assert.equal(finding.applicability, 'not_affected');
+    assert.equal(result.decisions[id].action, 'record');
   }
-  assert.ok(!seenDuringCollection.has('not_affected'), 'no exclusion is stored while coverage is partial');
+  assert.ok(!seenDuringCollection.has('unknown'), 'the result never flips to unknown');
   assert.equal(store.history(id).length, 1);
-  const jobs = store.jobs().filter((job) => job.finding_id === id);
   assert.deepEqual(
-    jobs.map((job) => [job.revision, job.status]),
-    [[1, 'accepted']],
+    store.jobs().filter((job) => job.finding_id === id),
+    [],
+    'no alert is sent',
   );
 });
 

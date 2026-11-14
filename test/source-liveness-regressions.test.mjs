@@ -107,8 +107,8 @@ test('everyday words that are also package names do not make unrelated records r
     assess(inv, [about], config({}), NOW).map((finding) => finding.component_id),
     ['lock:request'],
   );
-  const distinctive = inventory([npm('left-pad'), npm('@acme/sdk'), npm('lodash4')]);
-  for (const name of ['left-pad', '@acme/sdk', 'lodash4'])
+  const distinctive = inventory([npm('qrlib-pad'), npm('@acme/sdk'), npm('lodash4')]);
+  for (const name of ['qrlib-pad', '@acme/sdk', 'lodash4'])
     assert.equal(evidenceRelevant(story(`Attackers abuse ${name} in the wild.`), distinctive), true, name);
   // Terms the operator declared always count, in advisories and in news.
   const declared = inventory([], {

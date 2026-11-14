@@ -111,7 +111,8 @@ test('inventory exclusions cancel old queued alerts before HTTP, then failed cov
     config: { ...config, sources: { ...config.sources, osv: true } },
     inventory: inventory('2.0.0'),
     store,
-    now: now + 1000,
+    // Past two poll intervals: the record behind the exclusion is no longer current.
+    now: now + 3 * 3_600_000,
     http: async () => {
       calls++;
       assert.equal(store.jobs().filter((j) => j.status === 'pending').length, 0);

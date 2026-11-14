@@ -142,36 +142,47 @@ function generalNews(assessment: Assessment | undefined): boolean {
   );
 }
 
-/** An exclusion drawn from a source whose collection is incomplete cannot establish current safety. */
+/**
+ * An exclusion rests on the version ranges of its own advisory records. It holds while each of
+ * them is current: read in this collection, or, when its source could not read it this time, read
+ * within the last two poll intervals (the same limit after which evidence counts as stale). What
+ * else a source missed in this collection (another record, a package lookup) concerns other
+ * findings, not this one; it is reported as a monitoring problem without withdrawing this result.
+ */
 function withoutUnsupportedExclusion(
   finding: Assessment,
   evidence: Evidence[],
   coverage: CoverageReceipt[],
+  window: number,
 ): Assessment {
   if (finding.applicability !== 'not_affected') return finding;
   // Only the advisory records that supplied the excluding ranges matter. Linked news or an
   // exploitation listing adds context; a gap in reading those says nothing about the ranges.
-  const sources = new Set(
-    evidence
-      .filter((item) => item.kind === 'advisory' && finding.evidence_ids.includes(item.id))
-      .map((item) => item.source),
+  const records = evidence.filter(
+    (item) => item.kind === 'advisory' && finding.evidence_ids.includes(item.id),
   );
-  const incomplete = coverage.some(
-    (receipt) =>
-      receipt.status !== 'complete' &&
-      // The source read every record for the inventory's packages; it missed something else.
-      receipt.package_results !== 'complete' &&
-      [...sources].some((source) => source === receipt.source || receipt.source.startsWith(`${source}:`)),
-  );
-  if (!incomplete) return finding;
+  const outdated = records.some((item) => {
+    const receipt = coverage.find(
+      (candidate) => candidate.source === item.source || candidate.source.startsWith(`${item.source}:`),
+    );
+    if (!receipt || receipt.status === 'complete') return false;
+    const fetched = Date.parse(item.fetched_at);
+    return !(fetched >= Date.parse(receipt.attempted_at) - window);
+  });
+  if (!outdated) return finding;
   return {
     ...finding,
     applicability: 'unknown',
     reasons: [
       ...finding.reasons,
-      'Source coverage is incomplete; an exclusion cannot establish current safety.',
+      'Source coverage is incomplete and an advisory record behind this exclusion could not be read recently; the exclusion cannot establish current safety.',
     ],
   };
+}
+
+/** How old an advisory record behind an exclusion may be while its source cannot read it. */
+function exclusionWindow(config: Config): number {
+  return Math.max(120_000, (config.poll_interval_minutes ?? 30) * 120_000);
 }
 
 /** When stored evidence was last collected: the start of the last scan, or its newest fetch time. */
@@ -328,7 +339,7 @@ export async function runScan(options: {
     // must not turn an exclusion into an urgent "unknown" that the refresh then takes back.
     const collectedAt = Math.min(now, lastCollection(store, cached));
     const current = assess(inventory, cached, config, now, collectedAt).map((finding) =>
-      withoutUnsupportedExclusion(finding, cached, lastCoverage),
+      withoutUnsupportedExclusion(finding, cached, lastCoverage, exclusionWindow(config)),
     );
     const ids = new Set(current.map((a) => a.id));
     for (const finding of current)
@@ -354,7 +365,7 @@ export async function runScan(options: {
   remediationEvidence = evidence;
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
   const findings = assess(inventory, evidence, config, now).map((finding) =>
-    withoutUnsupportedExclusion(finding, evidence, result.coverage),
+    withoutUnsupportedExclusion(finding, evidence, result.coverage, exclusionWindow(config)),
   );
   const bases = new Map(findings.map((a) => [a.id, basis(a, evidenceById)]));
   const errors = [

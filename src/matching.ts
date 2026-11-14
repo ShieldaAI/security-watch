@@ -62,7 +62,10 @@ function namedAsPackage(names: Iterable<string>, ecosystem: Ecosystem): (text: s
   const registry = `(?:${REGISTRY_CONTEXT[ecosystem]})`;
   const kind = '(?:package|library|module|dependency|gem|crate|plugin)';
   const kinds = '(?:packages|libraries|modules|dependencies|gems|crates|plugins)';
-  const item = '[\\p{L}\\p{N}@/._-]+';
+  // One entry of a list of package names. Words that join a sentence are never one: "npm packages
+  // that send", "PyPI packages which steal".
+  const item =
+    '(?!(?:that|which|who|whose|to|are|were|was|is|be|been|being|have|has|had|and|or|but|with|from|for|in|on|of|the|a|an|this|these|those|not|no|it|its|they|their|as|by|at|into|than|then|so|such|also|now|designed|found|used|named|called|published|uploaded|removed)(?![\\p{L}\\p{N}]))[\\p{L}\\p{N}@/._-]+';
   const quote = '["\'`‘’“”]?';
   const { before, after } = boundary;
   const patterns: RegExp[] = [];
@@ -79,13 +82,14 @@ function namedAsPackage(names: Iterable<string>, ecosystem: Ecosystem): (text: s
           `${before}${kind} (?:called|named) ${quote}${name}${after}`,
           `${before}(?:npm|yarn|pnpm|pip|pip3|gem|cargo|composer|go|dotnet|nuget) (?:install|add|i|get|require) (?:-\\S+ )*${quote}${name}(?![\\p{L}\\p{N}_/\\-])`,
           `${before}${registry}:${name}${after}`,
-          // A registry and the kind in the plural, with a short list: "npm packages chalk and debug",
-          // "the npm libraries colors and faker", "chalk and debug npm packages".
-          `${before}${registry} ${kinds} (?:${item},? (?:and )?){0,5}${quote}${name}${after}`,
-          // Before the registry word the name must be part of a list: "six npm packages" and
-          // "malicious npm packages" are a number and an adjective.
-          `${before}${quote}${name}${quote}(?:,? (?:and )?${item}){1,5} ${registry} ${kinds}${after}`,
-          `${before}${item}(?:, ${item}){0,4},? and ${quote}${name}${quote} ${registry} ${kinds}${after}`,
+          // A real list of names next to a registry and the kind in the plural, with a comma or "and"
+          // between the entries: "the npm packages chalk, colors and debug", "the npm libraries
+          // colors and faker", "Chalk and Debug npm Packages". One word after or before the plural
+          // is not a list: "npm packages that send", "six npm packages".
+          `${before}${registry} ${kinds} (?:${item}, ){0,4}${quote}${name}${quote}(?:, ${item}){0,4},? and ${item}${after}`,
+          `${before}${registry} ${kinds} (?:${item}, ){0,4}${item},? and ${quote}${name}${after}`,
+          `${before}(?:${item}, ){0,4}${quote}${name}${quote}(?:, ${item}){0,4},? and ${item} ${registry} ${kinds}${after}`,
+          `${before}(?:${item}, ){0,4}${item},? and ${quote}${name}${quote} ${registry} ${kinds}${after}`,
         ].join('|'),
         'iu',
       ),

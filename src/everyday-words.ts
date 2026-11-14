@@ -159,11 +159,16 @@ rake storybook svelte thor tox transformers winston`.split(/\s+/),
 );
 
 const EVERYDAY = new Set([...WORDS.split(/\s+/), ...JARGON.split(/\s+/)].filter(Boolean));
+const JARGON_WORDS = new Set(JARGON.split(/\s+/).filter(Boolean));
 
 /** Whether a name is one of the commonest words of security prose ("send", "buffer", "next"). */
 export function everydayWord(name: string): boolean {
   const word = name.trim().toLowerCase();
-  return EVERYDAY.has(word) && !PROPER.has(word);
+  if (PROPER.has(word)) return false;
+  if (EVERYDAY.has(word)) return true;
+  // The plural of a term of security writing is one too ("websockets", "cves").
+  const singular = word.endsWith('s') ? word.slice(0, -1) : undefined;
+  return singular !== undefined && JARGON_WORDS.has(singular);
 }
 
 /** Whether a dictionary word is also the name of a well-known library, written with a capital. */
@@ -209,7 +214,12 @@ function baseForms(word: string): string[] {
 const DISTINCTIVE = new Set<string>(['chokidar', 'hapi', 'multer', 'nanoid', 'redux', 'spacy']);
 function englishWord(word: string): boolean {
   if (DISTINCTIVE.has(word)) return false;
-  return EVERYDAY.has(word) || PROPER.has(word) || baseForms(word).some(inDictionary);
+  return (
+    EVERYDAY.has(word) ||
+    PROPER.has(word) ||
+    // "websockets", "apis": a plural of a term of security writing is one too.
+    baseForms(word).some((form) => EVERYDAY.has(form) || inDictionary(form))
+  );
 }
 
 /**
@@ -222,17 +232,27 @@ cross-origin cross-site denial-of-service diffie-hellman end-to-end front-end hi
 long-term man-in-the-middle multi-factor open-source opt-in opt-out out-of-bounds plug-in pre-auth
 proof-of-concept read-only real-time same-origin server-side set-cookie set-up side-channel sign-in
 single-sign-on third-party time-based two-factor use-after-free user-agent zero-click zero-day
-zero-trust`.split(/\s+/),
+zero-trust one-time one-click one-day n-day two-step multi-step stack-trace stack-based heap-based
+double-free race-condition path-traversal privilege-escalation code-execution remote-code
+content-disposition content-length content-security-policy x-forwarded-for keep-alive cache-control
+rate-limit rate-limiting password-spraying credential-stuffing end-of-life up-to-date out-of-date
+well-known high-risk low-risk high-level low-level first-party closed-source read-write write-only
+drive-by follow-up sign-up check-in pop-up take-over point-of-sale peer-to-peer command-and-control
+living-off-the-land ransomware-as-a-service supply-chain open-redirect file-upload self-signed
+self-hosted cloud-native long-lived short-lived hard-coded`.split(/\s+/),
 );
 
 /**
  * Whether a package name reads as ordinary English: one word ("entities", "scheduler", "immediate")
- * or a compound of everyday prose ("side-channel", "zero-day"). Prose uses such a name in its
+ * or a compound that prose writes with a hyphen ("side-channel", "one-time", "stack-trace"). Prose uses such a name in its
  * ordinary sense far more often than it names the package, so a mention of it needs more than the
  * word itself. A name that is not English ("axios", "lodash", "webpack") does not.
  */
 export function dictionaryName(name: string): boolean {
   const word = name.trim().toLowerCase();
   if (EVERYDAY.has(word) || PROPER.has(word) || COMPOUNDS.has(word)) return true;
+  // A hyphenated name counts as English only when it is a compound that prose writes with the
+  // hyphen ("one-time", "stack-trace", "content-disposition"): those are in COMPOUNDS. A library's
+  // compound ("body-parser", "node-fetch", "left-pad") is hardly ever ordinary prose.
   return /^[a-z]+$/.test(word) && englishWord(word);
 }

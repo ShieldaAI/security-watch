@@ -109,7 +109,7 @@ test('an exclusion holds when cve.now is incomplete only because of an unrelated
   );
 });
 
-test('an exclusion does not hold when the record it rests on could not be read', async () => {
+test('an exclusion does not hold once the record it rests on has not been read for two poll intervals', async () => {
   const store = new Store(':memory:');
   await runScan({
     config: scanConfig,
@@ -118,8 +118,35 @@ test('an exclusion does not hold when the record it rests on could not be read',
     now: NOW,
     http: cveNow(first, lodashRecord),
   });
-  const later = NOW + 30 * 60_000;
   // An unrelated record keeps the source partial with evidence; the lodash record answers 503.
+  // Half an hour later the copy read on the last scan is still current: the exclusion holds.
+  const soon = NOW + 30 * 60_000;
+  const failingLodash = (time) =>
+    cveNow(
+      [{ id: 'CVE-2026-60002', publishedAt: iso(time - 600_000), firstSeenAt: iso(time - 300_000) }],
+      (id) =>
+        id === 'CVE-2026-50001'
+          ? { status: 503, headers: {}, body: '' }
+          : json({
+              id,
+              status: 'published',
+              title: id,
+              originalDescription: 'unrelated',
+              publishedAt: iso(time - 600_000),
+              modifiedAt: iso(time - 600_000),
+            }),
+    );
+  await runScan({
+    config: scanConfig,
+    inventory: lodashInventory(soon),
+    store,
+    now: soon,
+    http: failingLodash(soon),
+  });
+  assert.equal(lodashFinding(store).applicability, 'not_affected');
+  assert.equal(store.history(lodashFinding(store).id).length, 1);
+  // Still failing after two poll intervals: the exclusion gives way.
+  const later = NOW + 2 * 3_600_000;
   const other = [
     { id: 'CVE-2026-60002', publishedAt: iso(later - 600_000), firstSeenAt: iso(later - 300_000) },
   ];

@@ -99,7 +99,7 @@ test('a package whose name is an everyday word needs a story about packages or a
 });
 
 test('the matcher follows entries added to or removed from the same inventory object', () => {
-  const inv = inventory([component('npm', 'left-pad')]);
+  const inv = inventory([component('npm', 'qrlib-pad')]);
   const record = {
     ...story('unrelated CVE-2026-2000'),
     id: 'cve_now:CVE-2026-2000',
