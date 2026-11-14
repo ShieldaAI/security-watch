@@ -226,7 +226,7 @@ test('cve.now skips an invalid listing item and collects following valid details
   let broken = true;
   const cfg = config({ cve_now: true });
   const http = async (url) =>
-    url.endsWith('/entries')
+    url.endsWith('/entries?limit=100')
       ? response({
           entries: [
             broken ? { id: 'bad', publishedAt: 'invalid' } : cve('CVE-2026-12346'),
@@ -358,7 +358,7 @@ test('cancellation stops source collection and does not become a recoverable ite
           async (url) => {
             calls.push(url);
             if (stage === 'article' && url.includes('feedburner')) return response(rss([rssItem('good')]));
-            if (stage === 'cve-detail' && url.endsWith('/entries'))
+            if (stage === 'cve-detail' && url.endsWith('/entries?limit=100'))
               return response({ entries: [cve('CVE-2026-12345')] });
             if (stage === 'osv-detail' && url.endsWith('/querybatch'))
               return response({ results: [{ vulns: [{ id: 'OSV-2026-1' }] }] });

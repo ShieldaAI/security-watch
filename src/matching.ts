@@ -1,4 +1,5 @@
 import { packageKey } from './ecosystems.js';
+import { everydayWord } from './everyday-words.js';
 import type { Ecosystem } from './ecosystems.js';
 import type { Inventory } from './types.js';
 
@@ -37,19 +38,31 @@ function packageContext(text: string, ecosystem: Ecosystem): boolean {
   return pattern.test(text);
 }
 
-/** A name made only of letters ("send", "buffer", "request") is also an everyday word. */
+/**
+ * A name made only of letters that is also an everyday word ("send", "buffer", "request", "next").
+ * Prose uses such a word in its ordinary sense far more often than as a package name.
+ */
 function plainWord(name: string): boolean {
-  return /^\p{L}+$/u.test(name.trim());
+  return /^\p{L}+$/u.test(name.trim()) && everydayWord(name);
+}
+
+/** After a name: a version ("Requests 2.32.0", "send@0.19.0") or, for npm, the ".js" suffix. */
+function releaseSuffix(ecosystem: Ecosystem): string {
+  return `(?:${ecosystem === 'npm' ? '\\.js(?:[ @]v?\\d+(?:\\.\\d+)?)?|' : ''}[ @]v?\\d+\\.\\d+)`;
 }
 
 /**
- * Whether prose names this package. A distinctive name (with a digit, hyphen, dot, scope or path)
- * counts wherever it appears. A plain word counts only when the text is about packages, so
- * "buffer overflow in a router" does not match the npm package `buffer`.
+ * Whether prose names this package. A name counts wherever it appears unless it is also an everyday
+ * word. An everyday word counts only when the text is about packages or names a release of it, so
+ * "buffer overflow in a router" does not match the npm package `buffer`, while "Next.js" does match
+ * `next`. A name written with a version, such as `send@0.19.0`, always counts.
  */
 export function packageMentioned(text: string, component: { ecosystem: Ecosystem; name: string }): boolean {
-  if (!mentions(text, component.name)) return false;
-  return !plainWord(component.name) || packageContext(text, component.ecosystem);
+  const name = component.name.trim();
+  if (name.length < 3) return false;
+  if (bounded(`${escape(name)}${releaseSuffix(component.ecosystem)}`).test(text)) return true;
+  if (!mentions(text, name)) return false;
+  return !plainWord(name) || packageContext(text, component.ecosystem);
 }
 
 export interface InventoryMatcher {
@@ -57,57 +70,87 @@ export interface InventoryMatcher {
   packages: Set<string>;
   /** Product names, product keywords and system keywords: terms the operator chose on purpose. */
   declared(text: string): boolean;
-  /** Any inventory package named in prose, under the plain-word rule above. */
+  /** Any inventory package named in prose, under the everyday-word rule above. */
   packageNamed(text: string): boolean;
 }
 
-const matchers = new WeakMap<Inventory, InventoryMatcher>();
-function anyOf(terms: Iterable<string>): (text: string) => boolean {
+const matchers = new WeakMap<Inventory, { shape: string; matcher: InventoryMatcher }>();
+/**
+ * A cheap description of what the matcher was built from. It changes when a system, component,
+ * product or keyword is added, removed or replaced, so a caller that edits the same inventory object
+ * between scans does not keep matching against the old names.
+ */
+function shape(inventory: Inventory): string {
+  return inventory.systems
+    .map((system) =>
+      [
+        system.id,
+        system.components.length,
+        system.components.at(-1)?.name ?? '',
+        (system.products ?? []).map((product) => `${product.name}:${product.keywords.join(',')}`).join(';'),
+        (system.keywords ?? []).join(','),
+      ].join('|'),
+    )
+    .join('\n');
+}
+function anyOf(terms: Iterable<string>, suffix = ''): (text: string) => boolean {
   const unique = [...new Set([...terms].map((term) => term.trim()).filter((term) => term.length >= 3))];
   // One alternation per chunk keeps each expression small while testing every name in one pass.
   const patterns: RegExp[] = [];
   for (let offset = 0; offset < unique.length; offset += 400)
     patterns.push(
       bounded(
-        unique
+        `(?:${unique
           .slice(offset, offset + 400)
           .map(escape)
-          .join('|'),
+          .join('|')})${suffix}`,
       ),
     );
   return (text) => patterns.some((pattern) => pattern.test(text));
 }
 
-/** Built once per loaded inventory; a scan compares thousands of records against the same names. */
+/**
+ * Built once per loaded inventory; a scan compares thousands of records against the same names.
+ * Adding or removing entries on the same object rebuilds it. Renaming a component in place (other
+ * than the last one of a system) is not noticed: pass a new inventory object after such an edit.
+ */
 export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
-  let matcher = matchers.get(inventory);
-  if (matcher) return matcher;
+  const current = shape(inventory);
+  const cached = matchers.get(inventory);
+  if (cached && cached.shape === current) return cached.matcher;
   const packages = new Set<string>();
   const declared: string[] = [];
   const distinctive: string[] = [];
-  const plain = new Map<Ecosystem, string[]>();
+  const byEcosystem = new Map<Ecosystem, { plain: string[]; all: string[] }>();
   for (const system of inventory.systems) {
     for (const component of system.components) {
       const key = packageKey(component);
       if (key) packages.add(key);
-      if (plainWord(component.name)) {
-        if (!plain.has(component.ecosystem)) plain.set(component.ecosystem, []);
-        plain.get(component.ecosystem)!.push(component.name);
-      } else distinctive.push(component.name);
+      if (!byEcosystem.has(component.ecosystem)) byEcosystem.set(component.ecosystem, { plain: [], all: [] });
+      const names = byEcosystem.get(component.ecosystem)!;
+      names.all.push(component.name);
+      if (plainWord(component.name)) names.plain.push(component.name);
+      else distinctive.push(component.name);
     }
     for (const product of system.products ?? []) declared.push(product.name, ...product.keywords);
     declared.push(...(system.keywords ?? []));
   }
   const declaredTest = anyOf(declared);
   const distinctiveTest = anyOf(distinctive);
-  const plainTests = [...plain].map(([ecosystem, names]) => ({ ecosystem, test: anyOf(names) }));
-  matcher = {
+  const ecosystemTests = [...byEcosystem].map(([ecosystem, names]) => ({
+    ecosystem,
+    plain: anyOf(names.plain),
+    release: anyOf(names.all, releaseSuffix(ecosystem)),
+  }));
+  const matcher: InventoryMatcher = {
     packages,
     declared: declaredTest,
     packageNamed: (text) =>
       distinctiveTest(text) ||
-      plainTests.some(({ ecosystem, test }) => packageContext(text, ecosystem) && test(text)),
+      ecosystemTests.some(
+        ({ ecosystem, plain, release }) => release(text) || (packageContext(text, ecosystem) && plain(text)),
+      ),
   };
-  matchers.set(inventory, matcher);
+  matchers.set(inventory, { shape: current, matcher });
   return matcher;
 }

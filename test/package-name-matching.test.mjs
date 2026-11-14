@@ -1,0 +1,119 @@
+// Which news stories count as naming an inventory package.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { assess } from '../dist/assessment.js';
+import { evidenceRelevant } from '../dist/cve-now.js';
+import { inventoryMatcher, packageMentioned } from '../dist/matching.js';
+
+const NOW = Date.parse('2026-10-24T12:00:00Z');
+const at = new Date(NOW).toISOString();
+const config = { news_lookback_minutes: 40, poll_interval_minutes: 30, inventory_stale_days: 30, policy: {} };
+const component = (ecosystem, name) => ({ id: `c:${name}`, ecosystem, name, version: '1.0.0' });
+const inventory = (components) => ({
+  systems: [{ id: 'prod', name: 'prod', updated_at: at, products: [], keywords: [], components }],
+});
+const story = (title, description = title) => ({
+  id: `hacker_news:entry:${title.length}-${title.charCodeAt(0)}`,
+  source: 'hacker_news',
+  kind: 'news',
+  title,
+  url: 'https://example.com/a',
+  description,
+  aliases: [title.match(/CVE-\d+-\d+/)?.[0] ?? 'CVE-2026-1'],
+  severity: 'unknown',
+  modified_at: at,
+  fetched_at: at,
+  packages: [],
+  content_status: 'full',
+});
+const found = (inv, item) => assess(inv, [item], config, NOW).map((finding) => finding.component_id);
+
+test('a headline about a well-known package matches it without the word "package"', () => {
+  const inv = inventory([
+    component('npm', 'axios'),
+    component('npm', 'express'),
+    component('npm', 'lodash'),
+    component('npm', 'next'),
+    component('npm', 'vite'),
+    component('npm', 'webpack'),
+    component('PyPI', 'django'),
+    component('PyPI', 'pillow'),
+    component('PyPI', 'langchain'),
+    component('RubyGems', 'rails'),
+  ]);
+  for (const [name, title] of [
+    ['axios', 'Axios 1.8.2 fixes SSRF and credential leak tracked as CVE-2026-27152'],
+    ['next', 'Critical Next.js middleware bypass CVE-2026-29927 under active exploitation'],
+    ['django', 'Django security releases issued: 5.1.7, 5.0.13 and 4.2.20 fix CVE-2026-26699'],
+    ['vite', 'Vite dev server arbitrary file read (CVE-2026-30208) exploited in the wild'],
+    ['langchain', 'Critical RCE in LangChain (CVE-2026-68664) lets attackers steal secrets from AI agents'],
+    ['rails', 'Rails releases patches for Active Storage flaw CVE-2026-24293'],
+    ['express', 'Express fixes open redirect CVE-2026-29041 in res.location'],
+    ['pillow', 'Researchers disclose Pillow heap overflow CVE-2026-50447'],
+    ['webpack', 'Webpack flaw CVE-2026-43788 enables DOM clobbering XSS'],
+    ['lodash', 'Lodash prototype pollution CVE-2026-2950 affects millions of projects'],
+    ['lodash', 'a flaw in lodash lets attackers pollute prototypes (CVE-2026-2951)'],
+  ]) {
+    const item = story(title);
+    assert.deepEqual(found(inv, item), [`c:${name}`], title);
+    assert.equal(evidenceRelevant(item, inv), true, title);
+  }
+});
+
+test('a package whose name is an everyday word needs a story about packages or a named release', () => {
+  const inv = inventory(
+    ['send', 'buffer', 'request', 'events', 'process', 'open', 'next', 'router', 'cookie', 'moment'].map(
+      (name) => component('npm', name),
+    ),
+  );
+  for (const title of [
+    // Title case and a sentence start capitalise ordinary words too.
+    'Critical Buffer Overflow in Acme Router Firmware Under Attack (CVE-2026-1000)',
+    'Request smuggling flaw CVE-2026-1001 lets attackers send forged headers',
+    'Open redirect in ExampleCMS: patch expected next week (CVE-2026-1002)',
+    'Session Cookie Theft Campaign Targets Events Industry at the Moment (CVE-2026-1003)',
+    'Attackers send 1,5 million requests per process, CVE-2026-1004',
+  ]) {
+    const item = story(title);
+    assert.deepEqual(found(inv, item), [], title);
+    assert.equal(evidenceRelevant(item, inv), false, title);
+  }
+  for (const [name, title] of [
+    ['send', 'Malicious release of the send npm package steals tokens (CVE-2026-1005)'],
+    ['next', 'Next.js 15.2.3 fixes middleware bypass CVE-2026-1006'],
+    ['moment', 'Moment.js path traversal CVE-2026-1007'],
+    ['send', 'Upgrade to send@0.19.0 to fix template injection CVE-2026-1008'],
+    ['cookie', 'Cookie 0.7.0 fixes out-of-bounds characters, CVE-2026-1009'],
+  ]) {
+    const item = story(title);
+    assert.deepEqual(found(inv, item), [`c:${name}`], title);
+    assert.equal(evidenceRelevant(item, inv), true, title);
+  }
+  // The suffix that names an npm project does not carry over to another ecosystem.
+  assert.equal(packageMentioned('Next.js middleware bypass', { ecosystem: 'PyPI', name: 'next' }), false);
+  assert.equal(
+    packageMentioned('Requests 2.32.0 fixes a leak', { ecosystem: 'PyPI', name: 'requests' }),
+    true,
+  );
+  assert.equal(packageMentioned('sends many requests', { ecosystem: 'PyPI', name: 'requests' }), false);
+});
+
+test('the matcher follows entries added to or removed from the same inventory object', () => {
+  const inv = inventory([component('npm', 'left-pad')]);
+  const record = {
+    ...story('unrelated CVE-2026-2000'),
+    id: 'cve_now:CVE-2026-2000',
+    source: 'cve_now',
+    kind: 'advisory',
+    packages: [{ ecosystem: 'npm', name: 'is-odd' }],
+  };
+  assert.equal(evidenceRelevant(record, inv), false);
+  const before = inventoryMatcher(inv);
+  assert.equal(inventoryMatcher(inv), before, 'an unchanged inventory reuses its matcher');
+  inv.systems[0].components.push(component('npm', 'is-odd'));
+  assert.equal(evidenceRelevant(record, inv), true);
+  inv.systems[0].keywords.push('Acme router');
+  assert.equal(evidenceRelevant(story('Acme router flaw CVE-2026-2001'), inv), true);
+  inv.systems[0].components.pop();
+  assert.equal(evidenceRelevant(record, inv), false);
+});

@@ -237,6 +237,12 @@ export function assess(
   evidence: Evidence[],
   config: Config,
   now = Date.now(),
+  /**
+   * The time against which the age of advisory evidence is judged; `now` unless given. A scan that
+   * reconciles stored evidence before refreshing it passes the time of the last collection, so
+   * evidence does not count as stale merely because the refresh has not happened yet.
+   */
+  evidenceAsOf = now,
 ): Assessment[] {
   const output: Assessment[] = [];
   const index = new Map<System, Map<string, Component[]>>();
@@ -263,10 +269,13 @@ export function assess(
       .filter((item) => item.kind === 'news')
       .map((item) => `${item.title}\n${item.description}`)
       .join('\n');
-    // An advisory record without package claims identifies the event but says nothing about which
-    // packages it concerns, so it must not retire a candidate the linked news already raised.
+    // An advisory record without a usable package claim identifies the event but says nothing about
+    // which inventory packages it concerns, so it must not retire a candidate the linked news already
+    // raised. A claim for an ecosystem or a name this application cannot match is no claim at all.
     const unclaimedNews =
-      !isNews && newsText.length > 0 && advisories.every((item) => item.packages.length === 0);
+      !isNews &&
+      newsText.length > 0 &&
+      advisories.every((item) => item.packages.every((claim) => packageKey(claim) === undefined));
     // Index the group's claims once; a scan compares every group with every component.
     const claimed = new Map<string, { item: Evidence; claims: PackageClaim[] }[]>();
     for (const item of advisories) {
@@ -362,7 +371,7 @@ export function assess(
           return (
             !Number.isFinite(fetched) ||
             fetched > now + 300_000 ||
-            now - fetched > Math.max(120_000, config.poll_interval_minutes * 120_000)
+            evidenceAsOf - fetched > Math.max(120_000, config.poll_interval_minutes * 120_000)
           );
         });
         if (staleEvidence) {

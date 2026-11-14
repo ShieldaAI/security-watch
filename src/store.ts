@@ -111,6 +111,41 @@ function fingerprint(a: Assessment, decision: Decision): string {
     action: decision.action,
   });
 }
+/**
+ * The fingerprints earlier releases stored for the same finding. A finding saved by an earlier
+ * release and unchanged in everything that release compared is not a new revision: an upgrade must
+ * not re-send alerts or drop acknowledgements. Keep one entry per released fingerprint format.
+ */
+function earlierFingerprints(a: Assessment, decision: Decision): string[] {
+  // 0.1.0-alpha.0 (schema 4).
+  const alpha = {
+    event: a.event_id,
+    system: a.system_id,
+    component: a.component_id,
+    category: a.category,
+    applicability: a.applicability,
+    severity: a.source_severity,
+    priority: a.priority,
+    exploited: a.exploited,
+    withdrawn: a.withdrawn ?? false,
+    active: a.active !== false,
+    fix: a.fix ?? null,
+    action: decision.action,
+  };
+  // Development builds between the alpha and 1.0 (schema 5 and 6) added the news fields.
+  const { event, system, component, category, applicability, ...rest } = alpha;
+  const withNews = {
+    event,
+    system,
+    component,
+    category,
+    applicability,
+    news_classification: a.news_analysis?.classification ?? null,
+    news_impact: a.news_analysis?.impact ?? null,
+    ...rest,
+  };
+  return [hash(alpha), hash(withNews)];
+}
 
 /** Durable state for one local worker. Stores evidence and results, never provider credentials. */
 export class Store {
@@ -402,7 +437,9 @@ export class Store {
               content_hash: String(row.content_hash),
             }))
         : [];
-      const { updated_at: _updated, ...reviewedAssessment } = assessment;
+      // Where the finding lives (inventory names and notes) is shown to the reader; it is not part
+      // of the conclusion a reviewer approves, so editing a note does not ask for a new review.
+      const { updated_at: _updated, location: _location, ...reviewedAssessment } = assessment;
       // Ordinary alert deduplication stays semantic. A human review instead binds the exact
       // supplied conclusion, source content and host inventory/model context, excluding scan time.
       const signature = decision.review
@@ -414,7 +451,10 @@ export class Store {
             basis: reviewBasis ?? null,
           })
         : fingerprint(assessment, decision);
-      const changed = !old || signature !== old.fingerprint;
+      const changed =
+        !old ||
+        (signature !== old.fingerprint &&
+          !earlierFingerprints(assessment, decision).includes(String(old.fingerprint)));
       const revision = old ? Number(old.revision) + (changed ? 1 : 0) : 1;
       this.#db
         .prepare(

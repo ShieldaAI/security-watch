@@ -149,8 +149,12 @@ function withoutUnsupportedExclusion(
   coverage: CoverageReceipt[],
 ): Assessment {
   if (finding.applicability !== 'not_affected') return finding;
+  // Only the advisory records that supplied the excluding ranges matter. Linked news or an
+  // exploitation listing adds context; a gap in reading those says nothing about the ranges.
   const sources = new Set(
-    evidence.filter((item) => finding.evidence_ids.includes(item.id)).map((item) => item.source),
+    evidence
+      .filter((item) => item.kind === 'advisory' && finding.evidence_ids.includes(item.id))
+      .map((item) => item.source),
   );
   const incomplete = coverage.some(
     (receipt) =>
@@ -166,6 +170,22 @@ function withoutUnsupportedExclusion(
       'Source coverage is incomplete; an exclusion cannot establish current safety.',
     ],
   };
+}
+
+/** When stored evidence was last collected: the start of the last scan, or its newest fetch time. */
+function lastCollection(store: Store, cached: Evidence[]): number {
+  try {
+    const started = Date.parse(
+      (JSON.parse(store.getMeta('last_scan') ?? '{}') as { started_at?: string }).started_at ?? '',
+    );
+    if (Number.isFinite(started)) return started;
+  } catch {
+    /* An unreadable record falls back to the evidence itself. */
+  }
+  return cached.reduce((latest, item) => {
+    const fetched = Date.parse(item.fetched_at);
+    return Number.isFinite(fetched) && fetched > latest ? fetched : latest;
+  }, 0);
 }
 
 export async function runScan(options: {
@@ -234,19 +254,21 @@ export async function runScan(options: {
       now,
     );
   };
-  const systemHashes = new Map(
-    inventory.systems.map((system) => {
-      const { updated_at: _updated, ...context } = system;
-      return [system.id, hash(context)];
-    }),
-  );
+  // Notes and the owner say where to look. They are shown in notifications and never reach a model,
+  // so they are left out of everything that decides analysis reuse, reviews, revisions or alerts.
+  const context = (system: Inventory['systems'][number]) => {
+    const { updated_at: _updated, note: _note, owner: _owner, ...rest } = system;
+    return {
+      ...rest,
+      components: system.components.map(({ note: _componentNote, ...component }) => component),
+      products: system.products.map(({ note: _productNote, ...product }) => product),
+    };
+  };
+  const systemHashes = new Map(inventory.systems.map((system) => [system.id, hash(context(system))]));
   const reviewSystemHashes = new Map(
-    inventory.systems.map((system) => {
-      const { updated_at: _updated, ...context } = system;
-      return [system.id, canonicalHash(context)];
-    }),
+    inventory.systems.map((system) => [system.id, canonicalHash(context(system))]),
   );
-  const basis = (finding: Assessment, evidenceById: Map<string, Evidence>): string => {
+  const basis = (finding: Assessment, evidenceById: Map<string, Evidence>, evidenceAsOf = now): string => {
     const { updated_at: _updated, ...assessment } = finding;
     return hash({
       assessment,
@@ -268,7 +290,7 @@ export async function runScan(options: {
             generalNews(previousById.get(finding.id)) ||
             (Number.isFinite(fetched) &&
               fetched <= now + 300_000 &&
-              now - fetched <= Math.max(120_000, config.poll_interval_minutes * 120_000)),
+              evidenceAsOf - fetched <= Math.max(120_000, config.poll_interval_minutes * 120_000)),
         };
       }),
     });
@@ -299,12 +321,16 @@ export async function runScan(options: {
     // The last scan's receipts still describe the stored evidence: without them a finding held at
     // unknown by incomplete coverage would be recorded as excluded here and reopened after collection.
     const lastCoverage = JSON.parse(store.getMeta('source:coverage') ?? '[]') as CoverageReceipt[];
-    const current = assess(inventory, cached, config, now).map((finding) =>
+    // This pass applies inventory changes to evidence that is about to be refreshed. Judge the age
+    // of that evidence as of the last collection: time that passed while the monitor was stopped
+    // must not turn an exclusion into an urgent "unknown" that the refresh then takes back.
+    const collectedAt = Math.min(now, lastCollection(store, cached));
+    const current = assess(inventory, cached, config, now, collectedAt).map((finding) =>
       withoutUnsupportedExclusion(finding, cached, lastCoverage),
     );
     const ids = new Set(current.map((a) => a.id));
     for (const finding of current)
-      if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById)));
+      if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById, collectedAt)));
     for (const previous of previousById.values())
       if (previous.category !== 'health' && previous.active !== false && !ids.has(previous.id))
         retire(previous);
