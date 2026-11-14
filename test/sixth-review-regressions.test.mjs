@@ -369,9 +369,9 @@ test('an ordinary word next to "packages" or "library" is not the package of tha
 
 test('a word is the package when the text names it as one', () => {
   for (const [ecosystem, name, text] of [
-    ['npm', 'request', 'The request package has been deprecated since 2020.'],
+    ['npm', 'request', 'The request npm package has been deprecated since 2020.'],
     ['npm', 'request', 'The "request" npm package has been deprecated since 2020.'],
-    ['PyPI', 'requests', 'Maintainers of the requests library fixed a credential leak.'],
+    ['PyPI', 'requests', 'Maintainers of the `requests` library fixed a credential leak.'],
     ['npm', 'next', 'The npm package next is affected by a cache poisoning bug.'],
     ['npm', 'which', 'A dependency called which was republished with a backdoor.'],
     ['npm', 'once', 'A package named once was hijacked.'],

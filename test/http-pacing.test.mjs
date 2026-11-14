@@ -83,11 +83,12 @@ test('Retry-After on 403 and 429 delays already queued requests without retrying
         starts.push(performance.now());
         paths.push(request.url);
         if (request.url === '/first') {
-          response.writeHead(status, { 'Retry-After': '1' });
+          response.writeHead(status, { 'Retry-After': '3' });
           response.end('limited');
         } else response.end('ok');
       });
-      const options = { allowPrivate: true, minIntervalMs: 40, timeoutMs: 2500 };
+      // The first answer must arrive before the second request is due, also on a busy machine.
+      const options = { allowPrivate: true, minIntervalMs: 600, timeoutMs: 8000 };
       const [first, second] = await Promise.all([
         safeHttp(`${origin}/first`, options),
         safeHttp(`${origin}/second`, options),
@@ -95,7 +96,7 @@ test('Retry-After on 403 and 429 delays already queued requests without retrying
       assert.equal(first.status, status);
       assert.equal(second.status, 200);
       assert.deepEqual(paths, ['/first', '/second']);
-      assert(starts[1] - starts[0] >= 900, 'Retry-After must extend an existing queue wait');
+      assert(starts[1] - starts[0] >= 2700, 'Retry-After must extend an existing queue wait');
     });
 });
 

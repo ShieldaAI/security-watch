@@ -62,6 +62,24 @@ export function releaseEnvironmentProblem(env) {
   return undefined;
 }
 
+/**
+ * Why npm's configured registries must not receive this package, or nothing. `registry` and
+ * `scoped` are what `npm config get registry` and `npm config get @shieldaai:registry` print. A
+ * scoped registry (a line `@shieldaai:registry=…` in an `.npmrc`) sets no environment variable,
+ * so it is read from npm itself.
+ */
+export function registryProblem({ registry, scoped }) {
+  const official = (value) =>
+    value === undefined ||
+    ['', 'undefined', 'null'].includes(value.trim()) ||
+    value.trim().replace(/\/$/, '') === 'https://registry.npmjs.org';
+  if (!official(scoped))
+    return `npm is set to publish @shieldaai packages to ${scoped.trim()}; releases go to https://registry.npmjs.org/. Remove that setting.`;
+  if (!official(registry))
+    return `npm is set to publish to ${registry.trim()}; releases go to https://registry.npmjs.org/. Remove that setting.`;
+  return undefined;
+}
+
 /** The environment for the publish: the tag is stated, and no tag setting is inherited. */
 export function releaseEnvironment(env, tag) {
   const next = { ...env, SECURITY_WATCH_RELEASE_TAG: tag };

@@ -285,20 +285,24 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
  * - a longer version: "2.4.1" in "2.4.1-rc.1", "2.4.1+build.5", "2.4.1.RELEASE", "1.2" in "1.2.x";
  * - an amount or a unit: "$5", "5€", "45%", "45 %", "#45", "-5", "20°";
  * - a port with its protocol: "443/tcp".
- * Hyphens, dashes and minus signs of every kind count as hyphens ("CVE‑2026‑40001", "2.0–2.4").
+ * Hyphens, en dashes and minus signs count as hyphens ("CVE‑2026‑40001", "2.0–2.4"); an em dash is
+ * punctuation.
  * A "v" before the version belongs to it ("v2.4.1"). Either end of a range written with a hyphen is
  * a citation ("2.0-2.4", "versions 12-16"), and so is a version in a list ("2.4.1, 2.4.2",
  * "2.4.1/2.4.2") or after a name joined by a hyphen ("exampledb2-2.4.52", "node-18").
  */
 function citesVersion(original: string, version: string): boolean {
-  const wanted = version.trim();
+  // The quote and the version the model copied from it are read the same way: hyphens, en dashes
+  // and minus signs are hyphens ("CVE‑2026‑40001", "2.0–2.4"), every kind and run of space is one
+  // space ("45 %"), and characters that show as nothing are dropped ("2.4.1<zero-width>.1").
+  const normal = (text: string) =>
+    text
+      .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
+      .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
+      .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
+  const wanted = normal(version).trim();
   if (!wanted) return false;
-  // Every kind of hyphen, dash and minus is a hyphen, and every kind of space a space, so that
-  // "CVE‑2026‑40001" and "45 %" are read as they are written. Each is one UTF-16 unit, so the
-  // positions stay the same.
-  const quote = original
-    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
-    .replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, ' ');
+  const quote = normal(original);
   const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
   // A short whole number, without a leading zero ("0100" is half of a telephone number).
   const integer = (token: string) => /^(?:0|[1-9]\d{0,3})$/u.test(token);

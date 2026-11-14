@@ -17,6 +17,21 @@ export function mentions(text: string, needle: string): boolean {
  * The registry of each ecosystem and its tools, as prose names them. A language name is not in
  * this list: "the Python backdoor sends requests" is not about the `requests` package.
  */
+/** The install command of each ecosystem, as written in advisories and articles. */
+const INSTALL: Record<Ecosystem, string> = {
+  npm: '(?:npm (?:install|i|add)|yarn add|pnpm (?:add|install))',
+  PyPI: '(?:pip3? install|pipx install|uv (?:add|pip install)|poetry add)',
+  Packagist: 'composer require',
+  Go: 'go (?:get|install)',
+  Maven: '(?!)',
+  'crates.io': 'cargo (?:add|install)',
+  RubyGems: '(?:gem install|bundle add)',
+  NuGet: '(?:dotnet add package|nuget install|Install-Package)',
+  Hex: 'mix (?:deps\\.get|archive\\.install)',
+  Pub: '(?:dart|flutter) pub add',
+  Hackage: 'cabal install',
+  SwiftURL: '(?!)',
+};
 const LANGUAGE_CONTEXT: Record<Ecosystem, string> = {
   npm: 'node\\.js|nodejs|javascript|typescript',
   PyPI: 'python',
@@ -57,11 +72,17 @@ const REGISTRY_CONTEXT: Record<Ecosystem, string> = {
  * - "the npm packages chalk and debug": a registry, the kind in the plural, and a short list;
  * - "the Python framework Tornado": the language, what the software is, the name with a capital.
  */
-function namedAsPackage(names: Iterable<string>, ecosystem: Ecosystem): (text: string) => boolean {
+function namedAsPackage(
+  names: Iterable<string>,
+  ecosystem: Ecosystem,
+  common: boolean,
+): (text: string) => boolean {
   const unique = [...new Set([...names].map((name) => name.trim()).filter((name) => name.length >= 3))];
   const registry = `(?:${REGISTRY_CONTEXT[ecosystem]})`;
-  const kind = '(?:package|library|module|dependency|gem|crate|plugin)';
-  const kinds = '(?:packages|libraries|modules|dependencies|gems|crates|plugins)';
+  // "module" is left out: kernel, PAM and web-server modules are not packages.
+  const kind = '(?:package|library|dependency|gem|crate|plugin)';
+  const kinds = '(?:packages|libraries|dependencies|gems|crates|plugins)';
+  const install = INSTALL[ecosystem];
   // One entry of a list of package names. Words that join a sentence are never one: "npm packages
   // that send", "PyPI packages which steal".
   const item =
@@ -77,10 +98,16 @@ function namedAsPackage(names: Iterable<string>, ecosystem: Ecosystem): (text: s
     patterns.push(
       new RegExp(
         [
-          `${before}${quote}${name}${quote} (?:${registry} )?${kind}${after}`,
+          // "the request package", "the requests library". For the commonest words ("which package
+          // was affected", "the standard library", "the next package update") the name has to be
+          // quoted or followed by the registry: "the 'request' package", "the request npm package".
+          common
+            ? `${before}(?:["'\`‘’“”]${name}["'\`‘’“”] (?:${registry} )?|${name} ${registry} )${kind}${after}`
+            : `${before}${quote}${name}${quote} (?:${registry} )?${kind}${after}`,
           `${before}${registry} ${kind} ${quote}${name}${after}`,
           `${before}${kind} (?:called|named) ${quote}${name}${after}`,
-          `${before}(?:npm|yarn|pnpm|pip|pip3|gem|cargo|composer|go|dotnet|nuget) (?:install|add|i|get|require) (?:-\\S+ )*${quote}${name}(?![\\p{L}\\p{N}_/\\-])`,
+          // The ecosystem's own install command: "pip install express" is not about npm.
+          `${before}${install} (?:-\\S+ )*${quote}${name}(?![\\p{L}\\p{N}_/\\-])`,
           `${before}${registry}:${name}${after}`,
           // A real list of names next to a registry and the kind in the plural, with a comma or "and"
           // between the entries: "the npm packages chalk, colors and debug", "the npm libraries
@@ -171,7 +198,7 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
       .slice(offset, offset + 400)
       .map(escape)
       .join('|')})`;
-    const word = '(?:packages?|librar(?:y|ies)|modules?)';
+    const word = '(?:packages?|librar(?:y|ies))';
     patterns.push(
       new RegExp(
         `${boundary.before}${alternatives} (?:[\\p{L}\\p{N}]+ )?${word}${boundary.after}|${boundary.before}${word} ${alternatives}${boundary.after}`,
@@ -262,7 +289,7 @@ function nameTests(ecosystem: Ecosystem, name: string): (text: string) => boolea
     const mention = bounded(escape(name));
     const kind = nameKind(name);
     const named = kind === 'dictionary' ? writtenAsName([name]) : () => false;
-    const near = kind === 'distinctive' ? undefined : namedAsPackage([name], ecosystem);
+    const near = kind === 'distinctive' ? undefined : namedAsPackage([name], ecosystem, kind === 'common');
     test = (text) => {
       if (release(text)) return true;
       if (name.length < 3) return false;
@@ -412,8 +439,8 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
   const ecosystemTests = [...byEcosystem].map(([ecosystem, names]) => ({
     ecosystem,
     // The same rules as `packageMentioned`, for every name of the ecosystem at once.
-    common: namedAsPackage(names.common, ecosystem),
-    dictionary: namedAsPackage(names.dictionary, ecosystem),
+    common: namedAsPackage(names.common, ecosystem, true),
+    dictionary: namedAsPackage(names.dictionary, ecosystem, false),
     release: releaseTest(names.all, ecosystem),
   }));
   const matcher: InventoryMatcher = {

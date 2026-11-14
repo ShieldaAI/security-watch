@@ -446,13 +446,13 @@ test('an English word matches only where the text calls it a package', () => {
   ])
     assert.equal(mentioned(ecosystem, name, text), false, `${name}: ${text}`);
   for (const [ecosystem, name, text] of [
-    ['npm', 'send', 'A flaw in the send package lets attackers read files.'],
+    ['npm', 'send', 'A flaw in the send npm package lets attackers read files.'],
     ['npm', 'next', 'The npm package next is affected by a cache poisoning bug.'],
     ['npm', 'prompts', 'A compromised release of the prompts library was published to npm.'],
     ['npm', 'enabled', 'The npm package enabled, used by debug, was hijacked.'],
     ['npm', 'which', 'A dependency called which was republished with a backdoor.'],
     ['PyPI', 'requests', 'Run pip install requests==2.32.0 to get the fix.'],
-    ['PyPI', 'requests', 'Maintainers of the requests library fixed a credential leak.'],
+    ['PyPI', 'requests', 'Maintainers of the "requests" library fixed a credential leak.'],
     ['npm', 'entities', 'The entities package on npm was compromised.'],
   ])
     assert.equal(mentioned(ecosystem, name, text), true, `${name}: ${text}`);

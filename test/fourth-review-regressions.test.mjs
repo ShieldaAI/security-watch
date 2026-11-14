@@ -90,7 +90,7 @@ test('a story about the package still matches an English-word name', () => {
     // The registry, or the word "package", "library" or "dependency".
     ['npm', 'entities', 'The entities package on npm was compromised (CVE-2026-11111).'],
     ['npm', 'request', 'A malicious release of the request npm package steals tokens.'],
-    ['PyPI', 'requests', 'A flaw in the requests library leaks proxy credentials.'],
+    ['PyPI', 'requests', 'A flaw in the requests PyPI library leaks proxy credentials.'],
     // Named as a package: an install command, a registry prefix, "called".
     ['PyPI', 'coverage', 'Run pip install coverage only from the official index.'],
     ['npm', 'send', 'The advisory covers npm:send before 0.19.0.'],

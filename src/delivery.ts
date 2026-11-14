@@ -183,8 +183,10 @@ function safeText(input: string, length: number, mentions = true): string {
     // A run of blanks moves what follows as far as a line break would.
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim();
-  // An emoji cut in half would leave text some services refuse.
-  return cut(mentions ? cleaned.replace(/@/g, '@\u200b') : cleaned, length);
+  const text = mentions ? cleaned.replace(/@/g, '@\u200b') : cleaned;
+  // A value that does not fit ends with "…", so a reader never takes a cut value for a whole one
+  // ("8.0.3" for "8.0.39"). An emoji is never cut in half.
+  return text.length <= length ? text : `${cut(text, length - 1).trimEnd()}…`;
 }
 /**
  * One value for one line of a message. Advisory text, model output and inventory names are placed
@@ -200,8 +202,25 @@ function single(value: string, length: number): string {
  * left out, and nothing is inserted into it.
  */
 function link(value: string): string | undefined {
-  const cleaned = safeText(singleLine(value), 2000, false);
-  return cleaned.length <= 320 && !/\s/.test(cleaned) ? cleaned : undefined;
+  const written = value.trim();
+  const cleaned = safeText(singleLine(written), 2000, false);
+  // Shown only exactly as written: a link from which a character had to be removed (an invisible
+  // mark, a line break) is another address, and so is a shortened one.
+  return cleaned === written && cleaned.length <= 320 && !/\s/.test(cleaned) ? cleaned : undefined;
+}
+/** A list from a model, each entry whole: as many as fit, then how many more there are. */
+function listLine(label: string, items: string[], length: number): string {
+  const values = items.map((item) => single(item, 4000)).filter(Boolean);
+  if (!values.length) return `${label}: Not established`;
+  const shown: string[] = [];
+  let used = 0;
+  for (const value of values) {
+    if (value.length > length || (shown.length && used + value.length + 2 > length)) break;
+    shown.push(value);
+    used += value.length + 2;
+  }
+  const more = values.length - shown.length;
+  return `${label}: ${shown.join('; ')}${more ? `${shown.length ? '; ' : ''}and ${more} more` : ''}`;
 }
 /** The operator's own inventory names and notes, so the reader knows where to check. */
 function locationLines(a: Assessment, length: number): string[] {
@@ -228,14 +247,16 @@ const webUrl = (value: string): boolean => {
  * whole versions as fit are shown, and the line says how many more there are.
  */
 function fixLine(fix: string): string {
-  const versions = singleLine(fix, 4000)
-    .split(/;\s*/)
-    .map((version) => single(version, 120))
+  // Versions of one claim are joined with commas, versions of different claims with semicolons.
+  const versions = singleLine(fix, fix.length)
+    .split(/[;,]\s*/)
+    .map((version) => single(version, 4000))
     .filter(Boolean);
   const shown: string[] = [];
   let length = 0;
   for (const version of versions) {
-    if (shown.length && length + version.length + 2 > 300) break;
+    // A version is never shown cut: one that is too long on its own is counted with the rest.
+    if (version.length > 120 || (shown.length && length + version.length + 2 > 300)) break;
     shown.push(version);
     length += version.length + 2;
   }
@@ -262,13 +283,14 @@ export function notificationText(job: Notification): { subject: string; text: st
     ...(a.news_analysis
       ? [
           `AI news classification: ${single(a.news_analysis.classification, 60)}; reported system impact: ${single(a.news_analysis.impact, 60)}`,
-          `Affected products: ${single(a.news_analysis.affected_products.join('; ') || 'Not established', 180)}`,
-          `Reported versions: ${single(a.news_analysis.affected_versions.join('; ') || 'Not established', 180)}`,
-          `Prerequisites: ${single(a.news_analysis.prerequisites.join('; ') || 'Not established', 240)}`,
+          listLine('Affected products', a.news_analysis.affected_products, 180),
+          listLine('Reported versions', a.news_analysis.affected_versions, 180),
+          listLine('Prerequisites', a.news_analysis.prerequisites, 240),
           `Impact reasoning: ${single(a.news_analysis.rationale, 400)}`,
         ]
       : []),
-    ...a.reasons.slice(0, 4).map((r) => `• ${single(r, 180)}`),
+    // Every reason: when there are more than fit, the last ones are left out with the note below.
+    ...a.reasons.map((r) => `• ${single(r, 180)}`),
   ];
   // The fix, the rule that sent the message, the time and the sources close every message, whole.
   const closing = [

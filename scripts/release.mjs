@@ -11,6 +11,7 @@ import {
   releaseOptions,
   releaseProblem,
   releaseTag,
+  registryProblem,
 } from './release-tag.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -18,9 +19,18 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 const tag = releaseTag(manifest.version);
 const options = releaseOptions(process.argv.slice(2));
 const env = releaseEnvironment(process.env, tag);
-const problem = releaseEnvironmentProblem(process.env) ?? releaseProblem(manifest, env);
-if (problem) throw new Error(problem);
 if (!process.env.npm_execpath) throw new Error('Run through npm run release.');
+/** What npm itself is configured with, as the publish it starts would see it. */
+const configured = (key) =>
+  execFileSync(process.execPath, [process.env.npm_execpath, 'config', 'get', key], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim();
+const problem =
+  releaseEnvironmentProblem(process.env) ??
+  registryProblem({ registry: configured('registry'), scoped: configured('@shieldaai:registry') }) ??
+  releaseProblem(manifest, env);
+if (problem) throw new Error(problem);
 // `prepublishOnly` runs the release checks (clean checkout, tracked files only, `npm run check`).
 execFileSync(process.execPath, [process.env.npm_execpath, 'publish', '--tag', tag, ...options], {
   cwd: root,

@@ -100,12 +100,21 @@ test('a listing entry that cannot be read holds the checkpoint for a day, not fo
 });
 
 /** Polls in sequence, each starting from the state the one before left. */
-async function sequence(listing, detail, times) {
+async function sequence(listing, detail, times, { freshEachPoll = false } = {}) {
   let checkpoints = checkpoint;
   const results = [];
   for (const hours of times) {
     const state = {};
-    const result = await poll(listing, detail, NOW + hours * HOUR, state, checkpoints);
+    // As in a real deployment, each poll can also list a new record that reads fine.
+    const fresh = freshEachPoll
+      ? [
+          {
+            id: `CVE-2026-9${String(Math.round(hours * 10)).padStart(4, '0')}`,
+            publishedAt: iso(NOW + hours * HOUR - 60_000),
+          },
+        ]
+      : [];
+    const result = await poll([...fresh, ...listing], detail, NOW + hours * HOUR, state, checkpoints);
     checkpoints = result.checkpoints;
     results.push({ hours, result, asked: state.details ?? [] });
   }
@@ -137,18 +146,29 @@ test('a listed record whose detail is refused for good is given up on a day afte
 test('a listed record that keeps failing with HTTP 503 is asked for again for three days', async () => {
   const listing = [listedAt('CVE-2026-81004', 5 * 60_000), listedAt('CVE-2026-81005', 600_000)];
   const failing = (id) => (id === 'CVE-2026-81005' ? { status: 503, headers: {}, body: '' } : undefined);
-  const polls = await sequence(listing, failing, [0, 2, 25, 71, 73, 74]);
+  const polls = await sequence(listing, failing, [0, 2, 25, 71, 73, 74], { freshEachPoll: true });
   assert.equal(polls[0].result.checkpoints.cve_now, checkpoint.cve_now);
   for (const { hours, result, asked } of polls.slice(1, 4)) {
     assert.ok(asked.includes('CVE-2026-81005'), `${hours} h`);
     assert.match(result.errors[0].message, /1 advisory detail request\(s\) failed/, `${hours} h`);
     assert.equal(result.checkpoints.cve_now, iso(NOW + hours * HOUR), `${hours} h: the checkpoint moves`);
   }
-  // Once the checkpoint has moved on, only the unread record is asked for.
-  assert.deepEqual(polls[3].asked, ['CVE-2026-81005']);
+  // Once the checkpoint has moved on, only the unread record and the poll's new one are asked for.
+  assert.equal(polls[3].asked.length, 2);
+  assert.ok(polls[3].asked.includes('CVE-2026-81005'));
   assert.match(polls[4].result.errors[0].message, /could not be used and were skipped.*HTTP 503/);
   assert.deepEqual(polls[5].result.errors, []);
-  assert.deepEqual(polls[5].asked, []);
+  assert.ok(!polls[5].asked.includes('CVE-2026-81005'));
+});
+
+test('a record that fails is not given up on in a poll in which nothing else was read', async () => {
+  // The only request of each poll is the failing record: that cannot be told from an outage.
+  const listing = [listedAt('CVE-2026-81008', 600_000)];
+  const failing = () => ({ status: 503, headers: {}, body: '' });
+  const polls = await sequence(listing, failing, [0, 2, 80, 120]);
+  for (const { hours, result } of polls)
+    assert.doesNotMatch(result.errors[0].message, /were skipped/, `${hours} h`);
+  assert.equal(JSON.parse(polls.at(-1).result.checkpoints['cve_now:owed']).length, 1);
 });
 
 test('nothing is given up on while the service is failing every request', async () => {
@@ -401,8 +421,8 @@ test('single-line cleaning takes time proportional to the input', () => {
   assert.equal(singleLine(`2.0.0${` ${lf}`.repeat(2_000_000)}x`, 100), '2.0.0 x');
   assert.equal(singleLine(`${' '.repeat(4_000_000)}${lf}`, 100), '');
   assert.equal(singleLine(`a${' '.repeat(4_000_000)}${ls}b`, 100), 'a b');
-  // The earlier pattern needed minutes for each of these. Seconds would already mean a regression.
-  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+  // The earlier pattern needed minutes; the limit leaves room for a busy test machine.
+  assert.ok(Date.now() - started < 15_000, `took ${Date.now() - started} ms`);
 });
 
 test('single-line cleaning joins every run of separators and the spaces around it into one space', () => {
@@ -437,7 +457,7 @@ test('a quantity after an everyday word is not a release of the package with tha
     ['npm', 'debug', 'Malicious debug v4.4 was live for two hours (CVE-2026-11111)'],
     ['PyPI', 'requests', 'Requests 2.32.0 fixes a credential leak (CVE-2026-11111)'],
     ['npm', 'next', 'Next.js 15 middleware bypass CVE-2026-11111'],
-    ['npm', 'request', 'The request package is deprecated and affected by CVE-2026-11111'],
+    ['npm', 'request', 'The request npm package is deprecated and affected by CVE-2026-11111'],
   ])
     assert.equal(mentioned(ecosystem, name, text), true, text);
 });

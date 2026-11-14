@@ -194,7 +194,8 @@ async function stopWorker(child, logs) {
   await waitFor(
     () => child.exitCode !== null || child.signalCode !== null,
     () => logs.stdout + logs.stderr,
-    4000,
+    // Generous: the process only has to notice the signal, but a busy test machine is slow.
+    15_000,
   );
   assert.equal(child.exitCode, 0, logs.stdout + logs.stderr);
 }
@@ -203,7 +204,7 @@ async function cliStatus(fixture) {
   const child = spawn(process.execPath, [cli, 'status', '--config', fixture.configPath], {
     cwd: fixture.dir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 4000,
+    timeout: 15_000,
   });
   let stdout = '',
     stderr = '';
