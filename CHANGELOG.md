@@ -71,10 +71,12 @@ Behaviour that changes for an existing installation:
 - A few cve.now records whose requests kept failing (four in one batch, eight in a scan, or one answering "too many requests") ended every scan before the other records were read. Records whose requests failed are now asked for last on later scans, and stay last until a request for them succeeds.
 - A failed request for a stored cve.now record kept only for a product, a keyword or a citation withdrew every version exclusion drawn from cve.now and sent an alert. It no longer affects any exclusion.
 - A stored cve.now record that the service files under a new identifier, with the old one as an alias, is kept current under both.
+- A record given up on after three days of failed requests was reported as "could not be used"; it is now reported as "could not be read for three days and were given up on".
+- Technology a story names as what something is built with ("built with React", "written in TypeScript", "Electron apps") no longer counts as naming that package.
 - An SMTP address pointing at a service that is not SMTP (a mistyped port) recorded every alert as an uncertain receipt. Nothing was handed over, so it is retried.
 - A CycloneDX document listing the same package twice without a reference of its own was rejected. It is imported once.
 - `doctor` reports a heartbeat address the heartbeat would refuse, and exits with status 2.
-- More than 1,000 npm package versions switched cve.now off on every scan, and the exclusions drawn from it then became urgent `unknown` results. The lookups now take turns over several scans, and the listing and the records are read on every scan.
+- More than 1,000 npm package versions switched cve.now off on every scan, and the exclusions drawn from it then became urgent `unknown` results. The lookups now take turns over several scans, the one tried longest ago first, so every version is looked up in turn; the listing and the records are read on every scan.
 - A version range in prose ("7.0.0 through 7.0.16") counted as a release of an npm package named `through`, `from` or `until`, which could send an urgent alert. Those words take a version only as `through@2.3` or `through v2.3`.
 - A failed package lookup re-read its records without the matched version, so a finding that rested on the lookup flipped and alerted again. What an earlier lookup matched now stands until the lookup answers, and lookups that keep failing are sent after the others.
 - A cve.now package lookup that timed out or lost its connection ended the whole poll; only HTTP errors were tolerated. Every failed lookup is now reported and repeated on the next poll.

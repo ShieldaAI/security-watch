@@ -156,7 +156,10 @@ test('a listed record that keeps failing with HTTP 503 is asked for again for th
   // Once the checkpoint has moved on, only the unread record and the poll's new one are asked for.
   assert.equal(polls[3].asked.length, 2);
   assert.ok(polls[3].asked.includes('CVE-2026-81005'));
-  assert.match(polls[4].result.errors[0].message, /could not be used and were skipped.*HTTP 503/);
+  assert.match(
+    polls[4].result.errors[0].message,
+    /could not be read for three days and were given up on.*HTTP 503/,
+  );
   assert.deepEqual(polls[5].result.errors, []);
   assert.ok(!polls[5].asked.includes('CVE-2026-81005'));
 });

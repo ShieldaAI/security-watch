@@ -337,6 +337,19 @@ function titleCase(line: string): boolean {
 }
 
 /**
+ * Technology named as what something is built with, not as the subject: "pages built with React",
+ * "written in Python or TypeScript", "Electron apps", "a TypeScript loader". These are written in
+ * lower case before the written-as-name test, so a capital there shows nothing.
+ */
+const USED_WITH =
+  /\b(?:built|written|developed|made|coded|implemented|based|powered|programmed|created)(?: (?:with|in|on|using|by))? \p{L}[\p{L}.+#-]*(?:(?:,| or| and|, and|, or) \p{L}[\p{L}.+#-]*)*/gu;
+const USED_AS =
+  /\p{Lu}[\p{L}.+#-]* (?:apps?|applications?|loaders?|sites?|websites?|pages?|projects?|developers?|stealers?|malware|scripts?|payloads?|backdoors?|droppers?)(?![\p{L}\p{N}])/gu;
+function technologyInLowerCase(line: string): string {
+  return line.replace(USED_WITH, (span) => span.toLowerCase()).replace(USED_AS, (span) => span.toLowerCase());
+}
+
+/**
  * A test for English words written as names. Any of them counts when it has a capital straight
  * after a word that has none and is not followed by another capitalised word ("a flaw in Express
  * lets", "the Scheduler package"); "group Salt Typhoon" and "Windows Task Scheduler" are other
@@ -381,7 +394,11 @@ function writtenAsName(names: string[]): (text: string) => boolean {
   );
   if (!patterns.length) return () => false;
   return (text) =>
-    text.split('\n').some((line) => !titleCase(line) && patterns.some((pattern) => pattern.test(line)));
+    text
+      .split('\n')
+      .some(
+        (line) => !titleCase(line) && patterns.some((pattern) => pattern.test(technologyInLowerCase(line))),
+      );
 }
 
 export interface InventoryMatcher {

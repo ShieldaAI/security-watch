@@ -201,7 +201,7 @@ test('a dozen new records that always fail do not hold the checkpoint or hide th
   assert.match(polls[5].result.errors[0].message, /advisory detail request\(s\) failed/);
   assert.match(polls[5].result.errors[0].message, /12 new record\(s\) are still to be read/);
   const given = polls.filter(({ result }) =>
-    /could not be used and were skipped/.test(result.errors[0]?.message ?? ''),
+    /could not be read for three days and were given up on/.test(result.errors[0]?.message ?? ''),
   );
   assert.ok(given.length >= 1 && given[0].hour > 72, `given up on at ${given.map(({ hour }) => hour)} h`);
   const last = polls.at(-1);
