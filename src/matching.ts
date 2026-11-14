@@ -158,6 +158,19 @@ function nameKind(name: string): NameKind {
  * next 5.5 years" are quantities. Nor is an address: "IP address 203.0.113.7" has four parts.
  */
 const RELEASE_SUFFIX = '(?:@v?\\d+\\.\\d+| v\\d+\\.\\d+| \\d+\\.\\d+\\.\\d+(?!\\.\\d))';
+/** Only the forms no prose writes: "through@1.2", "through v1.2". */
+const STRICT_RELEASE_SUFFIX = '(?:@v?\\d+\\.\\d+| v\\d+\\.\\d+)';
+/**
+ * Words that stand before a version in prose about version ranges: "7.0.0 through 7.0.16", "from
+ * 16.1.0", "versions up to 4.1.2". Packages with these names exist; a version after the word is
+ * not a release of them unless it is written "name@1.2" or "name v1.2".
+ */
+const CONNECTORS = new Set(
+  `through thru from after before until till to since between and or below above under over prior
+including include includes inclusive exclusive version versions release releases build builds patch
+patched update updated upgrade upgraded fixed fix fixes affected affects up down at in on of is are
+was were be all any each every than then latest earliest older newer later earlier`.split(/\s+/),
+);
 const QUANTITY =
   '(?i:%|percent|thousand|million|billion|trillion|times|x|[kmgt]b|bytes|seconds?|minutes?|hours?|days?|weeks?|months?|years?|cvss|severity|score|rated|rating|out of|bn|usd|eur|dollars?)(?![\\p{L}\\p{N}])';
 const boundary = { before: '(?<![\\p{L}\\p{N}_@/\\-])', after: '(?![\\p{L}\\p{N}_@/\\-])' };
@@ -208,7 +221,10 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
   }
   // "Rails 7.2", "Salt 3007.1": a two-part version after an English word written with a capital,
   // unless a unit or a rating follows ("the Next 2.5 years", "Address 9.8 CVSS bug").
-  const named = unique.filter((name) => /^\p{L}+$/u.test(name) && nameKind(name) !== 'distinctive');
+  const named = unique.filter(
+    (name) =>
+      /^\p{L}+$/u.test(name) && nameKind(name) !== 'distinctive' && !CONNECTORS.has(name.toLowerCase()),
+  );
   for (let offset = 0; offset < named.length; offset += 400)
     patterns.push(
       new RegExp(
@@ -221,7 +237,16 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
     );
   for (let offset = 0; offset < unique.length; offset += 400) {
     const chunk = unique.slice(offset, offset + 400);
-    patterns.push(bounded(`(?:${chunk.map(escape).join('|')})${RELEASE_SUFFIX}`));
+    const loose = chunk.filter((name) => !CONNECTORS.has(name.toLowerCase()));
+    const strict = chunk.filter((name) => CONNECTORS.has(name.toLowerCase()));
+    if (loose.length) patterns.push(bounded(`(?:${loose.map(escape).join('|')})${RELEASE_SUFFIX}`));
+    if (strict.length) patterns.push(bounded(`(?:${strict.map(escape).join('|')})${STRICT_RELEASE_SUFFIX}`));
+    // How a library is often called after its ecosystem: "node-tar", "Python-Markdown".
+    const prefix = ecosystem === 'npm' ? 'node-' : ecosystem === 'PyPI' ? 'python-' : undefined;
+    if (prefix)
+      patterns.push(
+        new RegExp(`${boundary.before}${prefix}(?:${chunk.map(escape).join('|')})${boundary.after}`, 'iu'),
+      );
     if (ecosystem === 'npm') {
       // In lower case too, unless the word is one of the commonest: "validator.js" is the library,
       // "config.js" and "server.js" are files.

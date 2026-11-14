@@ -1211,6 +1211,7 @@ export async function collectSources(
     missing: checkpoints['cve_now:missing'],
     troubled: checkpoints['cve_now:troubled'],
     owed: checkpoints['cve_now:owed'],
+    lookupsOwed: checkpoints['cve_now:lookups_owed'],
     refusedSince: Number(checkpoints['cve_now:refused_since']) || undefined,
   };
   if (config.sources.cve_now)
@@ -1259,6 +1260,8 @@ export async function collectSources(
     // New records still to be read, so that the checkpoint can move on without them.
     if (job.source === 'cve_now' && cveNowState.nextOwed !== undefined)
       result.checkpoints['cve_now:owed'] = cveNowState.nextOwed;
+    if (job.source === 'cve_now' && cveNowState.nextLookupsOwed !== undefined)
+      result.checkpoints['cve_now:lookups_owed'] = cveNowState.nextLookupsOwed;
     if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
       result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
