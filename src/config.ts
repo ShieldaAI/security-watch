@@ -54,18 +54,23 @@ function sameModel(first: ModelSpec, second: ModelSpec): boolean {
       // are different spellings of one address.
       let host = url.hostname.toLowerCase().replace(/\.$/, '');
       // Every name for this machine is one address.
-      if (['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(host)) host = 'localhost';
+      if (
+        ['localhost', '[::1]', '0.0.0.0', '[::]'].includes(host) ||
+        host.endsWith('.localhost') ||
+        /^127\.\d+\.\d+\.\d+$/.test(host) ||
+        /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host)
+      )
+        host = 'localhost';
       return `${url.protocol}//${host}:${url.port}${path.replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()}`;
     } catch {
       return (spec.endpoint ?? '').trim().toLowerCase();
     }
   };
-  // "models/gemini-x" and "gemini-x", or "llama3" and "llama3:latest", are one model.
+  // "models/gemini-x" and "gemini-x", or "library/llama3", "llama3" and "llama3:latest", are one model.
   const name = (spec: ModelSpec) =>
     spec.model
-      .trim()
       .toLowerCase()
-      .replace(/^models\//, '')
+      .replace(/^(?:models|library)\//, '')
       .replace(/:latest$/, '');
   return name(first) === name(second) && address(first) === address(second);
 }

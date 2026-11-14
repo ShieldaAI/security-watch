@@ -289,7 +289,7 @@ test('explicit env files supply credentials as data without exposing values or e
   const marker = join(f.dir, 'must-not-exist');
   writeFileSync(
     envPath,
-    `WATCH_SETUP_KEY=${secret}\nWATCH_CLI_SLACK_TOKEN=synthetic-webhook\nIGNORED_SHELL=$(touch ${marker})\n`,
+    `WATCH_SETUP_KEY=${secret}\nWATCH_CLI_SLACK_TOKEN=https://hooks.slack.com/services/T000/B000/synthetic-webhook\nIGNORED_SHELL=$(touch ${marker})\n`,
     { mode: 0o600 },
   );
   const result = run(['doctor', '--credentials-file', envPath], f.dir, {
@@ -316,7 +316,7 @@ test('env file access rejects shared permissions and symlinks, and preserves exp
   writeFileSync(envPath, 'WATCH_SETUP_KEY=\nWATCH_CLI_SLACK_TOKEN=\n', { mode: 0o600 });
   const inherited = {
     WATCH_SETUP_KEY: 'synthetic-exported-key',
-    WATCH_CLI_SLACK_TOKEN: 'synthetic-exported-webhook',
+    WATCH_CLI_SLACK_TOKEN: 'https://hooks.slack.com/services/T000/B000/synthetic-exported-webhook',
   };
   assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 0);
   chmodSync(envPath, 0o644);

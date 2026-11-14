@@ -227,10 +227,9 @@ function importLockfile(path: string): { components: Component[]; warnings: stri
     if (!match) continue;
     // The location becomes the component's identifier, which is shown in notifications.
     if (LINE_BREAKING.test(location) || location.length > 480) {
-      if (warnings.length < 50)
-        warnings.push(
-          `Lockfile entry ${shortLabel(location)}: the path contains control characters or is too long; not imported.`,
-        );
+      warnings.push(
+        `Lockfile entry ${shortLabel(location)}: the path contains control characters or is too long; not imported.`,
+      );
       continue;
     }
     // One entry this application cannot read must not hide every other dependency in the file.
@@ -240,10 +239,9 @@ function importLockfile(path: string): { components: Component[]; warnings: stri
       name = normalizePackageName('npm', z.string().parse(value.name ?? match[1]));
       version = value.version === undefined ? undefined : shortText.parse(value.version);
     } catch {
-      if (warnings.length < 50)
-        warnings.push(
-          `Lockfile entry ${shortLabel(location)}: unsupported package name or version; not imported.`,
-        );
+      warnings.push(
+        `Lockfile entry ${shortLabel(location)}: unsupported package name or version; not imported.`,
+      );
       continue;
     }
     components.push({

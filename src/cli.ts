@@ -22,7 +22,7 @@ import { refreshCoverage } from './coverage.js';
 import { Store, readPilotReport } from './store.js';
 import { PilotReportError } from './pilot-report.js';
 import { runScan, readFixture, healthFinding } from './engine.js';
-import { deliverPending, smtpProblem } from './delivery.js';
+import { deliverPending, slackProblem, smtpProblem } from './delivery.js';
 import { safeHttp } from './http.js';
 import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
@@ -573,7 +573,14 @@ async function main(): Promise<void> {
     const smtp = config.notifications.email
       ? process.env[config.notifications.email.smtp_url_env]
       : undefined;
+    const slack = config.notifications.slack
+      ? process.env[config.notifications.slack.webhook_url_env]
+      : undefined;
     const problems = [
+      // Delivery refuses such an address on every attempt; say so before the first alert is due.
+      ...(slack && slackProblem(slack)
+        ? [`${config.notifications.slack!.webhook_url_env}: ${slackProblem(slack)}.`]
+        : []),
       ...(smtp && smtpProblem(smtp)
         ? [
             `${config.notifications.email!.smtp_url_env}: ${smtpProblem(smtp)}. Write a literal % in a password as %25.`,

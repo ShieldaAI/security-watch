@@ -278,40 +278,55 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
 }
 
 /**
- * Whether a quote states this version as written. A digit that is merely part of another number or
- * identifier is not a citation: "4" inside "4.2", "4,200", "3/4" or "CVE-2026-40001". A "v" before
- * the version is part of how versions are written ("v2.4.1"). Either end of a range written with a
- * hyphen is a citation ("2.0-2.4", "versions 12-16"), and so is the version after a name joined by
- * a hyphen ("exampledb2-2.4.52").
+ * Whether a quote states this version as written. The check is about how the text is written, not
+ * what it means: a number that stands alone ("30 days", "port 8080", a year) cannot be told from a
+ * version and is accepted. What is refused is a number that is visibly part of something else:
+ * - another number or identifier: "4" in "4.2", "4,200", "3/4", "10:30", "CVE-2026-40001";
+ * - a longer version: "2.4.1" in "2.4.1-rc.1", "2.4.1+build.5", "2.4.1_p1", "1.2" in "1.2.x";
+ * - an amount: "$5", "45%", "#45", "-5".
+ * A "v" before the version belongs to it ("v2.4.1"). Either end of a range written with a hyphen is
+ * a citation ("2.0-2.4", "versions 12-16"), and so is a version in a list ("2.4.1, 2.4.2",
+ * "2.4.1/2.4.2") or after a name joined by a hyphen ("exampledb2-2.4.52", "node-18").
  */
 function citesVersion(quote: string, version: string): boolean {
   const wanted = version.trim();
   if (!wanted) return false;
   const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
-  const integer = (token: string) => /^\d{1,4}$/u.test(token);
+  // A short whole number, without a leading zero ("0100" is half of a telephone number).
+  const integer = (token: string) => /^(?:0|[1-9]\d{0,3})$/u.test(token);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
     let before = quote.slice(Math.max(0, at - 64), at);
     const after = quote.slice(at + wanted.length, at + wanted.length + 64);
     // "v2.4.1": the letter belongs to the version, not to a word.
     if (/(?:^|[^\p{L}\p{N}])v$/iu.test(before) && /^\d/u.test(wanted)) before = before.slice(0, -1);
-    if (/[\p{L}\p{N}]$/u.test(before) || /\d[.,/]$/u.test(before)) continue;
-    if (/^[\p{L}\p{N}]/u.test(after) || /^[.,/]\d/u.test(after)) continue;
+    if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
+    if (/^[\p{L}\p{N}]/u.test(after) || /^\.[\dx*]/iu.test(after)) continue;
+    // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
+    if (/[$€£¥#_~+:]$/u.test(before) || /\p{L}\/$/u.test(before) || /(?:^|\s)-$/u.test(before)) continue;
+    if (/^(?:%|[_~+]|:\d|-\p{L})/u.test(after)) continue;
+    // In a list, both neighbours are versions of the same kind.
+    const listed = /([\p{L}\p{N}.]*\d)[,/]$/u.exec(before)?.[1];
+    if (listed !== undefined && !(dotted(wanted) && dotted(listed))) continue;
+    const listing = /^[,/](\d[\p{L}\p{N}.]*)/u.exec(after)?.[1];
+    if (listing !== undefined && !(dotted(wanted) && dotted(listing.replace(/\.$/u, '')))) continue;
     // Joined to something by a hyphen. Two dotted versions, or two short whole numbers on their
-    // own, are a range. A name before a dotted version is a name and its version. Anything else is
-    // one identifier ("CVE-2026-40001", "1.0.0-1", "2026-11-14").
+    // own, are a range. A name before a version is a name and its version. Anything else is one
+    // identifier ("CVE-2026-40001", "1.0.0-1", "2026-11-14").
     const left = /([\p{L}\p{N}.]*[\p{L}\p{N}])-$/u.exec(before);
     const right = /^-(\d[\p{L}\p{N}.]*)/u.exec(after);
     if (left) {
       const token = left[1]!;
       const chained = /-$/u.test(before.slice(0, left.index)) || right !== null;
-      const range = (dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token) && !chained);
-      const named = dotted(wanted) && /\p{L}/u.test(token) && !dotted(token);
+      const range = !chained && ((dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token)));
+      const named =
+        (dotted(wanted) && /\p{L}/u.test(token) && !dotted(token)) ||
+        (integer(wanted) && /^\p{L}+$/u.test(token) && !chained);
       if (!range && !named) continue;
     }
     if (right) {
       const token = right[1]!.replace(/\.$/u, '');
       const chained = /^-/u.test(after.slice(right[0].length)) || left !== null;
-      if (!((dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token) && !chained))) continue;
+      if (chained || !((dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token)))) continue;
     }
     return true;
   }

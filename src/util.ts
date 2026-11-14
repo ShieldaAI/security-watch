@@ -66,7 +66,10 @@ export function singleLine(value: string, max = 4000): string {
     index--;
   }
   out += value.slice(start, Math.min(length, start + Math.max(0, max - out.length)));
-  return cut(out, max).trimEnd();
+  const kept = cut(out, max);
+  // The copy above may stop between the two halves of a surrogate pair.
+  const last = kept.charCodeAt(kept.length - 1);
+  return ((last & 0xfc00) === 0xd800 ? kept.slice(0, -1) : kept).trimEnd();
 }
 
 /** A review binds JSON content independently of object insertion order. Array order is retained. */

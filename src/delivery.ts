@@ -167,21 +167,38 @@ export const sendEmail: EmailSender = async (message) => {
   }
 };
 
-function safeText(input: string, length: number): string {
-  const cleaned = cleanText(input, length)
-    .replace(/[\r\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
-    .replace(/@/g, '@\u200b');
+function safeText(input: string, length: number, mentions = true): string {
+  // The length is applied last: what is removed or reduced below must not count against it.
+  const cleaned = cleanText(input, Math.max(length, 4000))
+    // A lone half of a surrogate pair is not text; services may refuse a message that has one.
+    .replace(/\p{Cs}/gu, '\ufffd')
+    // Direction marks, and characters that show as nothing: zero-width and joining marks, the soft
+    // hyphen. Removed before spaces are counted, so that spaces they separated are one run.
+    .replace(/[\r\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
+    // Fillers that show as a blank (braille blank, Hangul fillers) are spaces to the reader.
+    .replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, ' ')
+    // A run of blanks moves what follows as far as a line break would.
+    .replace(/[^\S\n]{2,}/g, ' ')
+    .trim();
   // An emoji cut in half would leave text some services refuse.
-  return cut(cleaned, length);
+  return cut(mentions ? cleaned.replace(/@/g, '@\u200b') : cleaned, length);
 }
 /**
  * One value for one line of a message. Advisory text, model output and inventory names are placed
  * after fixed labels such as `Rule:` and `Where to look:`; a line break inside a value would let it
- * forge the next label, so every break becomes a space.
+ * forge the next label, so every break becomes a space, and a run of blank characters, which can
+ * push the rest of a value onto what looks like a line of its own, becomes one space.
  */
 function single(value: string, length: number): string {
-  // A long run of spaces can push the rest of a value onto what looks like a line of its own.
-  return safeText(singleLine(value).replace(/[^\S\n]{2,}/g, ' '), length);
+  return safeText(singleLine(value), length);
+}
+/**
+ * A source link, kept exactly: a shortened link is a different address, so one that is too long is
+ * left out, and nothing is inserted into it.
+ */
+function link(value: string): string | undefined {
+  const cleaned = safeText(singleLine(value), 2000, false);
+  return cleaned.length <= 320 && !/\s/.test(cleaned) ? cleaned : undefined;
 }
 /** The operator's own inventory names and notes, so the reader knows where to check. */
 function locationLines(a: Assessment, length: number): string[] {
@@ -203,10 +220,14 @@ const webUrl = (value: string): boolean => {
     return false;
   }
 };
+/** One Slack section holds 3,000 characters. */
+const MESSAGE_LIMIT = 2900;
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
   const urls = a.urls.filter(webUrl);
+  // In the order they give way when the text is too long for one Slack section: the last of these
+  // lines are dropped first, and a line is never cut in the middle.
   const body = [
     subject,
     `Finding: ${single(a.id, 200)}`,
@@ -214,6 +235,8 @@ export function notificationText(job: Notification): { subject: string; text: st
     `System: ${single(a.system_id, 200)}${a.component_id ? ` / ${single(a.component_id, 200)}` : ''}`,
     ...locationLines(a, 300),
     `Applicability: ${single(a.applicability, 40)}; source severity: ${single(a.source_severity, 40)}; priority: ${single(a.priority, 40)}`,
+    ...(a.exploited ? ['Known exploitation reported.'] : []),
+    `Summary: ${single(a.summary, 750)}`,
     ...(a.news_analysis
       ? [
           `AI news classification: ${single(a.news_analysis.classification, 60)}; reported system impact: ${single(a.news_analysis.impact, 60)}`,
@@ -223,19 +246,34 @@ export function notificationText(job: Notification): { subject: string; text: st
           `Impact reasoning: ${single(a.news_analysis.rationale, 400)}`,
         ]
       : []),
-    ...(a.exploited ? ['Known exploitation reported.'] : []),
-    single(a.summary, 750),
     ...a.reasons.slice(0, 4).map((r) => `• ${single(r, 180)}`),
-    ...(a.fix ? [`Fix: ${single(a.fix, 160)}`] : []),
-  ].join('\n');
-  // The rule that sent the message, the time and the sources close every message. When the text
-  // is too long for one Slack section, the middle is shortened, never these lines.
+  ];
+  // The fix, the rule that sent the message, the time and the sources close every message, whole.
   const closing = [
+    ...(a.fix ? [`Fix: ${single(a.fix, 160)}`] : []),
     `Rule: ${single(reason, 180)}`,
     `Assessment time: ${single(a.updated_at, 40)}`,
-    ...urls.slice(0, 3).map((u) => single(u, 320)),
+    ...urls
+      .map(link)
+      .filter((value): value is string => value !== undefined)
+      .slice(0, 3),
   ].join('\n');
-  return { subject, text: `${cut(body, 2900 - closing.length - 1)}\n${closing}` };
+  const SHORTENED = '(Message shortened; run explain for the full finding.)';
+  let room = MESSAGE_LIMIT - closing.length - 1;
+  const kept: string[] = [];
+  let shortened = false;
+  for (const line of body) {
+    // Room is kept for the note that says lines were left out.
+    if (line.length + 1 > room - (SHORTENED.length + 1)) {
+      shortened = true;
+      break;
+    }
+    kept.push(line);
+    room -= line.length + 1;
+  }
+  // Only the last line that fits may make the note unnecessary.
+  if (shortened) kept.push(SHORTENED);
+  return { subject, text: [...kept, closing].join('\n') };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;
@@ -253,7 +291,10 @@ function digestText(jobs: Notification[]): { subject: string; text: string } {
             `AI news: ${single(a.news_analysis.classification, 60)}; impact: ${single(a.news_analysis.impact, 60)}`,
           ]
         : []),
-      single(a.urls.find(webUrl) ?? 'No source URL supplied', 160),
+      a.urls
+        .filter(webUrl)
+        .map(link)
+        .find((value) => value !== undefined) ?? 'No source URL supplied',
     ].join('\n');
   });
   return { subject, text: `${subject}\n\n${entries.join('\n\n')}` };
@@ -271,6 +312,24 @@ function retryAt(headers: Record<string, string>, now: number, attempts: number)
  * A reason the SMTP address cannot be used, found without connecting. A user name or password
  * containing %, @, : or / must be percent-encoded (a literal % is written %25).
  */
+/** Why a Slack webhook address cannot be used, or nothing. The text never repeats the address. */
+export function slackProblem(address: string): string | undefined {
+  try {
+    const url = new URL(address);
+    return url.protocol !== 'https:' ||
+      url.hostname !== 'hooks.slack.com' ||
+      !url.pathname.startsWith('/services/') ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.port && url.port !== '443')
+      ? 'Slack webhook must be an HTTPS hooks.slack.com/services URL'
+      : undefined;
+  } catch {
+    return 'Slack webhook URL is invalid';
+  }
+}
 export function smtpProblem(address: string): string | undefined {
   try {
     const url = new URL(address);
@@ -456,23 +515,9 @@ export async function deliverPending(
         finish('failed', 'Slack destination is not configured');
         continue;
       }
-      try {
-        const url = new URL(secret);
-        if (
-          url.protocol !== 'https:' ||
-          url.hostname !== 'hooks.slack.com' ||
-          !url.pathname.startsWith('/services/') ||
-          url.username ||
-          url.password ||
-          url.search ||
-          url.hash ||
-          (url.port && url.port !== '443')
-        ) {
-          finish('failed', 'Slack webhook must be an HTTPS hooks.slack.com/services URL');
-          continue;
-        }
-      } catch {
-        finish('failed', 'Slack webhook URL is invalid');
+      const problem = slackProblem(secret);
+      if (problem) {
+        finish('failed', problem);
         continue;
       }
       const nextSlackAt = Number(store.getMeta('delivery:slack:next_at') ?? 0);
@@ -512,7 +557,8 @@ export async function deliverPending(
         if (
           !signal?.aborted &&
           error instanceof NetworkError &&
-          ['DNS_FAILED', 'CONNECTION_FAILED'].includes(error.code)
+          // Refused before any connection was made: nothing left this machine.
+          ['DNS_FAILED', 'CONNECTION_FAILED', 'DESTINATION_DENIED'].includes(error.code)
         )
           retry('Slack connection failed before sending', retryAt({}, now, item.attempts));
         else

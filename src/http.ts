@@ -109,8 +109,9 @@ function recordCooldown(origin: string, status: number, retryAfter: string | str
 export function isPublicAddress(address: string): boolean {
   try {
     const parsed = ipaddr.process(address);
-    // ::a.b.c.d, the deprecated IPv4-compatible form, is no public destination: a stack that
-    // still routes it reaches the embedded IPv4 address, which may be this machine.
+    // ::a.b.c.d, the deprecated IPv4-compatible form: a stack that still routes it reaches the
+    // embedded IPv4 address, which may be this machine. Written with a dotted quad the address is
+    // judged as that IPv4 address; written in hexadecimal it is no public destination.
     if (parsed.kind() === 'ipv6' && (parsed as ipaddr.IPv6).parts.slice(0, 6).every((part) => part === 0))
       return false;
     return parsed.range() === 'unicast';

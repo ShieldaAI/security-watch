@@ -419,7 +419,9 @@ test('either end of a hyphenated version range is a citation; a number joined to
   const revision = 'Example Database 1.0.0-1 is affected; 3.1-beta is not.';
   assert.throws(check(revision, ['1']), /MODEL_UNSUPPORTED_NEWS_CLAIM/);
   assert.throws(check(revision, ['1.0.0']), /MODEL_UNSUPPORTED_NEWS_CLAIM/);
-  assert.doesNotThrow(check(revision, ['3.1']));
+  // "3.1-beta" is another version than 3.1.
+  assert.throws(check(revision, ['3.1']), /MODEL_UNSUPPORTED_NEWS_CLAIM/);
+  assert.doesNotThrow(check(revision, ['3.1-beta']));
 });
 
 // ---- Verification model identity ------------------------------------------------------------------
