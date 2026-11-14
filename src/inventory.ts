@@ -4,26 +4,31 @@ import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
 import {
+  capitalisedNpmName,
   exactLibraryVersion,
   mergeNotes,
   normalizeEcosystem,
   normalizePackageName,
   parseLibrary,
 } from './ecosystems.js';
-import { hash } from './util.js';
+import { hash, LINE_BREAKING, singleLine } from './util.js';
 import { importCycloneDx } from './sbom.js';
 
-const shortText = z.string().trim().min(1).max(500);
+// Inventory text is shown in notifications, one value per line. A control character or a Unicode
+// line separator inside a name, owner or note would let that value start a line of its own.
+const shortText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine((value) => !LINE_BREAKING.test(value), 'Control characters are not allowed');
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
-const evidenceText = shortText.refine(
-  (value) => !/[\u0000-\u001f\u007f]/u.test(value),
-  'Control characters are not allowed',
-);
+const evidenceText = shortText;
 const referenceText = z
   .string()
   .min(1)
   .max(1000)
-  .regex(/^[^\u0000-\u001f\u007f]+$/u);
+  .refine((value) => !LINE_BREAKING.test(value), 'Control characters are not allowed');
 const declaredVerification = z.strictObject({
   status: z.enum(['verified', 'failed', 'unknown']),
   reference: evidenceText,
@@ -199,7 +204,7 @@ function readBounded(path: string, maximum: number): string {
 }
 
 function shortLabel(value: string): string {
-  return value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 120);
+  return singleLine(value, 120);
 }
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -219,6 +224,14 @@ function importLockfile(path: string): { components: Component[]; warnings: stri
     if (!location || !record(value) || value.link === true) continue;
     const match = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(location);
     if (!match) continue;
+    // The location becomes the component's identifier, which is shown in notifications.
+    if (LINE_BREAKING.test(location) || location.length > 480) {
+      if (warnings.length < 50)
+        warnings.push(
+          `Lockfile entry ${shortLabel(location)}: the path contains control characters or is too long; not imported.`,
+        );
+      continue;
+    }
     // One entry this application cannot read must not hide every other dependency in the file.
     let name: string;
     let version: string | undefined;
@@ -281,6 +294,12 @@ export function loadInventory(path: string): Inventory {
           system.components.push({ id: `library:${hash(key).slice(0, 24)}`, ...library });
         }
       }
+    }
+    // Names typed by hand, before anything is imported: a lockfile or SBOM carries the published
+    // spelling, a person may have typed `Lodash` for `lodash`.
+    for (const component of system.components) {
+      const warning = capitalisedNpmName(component);
+      if (warning && importWarnings.length < 1000) importWarnings.push(`${system.id}: ${warning}`);
     }
     if (sbom) {
       const imported = importCycloneDx(resolve(dirname(absolute), sbom));

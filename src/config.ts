@@ -2,8 +2,9 @@ import { readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
-import type { Config } from './types.js';
-import { isPublicAddress } from './http.js';
+import type { Config, ModelSpec } from './types.js';
+import { isIP } from 'node:net';
+import { privateAddress } from './http.js';
 import {
   PROVIDER_IDS,
   providerDefinition,
@@ -12,15 +13,43 @@ import {
   modelEndpoint,
 } from './providers.js';
 
-/** A host that is plainly on this machine or a private network; cleartext HTTP is allowed only there. */
+/**
+ * A host that is plainly on this machine or a private network; cleartext HTTP is allowed only there.
+ * An address is judged by its range. A name cannot be resolved here, so it is accepted when it has
+ * no public form: a single label (a container or service name), a special-use or private suffix, or
+ * a last label that cannot be a public top-level domain (`ollama.ml-tools`). The request itself is
+ * refused if such a name turns out to resolve to a public address.
+ */
 function localHost(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  if (/^[0-9.]+$/.test(host) || host.includes(':')) return !isPublicAddress(host);
+  const host = hostname
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
+    .replace(/\.$/, '');
+  if (isIP(host)) return privateAddress(host);
+  if (!host || /^[0-9.]+$/.test(host)) return false;
+  const last = host.slice(host.lastIndexOf('.') + 1);
   return (
     host === 'localhost' ||
     !host.includes('.') ||
-    /\.(?:localhost|local|internal|lan|home\.arpa|svc|cluster\.local)$/.test(host)
+    /\.(?:localhost|local|internal|intranet|private|corp|lan|home|home\.arpa|test|svc|cluster\.local|ts\.net)$/.test(
+      host,
+    ) ||
+    // Public top-level domains are letters only, or punycode.
+    (/[0-9_-]/.test(last) && !last.startsWith('xn--'))
   );
+}
+
+/** Two model settings that reach the same model at the same address, however each is written. */
+function sameModel(first: ModelSpec, second: ModelSpec): boolean {
+  const address = (spec: ModelSpec): string => {
+    try {
+      const url = new URL(modelEndpoint(spec));
+      return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}`;
+    } catch {
+      return spec.endpoint ?? '';
+    }
+  };
+  return first.model.toLowerCase() === second.model.toLowerCase() && address(first) === address(second);
 }
 
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
@@ -105,7 +134,7 @@ export const configSchema = z
       .default({
         enabled: false,
         daily_request_limit: 100,
-        daily_token_limit: 100000,
+        daily_token_limit: 1_000_000,
         max_input_chars: 12000,
         max_output_tokens: 1500,
         timeout_seconds: 45,
@@ -212,13 +241,7 @@ export const configSchema = z
   .strict()
   .superRefine((config, ctx) => {
     const { analysis, verification } = config.models;
-    if (
-      analysis &&
-      verification &&
-      analysis.provider === verification.provider &&
-      analysis.model === verification.model &&
-      (analysis.endpoint ?? '') === (verification.endpoint ?? '')
-    )
+    if (analysis && verification && sameModel(analysis, verification))
       ctx.addIssue({
         code: 'custom',
         message:

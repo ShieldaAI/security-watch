@@ -1,5 +1,5 @@
 import type { Component } from './types.js';
-import { hash } from './util.js';
+import { hash, LINE_BREAKING } from './util.js';
 import { valid } from 'semver';
 import { valid as validPython } from '@renovatebot/pep440';
 
@@ -68,7 +68,7 @@ export function normalizeEcosystem(value: string): Ecosystem {
 export function normalizePackageName(ecosystem: Ecosystem, value: string): string {
   const name = value.trim();
   let normalized = name;
-  let valid = name.length > 0 && name.length <= 500 && !/[\s\u0000-\u001f\u007f]/u.test(name);
+  let valid = name.length > 0 && name.length <= 500 && !/\s/u.test(name) && !LINE_BREAKING.test(name);
   switch (ecosystem) {
     case 'npm':
       // Names registered before 2017 may contain capitals (JSONStream) and are case-sensitive.
@@ -209,6 +209,21 @@ export function exactLibraryVersion(value: string, ecosystem?: Ecosystem): strin
   return version;
 }
 
+/** Packages published before npm required lower-case names. Their capitals are part of the name. */
+const LEGACY_NPM_NAMES = new Set(['JSONStream', 'Base64', 'JSONPath', 'JSONSelect']);
+
+/**
+ * What to tell the operator about an npm name typed by hand with capital letters. npm names are
+ * case-sensitive, and every name registered since 2017 is lower case: `Lodash` is not `lodash`, and
+ * an entry spelled that way matches no advisory. A few packages from before that rule keep their
+ * capitals, so the name is accepted, and anything but a known legacy name is reported.
+ */
+export function capitalisedNpmName(component: { ecosystem: Ecosystem; name: string }): string | undefined {
+  if (component.ecosystem !== 'npm' || component.name === component.name.toLowerCase()) return undefined;
+  if (LEGACY_NPM_NAMES.has(component.name)) return undefined;
+  return `npm package name ${component.name} contains capital letters. npm names are case-sensitive and current names are lower case, so this entry matches only advisories published for exactly that spelling. Write ${component.name.toLowerCase()} unless this is a package from before 2017 that kept its capitals; names imported from a lockfile or SBOM are taken as published.`;
+}
+
 export interface Library {
   ecosystem: Ecosystem;
   name: string;
@@ -220,7 +235,7 @@ export interface Library {
 /** A short, single-line pointer written by the operator, such as a service, repository path or owner. */
 export function libraryNote(value: string): string {
   const note = value.trim();
-  if (!note || note.length > 500 || /[\u0000-\u001f\u007f]/u.test(note))
+  if (!note || note.length > 500 || LINE_BREAKING.test(note))
     throw new Error('A library note must be 1 to 500 characters on one line');
   return note;
 }

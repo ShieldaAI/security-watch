@@ -593,6 +593,8 @@ async function main(): Promise<void> {
       problems,
       systems: inventory.systems.length,
       components: inventory.systems.reduce((sum, s) => sum + s.components.length, 0),
+      // Entries that were left out or will not match as written. Scans report the same list.
+      import_warnings: inventory.import_warnings ?? [],
       missing_environment_variables: missing,
       database: config.database,
       models_enabled: config.models.enabled,
@@ -647,7 +649,8 @@ async function main(): Promise<void> {
           : []),
       ],
     });
-    if (missing.length) process.exitCode = 2;
+    // `ok: false` always comes with a failing exit status, so a script can rely on either.
+    if (missing.length || problems.length) process.exitCode = 2;
     return;
   }
   const allowed = new Set([

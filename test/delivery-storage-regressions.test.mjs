@@ -115,43 +115,7 @@ test('an unusable SMTP address is a configuration failure, never an uncertain re
   assert.match(statuses(store)[0][2], /percent-encoded/);
 });
 
-test('TLS and sign-in failures before the message is handed over are retried, not marked uncertain', async () => {
-  const config = emailConfig(['ops@example.org']);
-  for (const failure of [
-    Object.assign(new Error('certificate has expired'), { code: 'ETLS' }),
-    Object.assign(new Error('greeting never received'), { command: 'CONN' }),
-    Object.assign(new Error('auth'), { code: 'EAUTH', command: 'AUTH PLAIN' }),
-  ]) {
-    const store = queued(config);
-    const result = await deliverPending(
-      store,
-      config,
-      noHttp,
-      now,
-      async () => {
-        throw failure;
-      },
-      undefined,
-      credentials,
-    );
-    assert.deepEqual(result, { accepted: 0, failed: 0, unknown: 0 }, failure.message);
-    assert.equal(statuses(store)[0][1], 'pending');
-  }
-  // A failure once the message is being transferred can have been delivered.
-  const store = queued(config);
-  const result = await deliverPending(
-    store,
-    config,
-    noHttp,
-    now,
-    async () => {
-      throw Object.assign(new Error('socket closed'), { command: 'DATA' });
-    },
-    undefined,
-    credentials,
-  );
-  assert.equal(result.unknown, 1);
-});
+// What each SMTP failure becomes is tested against a real loopback server in smtp-outcomes.test.mjs.
 
 test('acknowledging a revision the operator did not read is refused', () => {
   const store = queued(slackConfig);

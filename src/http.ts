@@ -114,6 +114,21 @@ export function isPublicAddress(address: string): boolean {
     return false;
   }
 }
+/**
+ * Whether an unencrypted connection to this address stays on this machine or a private network:
+ * loopback, RFC 1918, carrier-grade NAT (also used by overlay networks), link-local and IPv6
+ * unique-local addresses. Addresses that wrap a public IPv4 address (NAT64, 6to4, Teredo),
+ * multicast and reserved ranges are not private.
+ */
+export function privateAddress(address: string): boolean {
+  try {
+    return ['private', 'loopback', 'linkLocal', 'carrierGradeNat', 'uniqueLocal', 'unspecified'].includes(
+      ipaddr.process(address).range(),
+    );
+  } catch {
+    return false;
+  }
+}
 export function validateDestination(value: string, allowPrivate = false): URL {
   let url: URL;
   try {
@@ -134,6 +149,10 @@ export function validateDestination(value: string, allowPrivate = false): URL {
     (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && !isPublicAddress(host)))
   )
     throw new NetworkError('DESTINATION_DENIED');
+  // Permission to reach a private destination is not permission to send a request in the clear
+  // across the internet: plain HTTP is only for private and local addresses.
+  if (url.protocol === 'http:' && isIP(host) && !privateAddress(host))
+    throw new NetworkError('DESTINATION_DENIED');
   return url;
 }
 
@@ -151,6 +170,11 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
         return;
       }
       if (!options.allowPrivate && addresses.some((a) => !isPublicAddress(a.address))) {
+        callback(new NetworkError('DESTINATION_DENIED'), '', 4);
+        return;
+      }
+      // A name that resolves to a public address must not receive a plain HTTP request.
+      if (url.protocol === 'http:' && addresses.some((a) => !privateAddress(a.address))) {
         callback(new NetworkError('DESTINATION_DENIED'), '', 4);
         return;
       }

@@ -1,7 +1,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { exactLibraryVersion, normalizeEcosystem, normalizePackageName } from './ecosystems.js';
-import { hash } from './util.js';
+import { eq as samePythonVersion, valid as validPython } from '@renovatebot/pep440';
+import { hash, LINE_BREAKING } from './util.js';
 import type { Component, DependencyRelationship } from './types.js';
 
 export interface SbomImport {
@@ -13,10 +14,7 @@ export interface SbomImport {
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string =>
-  typeof value === 'string' &&
-  value.length > 0 &&
-  value.length <= 1000 &&
-  !/[\u0000-\u001f\u007f]/u.test(value);
+  typeof value === 'string' && value.length > 0 && value.length <= 1000 && !LINE_BREAKING.test(value);
 
 /** Bounded local metadata import: never follows references, runs scripts or fetches packages. */
 export function importCycloneDx(path: string): SbomImport {
@@ -67,21 +65,38 @@ export function importCycloneDx(path: string): SbomImport {
         result.warnings.push(`Component ${count}: missing package URL; not imported.`);
         continue;
       }
-      const match = /^pkg:([a-z][a-z0-9.+-]*)\/([^?#]+)(?:\?[^#]*)?(?:#.*)?$/.exec(entry.purl);
-      if (!match) throw new Error('Invalid SBOM package URL');
+      // The package type is case-insensitive in the purl specification; tools write `pkg:NPM/…` too.
+      const match = /^pkg:([A-Za-z][A-Za-z0-9.+-]*)\/([^?#]+)(?:\?[^#]*)?(?:#.*)?$/.exec(entry.purl);
+      if (!match) {
+        // One component this application cannot read must not block the rest of the document.
+        result.warnings.push(`Component ${count}: package URL is not valid; not imported.`);
+        continue;
+      }
       let ecosystem;
       try {
-        ecosystem = normalizeEcosystem(match[1]!);
+        ecosystem = normalizeEcosystem(match[1]!.toLowerCase());
       } catch {
-        result.warnings.push(`Component ${count}: unsupported package ecosystem ${match[1]}; not imported.`);
+        result.warnings.push(
+          `Component ${count}: unsupported package ecosystem ${match[1]!.slice(0, 40)}; not imported.`,
+        );
         continue;
       }
       // purl versions are separated before percent decoding (npm scopes use %40). A leading @ is
       // an unencoded npm scope, not a version separator.
       const split = match[2]!.lastIndexOf('@');
-      if (entry.version !== undefined && !text(entry.version)) throw new Error('Invalid SBOM version');
-      // Go tools write the same version as v1.8.0 or 1.8.0.
-      const comparable = (value: string) => (ecosystem === 'Go' ? value.replace(/^v/, '') : value);
+      // An empty version string means the generator did not know the version.
+      const declared = entry.version === '' || entry.version === null ? undefined : entry.version;
+      if (declared !== undefined && !text(declared)) {
+        result.warnings.push(`Component ${count}: version is not text; not imported.`);
+        continue;
+      }
+      // Go tools write the same version as v1.8.0 or 1.8.0; Python treats 1.0 and 1.0.0 as equal.
+      const sameVersion = (first: string, second: string): boolean => {
+        if (ecosystem === 'Go') return first.replace(/^v/, '') === second.replace(/^v/, '');
+        if (ecosystem === 'PyPI' && validPython(first) && validPython(second))
+          return samePythonVersion(first, second);
+        return first === second;
+      };
       const rawName = split <= 0 ? match[2]! : match[2]!.slice(0, split);
       const rawVersion = split <= 0 ? undefined : match[2]!.slice(split + 1);
       let name: string;
@@ -92,7 +107,7 @@ export function importCycloneDx(path: string): SbomImport {
         purlVersion = rawVersion === undefined ? undefined : decodeURIComponent(rawVersion);
         if (ecosystem === 'Maven') name = name.replace(/\/(?!.*\/)/, ':');
         name = normalizePackageName(ecosystem, name);
-        version = purlVersion ?? (entry.version as string | undefined);
+        version = purlVersion ?? declared;
         if (version !== undefined) version = exactLibraryVersion(version, ecosystem);
       } catch (error) {
         // One component this application cannot read must not block the rest of the document.
@@ -102,11 +117,7 @@ export function importCycloneDx(path: string): SbomImport {
         continue;
       }
       // Two different versions for one component is a contradiction in the document itself.
-      if (
-        purlVersion &&
-        entry.version !== undefined &&
-        comparable(purlVersion) !== comparable(entry.version as string)
-      )
+      if (purlVersion && declared !== undefined && !sameVersion(purlVersion, declared))
         throw new Error('Conflicting SBOM package versions');
       const component: Component = {
         id: `sbom:${hash(ref ?? entry.purl).slice(0, 32)}`,

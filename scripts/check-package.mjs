@@ -153,7 +153,8 @@ try {
     throw new Error('Packed CLI did not match the fixture');
   writeFileSync(
     join(consumer, 'consumer.mts'),
-    `import { assess, decide, collectSources, parseConfig, Store, PROVIDERS, providerDefinition, parseLibraryList, importCycloneDx, compareInventories, refreshCoverage, runRehearsal, readRehearsal, readPilotReport, readPilotBackupReport, createPilotCasePacket, scorePilotCases, scorePilotRecall, type PilotIncidentReference, type PilotRecallScore, type PilotCasePacket, type PilotFeedback, type PilotScore, type PilotReport, type RehearsalReport, type CoverageReceipt, type Ecosystem, type Assessment, type AiReview, type ModelProvider, type Inventory } from '@shieldaai/security-watch';
+    `import { ModelAnalyzer, safeHttp, deliverPending, attachLocation, type ModelState, type DeliveryOptions, type FindingLocation } from '@shieldaai/security-watch';
+import { assess, decide, collectSources, parseConfig, Store, PROVIDERS, providerDefinition, parseLibraryList, importCycloneDx, compareInventories, refreshCoverage, runRehearsal, readRehearsal, readPilotReport, readPilotBackupReport, createPilotCasePacket, scorePilotCases, scorePilotRecall, type PilotIncidentReference, type PilotRecallScore, type PilotCasePacket, type PilotFeedback, type PilotScore, type PilotReport, type RehearsalReport, type CoverageReceipt, type Ecosystem, type Assessment, type AiReview, type ModelProvider, type Inventory } from '@shieldaai/security-watch';
 const recallScorer: (path: string, window: { from: string, until: string }, reference: PilotIncidentReference) => Promise<PilotRecallScore> = scorePilotRecall;
 import { createPilotResponseTemplate, scorePilotResponses, type PilotResponseRegister, type PilotResponseScore } from '@shieldaai/security-watch';
 const responseScorer: (path: string, window: { from: string, until: string }, incidents: PilotIncidentReference, register: PilotResponseRegister) => Promise<PilotResponseScore> = scorePilotResponses;
@@ -177,6 +178,15 @@ const now = Date.now();
 const python = assess({systems:[{id:'python',name:'python',environment:'production',exposure:'internal',criticality:'high',updated_at:new Date(now).toISOString(),components:[{id:'mcp',ecosystem:'PyPI',name:'mcp',version:'1.30.0'}],products:[],keywords:[]}]},[{id:'fixture',source:'fixture',kind:'advisory',title:'MCP',url:'https://github.com/advisories/GHSA-w4fh-qvv9-3v23',description:'',aliases:[],severity:'high',modified_at:new Date(now).toISOString(),fetched_at:new Date(now).toISOString(),packages:[{ecosystem:'PyPI',name:'mcp',range:'>=1.10.0,<1.30.0'}]}],config,now);
 if(python[0]?.applicability!=='not_affected') throw new Error('Packed PEP 440 evaluator failed');
 const store = new Store(':memory:');
+// The published types must compile together: the analyzer takes the published Store, or a caller's own state.
+const analyzer = new ModelAnalyzer(config, store, safeHttp);
+const ownState: ModelState = { getMeta: () => undefined, setMeta: () => undefined, reserveBudget: () => true };
+if (typeof analyzer.analyze !== 'function' || typeof new ModelAnalyzer(config, ownState, safeHttp).analyze !== 'function') throw new Error('Missing analyzer');
+const deliveryOptions: DeliveryOptions = { now };
+const delivered = await deliverPending(store, config, safeHttp, deliveryOptions);
+if (delivered.accepted || delivered.failed || delivered.unknown) throw new Error('Unexpected delivery from an empty store');
+const where: FindingLocation | undefined = attachLocation({ id: 'f', event_id: 'e', system_id: 'none', category: 'library', applicability: 'unknown', source_severity: 'low', priority: 'low', title: 't', summary: 's', reasons: [], evidence_ids: [], urls: [], exploited: false, updated_at: new Date(now).toISOString() }, { systems: [] }).location;
+if (where !== undefined) throw new Error('Unexpected location');
 const findings: Assessment[] = store.findings();
 const reviews: AiReview[] = store.reviews({ limit: 10 });
 if (reviews.length || store.reviewSummary().pending || config.policy.ai_dismissals !== 'review') throw new Error('Unexpected review contract');

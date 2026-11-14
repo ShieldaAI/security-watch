@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { createConnection, type Socket } from 'node:net';
 import type { Assessment, Config, HttpClient, Notification } from './types.js';
-import { cleanText } from './util.js';
+import { cleanText, singleLine } from './util.js';
 import { decide } from './assessment.js';
 import { Store } from './store.js';
 import { NetworkError } from './http.js';
@@ -20,9 +20,17 @@ export interface EmailReceipt {
 }
 export type EmailSender = (message: EmailMessage) => Promise<EmailReceipt>;
 
-class EmailConnectionError extends Error {
-  constructor() {
-    super('SMTP connection failed before sending');
+/**
+ * The message provably never reached the mail server: the failure happened before the client wrote
+ * `MAIL FROM`. Only this error (or an explicit SMTP status) lets a job be retried automatically.
+ */
+class EmailNotSentError extends Error {
+  constructor(readonly stage: 'connection' | 'session') {
+    super(
+      stage === 'connection'
+        ? 'SMTP connection failed before sending'
+        : 'SMTP TLS or sign-in failed before sending',
+    );
   }
 }
 
@@ -37,7 +45,34 @@ export const sendEmail: EmailSender = async (message) => {
   )
     throw new Error('Invalid SMTP configuration');
   let socket: Socket | undefined;
+  // The transport labels every socket error, timeout and unexpected close the same way at any stage,
+  // including after the message body was transferred. The only proof that nothing was handed over is
+  // that the client never wrote MAIL FROM, so the conversation is observed through the transport's
+  // own transaction log. `observed` shows that log is working; without it nothing is assumed.
+  let observed = false;
+  let envelopeStarted = false;
+  const observe = (entry: unknown, line: unknown): void => {
+    observed = true;
+    if (
+      typeof entry === 'object' &&
+      entry !== null &&
+      'tnx' in entry &&
+      entry.tnx === 'client' &&
+      /^\s*(?:MAIL|RCPT|DATA|BDAT)\b/i.test(String(line))
+    )
+      envelopeStarted = true;
+  };
   const transport = nodemailer.createTransport({
+    logger: {
+      level: () => undefined,
+      trace: observe,
+      debug: observe,
+      info: observe,
+      warn: observe,
+      error: observe,
+      fatal: observe,
+    },
+    debug: true,
     host: url.hostname.replace(/^\[|\]$/g, ''),
     port: Number(url.port || (url.protocol === 'smtps:' ? 465 : 587)),
     secure: url.protocol === 'smtps:',
@@ -67,7 +102,7 @@ export const sendEmail: EmailSender = async (message) => {
       const deadline = setTimeout(() => socket?.destroy(new Error('SMTP connection timeout')), 30_000);
       socket.once('close', () => clearTimeout(deadline));
       socket.once('error', () => {
-        if (!connected) callback(new EmailConnectionError(), {});
+        if (!connected) callback(new EmailNotSentError('connection'), {});
       });
       socket.once('connect', () => {
         connected = true;
@@ -96,6 +131,17 @@ export const sendEmail: EmailSender = async (message) => {
     });
     const result = await Promise.race([sending, cancelled]);
     return { accepted: result.accepted.map(String), rejected: result.rejected.map(String) };
+  } catch (error) {
+    // A reply code from the server is passed on as it is: the caller decides from the code.
+    if (
+      message.signal?.aborted ||
+      error instanceof EmailNotSentError ||
+      statusCode(error) !== undefined ||
+      envelopeStarted ||
+      !observed
+    )
+      throw error;
+    throw new EmailNotSentError('session');
   } finally {
     if (abort) message.signal?.removeEventListener('abort', abort);
     transport.close();
@@ -109,11 +155,18 @@ function safeText(input: string, length: number): string {
     .replace(/@/g, '@\u200b')
     .slice(0, length);
 }
+/**
+ * One value for one line of a message. Advisory text, model output and inventory names are placed
+ * after fixed labels such as `Rule:` and `Where to look:`; a line break inside a value would let it
+ * forge the next label, so every break becomes a space.
+ */
+function single(value: string, length: number): string {
+  return safeText(singleLine(value), length);
+}
 /** The operator's own inventory names and notes, so the reader knows where to check. */
 function locationLines(a: Assessment, length: number): string[] {
   const where = a.location;
   if (!where) return [];
-  const single = (value: string, limit: number) => safeText(value, limit).replace(/\s*\n\s*/g, ' ');
   return [
     `Where to look: ${single(where.system, 120)}${where.owner ? ` (owner: ${single(where.owner, 80)})` : ''}${where.system_note ? ` - ${single(where.system_note, length)}` : ''}`,
     ...(where.component
@@ -123,66 +176,61 @@ function locationLines(a: Assessment, length: number): string[] {
       : []),
   ];
 }
+const webUrl = (value: string): boolean => {
+  try {
+    return ['https:', 'http:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
-  const subject = safeText(`[${a.priority.toUpperCase()}] ${a.title}`, 180).replace(/[\n\r]/g, ' ');
-  const urls = a.urls.filter((value) => {
-    try {
-      return ['https:', 'http:'].includes(new URL(value).protocol);
-    } catch {
-      return false;
-    }
-  });
+  const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
+  const urls = a.urls.filter(webUrl);
   const lines = [
     subject,
-    `Finding: ${a.id}`,
-    `Delivery: ${job.id}`,
-    `System: ${safeText(a.system_id, 200)}${a.component_id ? ` / ${safeText(a.component_id, 200)}` : ''}`,
+    `Finding: ${single(a.id, 200)}`,
+    `Delivery: ${single(job.id, 200)}`,
+    `System: ${single(a.system_id, 200)}${a.component_id ? ` / ${single(a.component_id, 200)}` : ''}`,
     ...locationLines(a, 300),
-    `Applicability: ${a.applicability}; source severity: ${a.source_severity}; priority: ${a.priority}`,
+    `Applicability: ${single(a.applicability, 40)}; source severity: ${single(a.source_severity, 40)}; priority: ${single(a.priority, 40)}`,
     ...(a.news_analysis
       ? [
-          `AI news classification: ${a.news_analysis.classification}; reported system impact: ${a.news_analysis.impact}`,
-          `Affected products: ${safeText(a.news_analysis.affected_products.join('; ') || 'Not established', 180)}`,
-          `Reported versions: ${safeText(a.news_analysis.affected_versions.join('; ') || 'Not established', 180)}`,
-          `Prerequisites: ${safeText(a.news_analysis.prerequisites.join('; ') || 'Not established', 240)}`,
-          `Impact reasoning: ${safeText(a.news_analysis.rationale, 400)}`,
+          `AI news classification: ${single(a.news_analysis.classification, 60)}; reported system impact: ${single(a.news_analysis.impact, 60)}`,
+          `Affected products: ${single(a.news_analysis.affected_products.join('; ') || 'Not established', 180)}`,
+          `Reported versions: ${single(a.news_analysis.affected_versions.join('; ') || 'Not established', 180)}`,
+          `Prerequisites: ${single(a.news_analysis.prerequisites.join('; ') || 'Not established', 240)}`,
+          `Impact reasoning: ${single(a.news_analysis.rationale, 400)}`,
         ]
       : []),
     ...(a.exploited ? ['Known exploitation reported.'] : []),
-    safeText(a.summary, 750),
-    ...a.reasons.slice(0, 4).map((r) => `• ${safeText(r, 180)}`),
-    ...(a.fix ? [`Fix: ${safeText(a.fix, 160)}`] : []),
-    `Rule: ${safeText(reason, 180)}`,
-    `Assessment time: ${a.updated_at}`,
-    ...urls.slice(0, 3).map((u) => safeText(u, 320)),
+    single(a.summary, 750),
+    ...a.reasons.slice(0, 4).map((r) => `• ${single(r, 180)}`),
+    ...(a.fix ? [`Fix: ${single(a.fix, 160)}`] : []),
+    `Rule: ${single(reason, 180)}`,
+    `Assessment time: ${single(a.updated_at, 40)}`,
+    ...urls.slice(0, 3).map((u) => single(u, 320)),
   ];
-  return { subject, text: safeText(lines.join('\n'), 2900) };
+  return { subject, text: lines.join('\n').slice(0, 2900) };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;
   const entries = jobs.map((job) => {
     const { assessment: a } = JSON.parse(job.payload) as { assessment: Assessment };
-    const sourceUrl = a.urls.find((value) => {
-      try {
-        return ['https:', 'http:'].includes(new URL(value).protocol);
-      } catch {
-        return false;
-      }
-    });
-    return (
-      `[${a.priority.toUpperCase()}] ${safeText(a.title, 90)}\n` +
-      `Finding: ${a.id}\nDelivery: ${job.id}\n` +
-      `System: ${safeText(a.system_id, 60)}${a.component_id ? ` / ${safeText(a.component_id, 60)}` : ''}\n` +
-      locationLines(a, 120)
-        .map((line) => `${line}\n`)
-        .join('') +
-      `Applicability: ${a.applicability}; source: ${a.source_severity}\n` +
-      (a.news_analysis
-        ? `AI news: ${a.news_analysis.classification}; impact: ${a.news_analysis.impact}\n`
-        : '') +
-      `${safeText(sourceUrl ?? 'No source URL supplied', 160)}`
-    );
+    return [
+      `[${single(a.priority, 40).toUpperCase()}] ${single(a.title, 90)}`,
+      `Finding: ${single(a.id, 200)}`,
+      `Delivery: ${single(job.id, 200)}`,
+      `System: ${single(a.system_id, 60)}${a.component_id ? ` / ${single(a.component_id, 60)}` : ''}`,
+      ...locationLines(a, 120),
+      `Applicability: ${single(a.applicability, 40)}; source: ${single(a.source_severity, 40)}`,
+      ...(a.news_analysis
+        ? [
+            `AI news: ${single(a.news_analysis.classification, 60)}; impact: ${single(a.news_analysis.impact, 60)}`,
+          ]
+        : []),
+      single(a.urls.find(webUrl) ?? 'No source URL supplied', 160),
+    ].join('\n');
   });
   return { subject, text: `${subject}\n\n${entries.join('\n\n')}` };
 }
@@ -220,18 +268,6 @@ export function smtpProblem(address: string): string | undefined {
 function mailbox(address: string): string {
   const at = address.lastIndexOf('@');
   return at < 0 ? address : `${address.slice(0, at)}@${address.slice(at + 1).toLowerCase()}`;
-}
-/** Failures in the connection, TLS or sign-in steps happen before any message is handed over. */
-function beforeEnvelope(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const code = 'code' in error ? String(error.code) : '';
-  const command = 'command' in error ? String(error.command) : '';
-  return (
-    code === 'ETLS' ||
-    code === 'EAUTH' ||
-    ['CONN', 'STARTTLS', 'EHLO', 'HELO'].includes(command) ||
-    /^AUTH\b/.test(command)
-  );
 }
 function statusCode(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('responseCode' in error)) return undefined;
@@ -499,10 +535,10 @@ export async function deliverPending(
         else finish('failed', 'SMTP did not accept any recipients');
       } catch (error) {
         const code = statusCode(error);
-        if (!signal?.aborted && error instanceof EmailConnectionError)
-          retry('SMTP connection failed before sending', retryAt({}, now, item.attempts));
-        else if (!signal?.aborted && !code && beforeEnvelope(error))
-          retry('SMTP TLS or sign-in failed before sending', retryAt({}, now, item.attempts));
+        // Only a failure the sender proved to precede the envelope is retried. Error labels alone
+        // do not prove it: a dropped connection after the message body carries the same label.
+        if (!signal?.aborted && error instanceof EmailNotSentError)
+          retry(error.message, retryAt({}, now, item.attempts));
         else if (code && code >= 400 && code < 500)
           retry(`SMTP rejected request with status ${code}`, retryAt({}, now, item.attempts));
         else if (code && code >= 500 && code < 600)

@@ -12,7 +12,7 @@ import type {
   Severity,
   SourceResult,
 } from './types.js';
-import { cleanText, hash, highest, timestamp } from './util.js';
+import { cleanText, hash, highest, singleLine, timestamp } from './util.js';
 import { collectCveNow, evidenceRelevant } from './cve-now.js';
 import { VENDOR_FEEDS, vendorArticleBody, vendorArticleTarget, type VendorFeed } from './vendor-sources.js';
 import {
@@ -318,8 +318,9 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     ];
     const fixed = array(affected.ranges, true)
       .flatMap((rawRange) => array(record(rawRange).events, true))
-      .map((rawEvent) => optionalString(record(rawEvent).fixed))
-      .filter((v): v is string => !!v);
+      // A fixed version is shown on the notification's Fix line: keep it short and on one line.
+      .map((rawEvent) => singleLine(optionalString(record(rawEvent).fixed) ?? '', 100))
+      .filter((v) => v.length > 0);
     packageClaims.push({
       ecosystem,
       name,
@@ -538,10 +539,12 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
     const pkg = record(vulnerability.package);
     const range = optionalString(vulnerability.vulnerable_version_range);
     const patched = vulnerability.first_patched_version;
-    const fixed =
-      typeof patched === 'object' && patched !== null
+    const fixed = singleLine(
+      (typeof patched === 'object' && patched !== null
         ? optionalString(record(patched).identifier)
-        : optionalString(patched);
+        : optionalString(patched)) ?? '',
+      100,
+    );
     return {
       ...sourcePackage(string(pkg.ecosystem), string(pkg.name)),
       ...(range ? { range } : {}),
