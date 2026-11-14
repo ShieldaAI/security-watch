@@ -20,9 +20,7 @@ try {
     if (
       !/^(dist\/|examples\/|docs\/|package.json$|README.md$|CHANGELOG.md$|LICENSE$|SECURITY.md$|CONTRIBUTING.md$)/.test(
         file.path,
-      ) ||
-      // Maintainer working documents stay in the repository.
-      /^docs\/(agent-best-practices-plan|quality-review)\.md$/.test(file.path)
+      )
     )
       throw new Error(`Unexpected packed file: ${file.path}`);
   for (const required of [

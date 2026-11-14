@@ -20,8 +20,6 @@
     "dist",
     "examples",
     "docs",
-    "!docs/agent-best-practices-plan.md",
-    "!docs/quality-review.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
