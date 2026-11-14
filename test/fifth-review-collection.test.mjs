@@ -405,7 +405,7 @@ test('a vendor feed without a model gets the notice that news is matched without
 
 const mentioned = (ecosystem, name, text) => packageMentioned(text, { ecosystem, name });
 
-test('package context counts only near the name, in the same sentence', () => {
+test('an English word matches only where the text calls it a package', () => {
   for (const [ecosystem, name, text] of [
     [
       'npm',
@@ -433,13 +433,25 @@ test('package context counts only near the name, in the same sentence', () => {
       'A Python package bundled in the installer drops the payload. It runs once the user signs in.',
     ],
     ['PyPI', 'requests', 'The Python backdoor sends requests to its C2 every minute.'],
+    // The word "package" or "library" right next to an ordinary word is still ordinary prose.
+    ['npm', 'which', 'A package named fabrice, which imitates fabric, steals AWS keys.'],
+    ['npm', 'which', 'The packages, which deliver a loader, were removed from npm.'],
+    ['npm', 'three', 'Researchers at Socket found three packages that typosquat popular libraries.'],
+    ['npm', 'buffer', 'A heap-based buffer overflow in the syslog function of the GNU C Library gives root.'],
+    ['npm', 'request', 'The npm package ejs passes options from the request to the template compiler.'],
+    ['npm', 'accepts', 'The JavaScript cryptography library accepts malformed signatures.'],
+    ['npm', 'long', 'The semver package takes a long time to parse crafted ranges.'],
+    ['npm', 'enabled', 'The JavaScript helper enabled, used by debug, was hijacked.'],
+    ['PyPI', 'coverage', 'A Python tool, coverage, executes code from a crafted config file.'],
   ])
     assert.equal(mentioned(ecosystem, name, text), false, `${name}: ${text}`);
   for (const [ecosystem, name, text] of [
     ['npm', 'send', 'A flaw in the send package lets attackers read files.'],
     ['npm', 'next', 'The npm package next is affected by a cache poisoning bug.'],
     ['npm', 'prompts', 'A compromised release of the prompts library was published to npm.'],
-    ['npm', 'enabled', 'The JavaScript helper enabled, used by debug, was hijacked.'],
+    ['npm', 'enabled', 'The npm package enabled, used by debug, was hijacked.'],
+    ['npm', 'which', 'A dependency called which was republished with a backdoor.'],
+    ['PyPI', 'requests', 'Run pip install requests==2.32.0 to get the fix.'],
     ['PyPI', 'requests', 'Maintainers of the requests library fixed a credential leak.'],
     ['npm', 'entities', 'The entities package on npm was compromised.'],
   ])
@@ -486,7 +498,20 @@ test('a well-known library is named as the second word of a sentence, and a rele
 
 test('the inventory matcher agrees with the single-name check on every rule', () => {
   const names = {
-    npm: ['send', 'next', 'express', 'entities', 'validator', 'config', 'ws', 'ip', 'lodash', 'offline'],
+    npm: [
+      'send',
+      'next',
+      'express',
+      'entities',
+      'validator',
+      'config',
+      'ws',
+      'ip',
+      'lodash',
+      'offline',
+      'which',
+      'three',
+    ],
     PyPI: ['requests', 'salt', 'flask', 'coverage'],
   };
   const components = Object.entries(names).flatMap(([ecosystem, list]) =>
@@ -510,6 +535,9 @@ test('the inventory matcher agrees with the single-name check on every rule', ()
     'upgrade to ws@8.17.1',
     'a flaw in lodash lets attackers pollute prototypes',
     'A Python tool, coverage, executes code from a crafted config file.',
+    'The packages, which deliver a loader, were removed from npm.',
+    'Researchers found three packages that typosquat popular libraries.',
+    'A dependency called which was republished with a backdoor.',
   ]) {
     const single = components.some((component) => packageMentioned(text, component));
     assert.equal(packageNamed(text), single, text);

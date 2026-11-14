@@ -16,6 +16,12 @@ import { spawnSync } from 'node:child_process';
 import { runRehearsal, readRehearsal, parseConfig, Store, readFixture } from '../dist/index.js';
 import { acquireLock } from '../dist/lock.js';
 
+// Some tests compare what a rehearsal leaves in the temporary folder. Another process rehearsing at
+// the same time (a second run of this suite) would be counted too, so this file gets its own folder.
+const privateTemp = mkdtempSync(join(tmpdir(), 'watch-rehearsal-private-'));
+process.env.TMPDIR = privateTemp;
+process.on('exit', () => rmSync(privateTemp, { recursive: true, force: true }));
+
 const NOW = Date.parse('2026-11-05T12:00:00Z');
 const at = (offset = 0) => new Date(NOW + offset).toISOString();
 const CANARY = 'PRIVATE_REHEARSAL_CANARY';

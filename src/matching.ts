@@ -14,10 +14,23 @@ export function mentions(text: string, needle: string): boolean {
 }
 
 /**
- * Words that show a text is talking about software packages. The registry and its tools say so
- * plainly. The language alone says less: "the Python backdoor sends requests" is not about the
- * `requests` package, so a language name is enough only for a word that is not among the commonest.
+ * The registry of each ecosystem and its tools, as prose names them. A language name is not in
+ * this list: "the Python backdoor sends requests" is not about the `requests` package.
  */
+const LANGUAGE_CONTEXT: Record<Ecosystem, string> = {
+  npm: 'node\\.js|nodejs|javascript|typescript',
+  PyPI: 'python',
+  Packagist: 'php',
+  Go: 'golang|go',
+  Maven: 'java',
+  'crates.io': 'rust',
+  RubyGems: 'ruby',
+  NuGet: '\\.net|dotnet',
+  Hex: 'elixir|erlang',
+  Pub: 'dart|flutter',
+  Hackage: 'haskell',
+  SwiftURL: 'swift',
+};
 const REGISTRY_CONTEXT: Record<Ecosystem, string> = {
   npm: 'npm|yarn|pnpm',
   PyPI: 'pypi|pip',
@@ -32,49 +45,60 @@ const REGISTRY_CONTEXT: Record<Ecosystem, string> = {
   Hackage: 'hackage|cabal',
   SwiftURL: 'swift package|swiftpm',
 };
-const LANGUAGE_CONTEXT: Record<Ecosystem, string> = {
-  npm: 'node\\.js|nodejs|javascript|typescript',
-  PyPI: 'python',
-  Packagist: 'php',
-  Go: 'golang',
-  Maven: 'java',
-  'crates.io': 'rust',
-  RubyGems: 'ruby',
-  NuGet: '\\.net|dotnet',
-  Hex: 'elixir|erlang',
-  Pub: 'dart|flutter',
-  Hackage: 'haskell',
-  SwiftURL: 'swift',
-};
 /**
- * A test for names that the text connects with packages: the name and a word of package context
- * stand in one sentence, at most 60 characters apart ("the entities package on npm", "a flaw in the
- * requests library"). Context somewhere else in a long article says nothing about this word:
- * "malicious npm packages were found. … which they send to a server" is not about `send`.
- * `language`: whether naming the ecosystem's language is enough, without a registry or "package".
- * "module" is left out: kernel modules, PAM modules and web-server modules are not packages.
+ * A test for English-word names that the text itself calls a package. The word "package" somewhere
+ * near is not enough: "the packages, which deliver a loader", "found three packages" and "a buffer
+ * overflow in the C library" are about other things. The name has to be named as one:
+ * - "the request package", "the requests library", "the entities npm package": the name, then
+ *   "package", "library", "module", "dependency", "gem", "crate" or "plugin", in the singular;
+ * - "the npm package next", "PyPI package requests": a registry, the kind, then the name;
+ * - "a package called send", "a dependency named once": the kind, "called" or "named", the name;
+ * - "npm install send", "pip install requests", "npm:send": an install command or registry prefix;
+ * - "the npm packages chalk and debug": a registry, the kind in the plural, and a short list;
+ * - "the Python framework Tornado": the language, what the software is, the name with a capital.
  */
-function nearContext(
-  names: Iterable<string>,
-  ecosystem: Ecosystem,
-  language: boolean,
-): (text: string) => boolean {
+function namedAsPackage(names: Iterable<string>, ecosystem: Ecosystem): (text: string) => boolean {
   const unique = [...new Set([...names].map((name) => name.trim()).filter((name) => name.length >= 3))];
-  const context = `(?:packages?|librar(?:y|ies)|dependenc(?:y|ies)|${REGISTRY_CONTEXT[ecosystem]}${
-    language ? `|${LANGUAGE_CONTEXT[ecosystem]}` : ''
-  })`;
-  const gap = '[^.!?\\n]{0,60}';
+  const registry = `(?:${REGISTRY_CONTEXT[ecosystem]})`;
+  const kind = '(?:package|library|module|dependency|gem|crate|plugin)';
+  const kinds = '(?:packages|libraries|modules|dependencies|gems|crates|plugins)';
+  const item = '[\\p{L}\\p{N}@/._-]+';
+  const quote = '["\'`‘’“”]?';
   const { before, after } = boundary;
   const patterns: RegExp[] = [];
   for (let offset = 0; offset < unique.length; offset += 400) {
-    const alternatives = `(?:${unique
+    const name = `(?:${unique
       .slice(offset, offset + 400)
       .map(escape)
       .join('|')})`;
     patterns.push(
       new RegExp(
-        `${before}${alternatives}${after}${gap}${before}${context}${after}|${before}${context}${after}${gap}${before}${alternatives}${after}`,
+        [
+          `${before}${quote}${name}${quote} (?:${registry} )?${kind}${after}`,
+          `${before}${registry} ${kind} ${quote}${name}${after}`,
+          `${before}${kind} (?:called|named) ${quote}${name}${after}`,
+          `${before}(?:npm|yarn|pnpm|pip|pip3|gem|cargo|composer|go|dotnet|nuget) (?:install|add|i|get|require) (?:-\\S+ )*${quote}${name}(?![\\p{L}\\p{N}_/\\-])`,
+          `${before}${registry}:${name}${after}`,
+          // A registry and the kind in the plural, with a short list: "npm packages chalk and debug",
+          // "the npm libraries colors and faker", "chalk and debug npm packages".
+          `${before}${registry} ${kinds} (?:${item},? (?:and )?){0,5}${quote}${name}${after}`,
+          // Before the registry word the name must be part of a list: "six npm packages" and
+          // "malicious npm packages" are a number and an adjective.
+          `${before}${quote}${name}${quote}(?:,? (?:and )?${item}){1,5} ${registry} ${kinds}${after}`,
+          `${before}${item}(?:, ${item}){0,4},? and ${quote}${name}${quote} ${registry} ${kinds}${after}`,
+        ].join('|'),
         'iu',
+      ),
+    );
+    // The ecosystem's language, what the software is, then the name with a capital: "the Python
+    // framework Tornado", "the Python formatter Black".
+    patterns.push(
+      new RegExp(
+        `${before}(?i:${LANGUAGE_CONTEXT[ecosystem]}) (?:[\\p{Ll}-]+ )?(?:framework|library|package|module|formatter|linter|tool|client|server|parser|compiler|bundler|runtime) (?:${unique
+          .slice(offset, offset + 400)
+          .map(capitalised)
+          .join('|')})${after}`,
+        'u',
       ),
     );
   }
@@ -199,7 +223,8 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
   let seen = recent.get(text);
   if (!seen) {
     if (recent.size >= RECENT_TEXTS) recent.clear();
-    seen = { lower: text.toLowerCase(), answers: new Map() };
+    const lower = text.toLowerCase();
+    seen = { lower, words: new Set(lower.match(/[a-z0-9]+/g) ?? []), answers: new Map() };
     recent.set(text, seen);
   }
   const key = `${component.ecosystem}\n${name}`;
@@ -207,7 +232,14 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
   if (answer === undefined) {
     // Most components are not in most texts: a plain search settles that before any expression
     // is built for the name.
-    answer = seen.lower.includes(name.toLowerCase()) && nameTests(component.ecosystem, name)(text);
+    // A name of plain letters and digits is looked up among the words of the text ("express", or
+    // "expressjs"); searching the whole text for every component costs too much for a lockfile of
+    // thousands. Any other name is searched for as it is.
+    const wanted = name.toLowerCase();
+    const present = /^[a-z0-9]+$/.test(wanted)
+      ? seen.words.has(wanted) || seen.words.has(`${wanted}js`)
+      : seen.lower.includes(wanted);
+    answer = present && nameTests(component.ecosystem, name)(text);
     seen.answers.set(key, answer);
   }
   return answer;
@@ -215,7 +247,7 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
 /** How many texts, and how many compiled names, are remembered before starting over. */
 const RECENT_TEXTS = 32;
 const COMPILED_NAMES = 50_000;
-const recent = new Map<string, { lower: string; answers: Map<string, boolean> }>();
+const recent = new Map<string, { lower: string; words: Set<string>; answers: Map<string, boolean> }>();
 const compiled = new Map<string, (text: string) => boolean>();
 /** The compiled test for one name; building its expressions once matters for large inventories. */
 function nameTests(ecosystem: Ecosystem, name: string): (text: string) => boolean {
@@ -226,12 +258,14 @@ function nameTests(ecosystem: Ecosystem, name: string): (text: string) => boolea
     const mention = bounded(escape(name));
     const kind = nameKind(name);
     const named = kind === 'dictionary' ? writtenAsName([name]) : () => false;
-    const near = kind === 'distinctive' ? undefined : nearContext([name], ecosystem, kind === 'dictionary');
+    const near = kind === 'distinctive' ? undefined : namedAsPackage([name], ecosystem);
     test = (text) => {
       if (release(text)) return true;
-      if (name.length < 3 || !mention.test(text)) return false;
-      if (!near || near(text)) return true;
-      return named(text);
+      if (name.length < 3) return false;
+      // Named as a package, which may be written with a version ("npm install send@latest").
+      if (near?.(text)) return true;
+      if (!mention.test(text)) return false;
+      return !near || named(text);
     };
     if (compiled.size >= COMPILED_NAMES) compiled.clear();
     compiled.set(key, test);
@@ -374,8 +408,8 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
   const ecosystemTests = [...byEcosystem].map(([ecosystem, names]) => ({
     ecosystem,
     // The same rules as `packageMentioned`, for every name of the ecosystem at once.
-    common: nearContext(names.common, ecosystem, false),
-    dictionary: nearContext(names.dictionary, ecosystem, true),
+    common: namedAsPackage(names.common, ecosystem),
+    dictionary: namedAsPackage(names.dictionary, ecosystem),
     release: releaseTest(names.all, ecosystem),
   }));
   const matcher: InventoryMatcher = {

@@ -116,11 +116,12 @@ test('a listed record whose detail is refused for good is given up on a day afte
   const listing = [listedAt('CVE-2026-81002', 5 * 60_000), listedAt('CVE-2026-81003', 600_000)];
   const gone = (id) => (id === 'CVE-2026-81003' ? { status: 404, headers: {}, body: '' } : undefined);
   const [first, soon, carried, day, after] = await sequence(listing, gone, [0, 0.5, 2, 25, 26]);
-  // A failure that just happened holds the checkpoint, as any incomplete collection does.
+  // The poll of the first failure holds the checkpoint, as any incomplete collection does.
   assert.match(first.result.errors[0].message, /1 advisory detail request\(s\) failed.*HTTP 404/);
   assert.equal(first.result.checkpoints.cve_now, checkpoint.cve_now);
-  assert.equal(soon.result.checkpoints.cve_now, checkpoint.cve_now);
-  // Once it has lasted, the record is asked for by name and the checkpoint moves.
+  // From the next poll on the record is asked for by name and the checkpoint moves.
+  assert.ok(soon.asked.includes('CVE-2026-81003'));
+  assert.equal(soon.result.checkpoints.cve_now, iso(NOW + 0.5 * HOUR));
   assert.ok(carried.asked.includes('CVE-2026-81003'));
   assert.match(carried.result.errors[0].message, /1 new record\(s\) are still to be read/);
   assert.equal(carried.result.checkpoints.cve_now, iso(NOW + 2 * HOUR));

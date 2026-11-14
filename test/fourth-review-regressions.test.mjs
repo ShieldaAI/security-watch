@@ -91,8 +91,10 @@ test('a story about the package still matches an English-word name', () => {
     ['npm', 'entities', 'The entities package on npm was compromised (CVE-2026-11111).'],
     ['npm', 'request', 'A malicious release of the request npm package steals tokens.'],
     ['PyPI', 'requests', 'A flaw in the requests library leaks proxy credentials.'],
-    // The language is enough for a word that is not among the commonest.
-    ['PyPI', 'coverage', 'A Python tool, coverage, executes code from a crafted config file.'],
+    // Named as a package: an install command, a registry prefix, "called".
+    ['PyPI', 'coverage', 'Run pip install coverage only from the official index.'],
+    ['npm', 'send', 'The advisory covers npm:send before 0.19.0.'],
+    ['npm', 'once', 'A dependency called once is pulled in by the tool.'],
     // A release.
     ['npm', 'send', 'Upgrade to send@0.19.0 to fix template injection.'],
     ['npm', 'debug', 'Malicious debug v4.4 was live for two hours.'],
