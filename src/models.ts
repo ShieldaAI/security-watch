@@ -282,15 +282,23 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
  * what it means: a number that stands alone ("30 days", "port 8080", a year) cannot be told from a
  * version and is accepted. What is refused is a number that is visibly part of something else:
  * - another number or identifier: "4" in "4.2", "4,200", "3/4", "10:30", "CVE-2026-40001";
- * - a longer version: "2.4.1" in "2.4.1-rc.1", "2.4.1+build.5", "2.4.1_p1", "1.2" in "1.2.x";
- * - an amount: "$5", "45%", "#45", "-5".
+ * - a longer version: "2.4.1" in "2.4.1-rc.1", "2.4.1+build.5", "2.4.1.RELEASE", "1.2" in "1.2.x";
+ * - an amount or a unit: "$5", "5€", "45%", "45 %", "#45", "-5", "20°";
+ * - a port with its protocol: "443/tcp".
+ * Hyphens, dashes and minus signs of every kind count as hyphens ("CVE‑2026‑40001", "2.0–2.4").
  * A "v" before the version belongs to it ("v2.4.1"). Either end of a range written with a hyphen is
  * a citation ("2.0-2.4", "versions 12-16"), and so is a version in a list ("2.4.1, 2.4.2",
  * "2.4.1/2.4.2") or after a name joined by a hyphen ("exampledb2-2.4.52", "node-18").
  */
-function citesVersion(quote: string, version: string): boolean {
+function citesVersion(original: string, version: string): boolean {
   const wanted = version.trim();
   if (!wanted) return false;
+  // Every kind of hyphen, dash and minus is a hyphen, and every kind of space a space, so that
+  // "CVE‑2026‑40001" and "45 %" are read as they are written. Each is one UTF-16 unit, so the
+  // positions stay the same.
+  const quote = original
+    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
+    .replace(/[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g, ' ');
   const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
   // A short whole number, without a leading zero ("0100" is half of a telephone number).
   const integer = (token: string) => /^(?:0|[1-9]\d{0,3})$/u.test(token);
@@ -302,8 +310,30 @@ function citesVersion(quote: string, version: string): boolean {
     if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
     if (/^[\p{L}\p{N}]/u.test(after) || /^\.[\dx*]/iu.test(after)) continue;
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
-    if (/[$€£¥#_~+:]$/u.test(before) || /\p{L}\/$/u.test(before) || /(?:^|\s)-$/u.test(before)) continue;
-    if (/^(?:%|[_~+]|:\d|-\p{L})/u.test(after)) continue;
+    if (
+      /[\p{Sc}#_~+∶±×№⁄∕·]$/u.test(before) ||
+      // A time ("10:30") or a thousands separator ("4'200"); a quotation mark or a label is not one.
+      /\d['’]$/u.test(before) ||
+      // After a colon joined to a word or number: a port ("example.com:443"), a vector
+      // ("CVSS:3.1"), an address ("::1"), a time.
+      /[\p{L}\p{N}:]:$/u.test(before) ||
+      /\p{L}\/$/u.test(before) ||
+      // A minus sign ("-5", "(-5)", "x=-5") or a decimal point (".5 seconds").
+      /(?:^|[^\p{L}\p{N}.])-$/u.test(before) ||
+      /(?:^|[^\p{N}])\.$/u.test(before)
+    )
+      continue;
+    // After it: a percent sign or a currency (also after a space), a unit of degrees, a protocol
+    // ("443/tcp"), a qualifier that makes it another version ("2.4.1.RELEASE", "2.4.1-beta").
+    if (
+      /^(?: ?[%‰％٪\p{Sc}°×]|[_~+·∶⁄∕]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(after) ||
+      // A qualifier that makes it another release ("2.4.1.RELEASE", "5.3.20.Final", "1.0.M2").
+      // A file extension does not ("log4j-2.17.1.jar", "foo-1.2.3.tar.gz").
+      /^\.(?:release|final|ga|snapshot|build|sp\d*|cr\d*|rc\d*|m\d+|beta\d*|alpha\d*)(?![\p{L}\p{N}])/iu.test(
+        after,
+      )
+    )
+      continue;
     // In a list, both neighbours are versions of the same kind.
     const listed = /([\p{L}\p{N}.]*\d)[,/]$/u.exec(before)?.[1];
     if (listed !== undefined && !(dotted(wanted) && dotted(listed))) continue;

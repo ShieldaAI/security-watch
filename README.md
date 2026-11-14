@@ -27,7 +27,7 @@ System: web-shop / library:ee5130742729fbc72bd45978
 Where to look: Web shop (owner: Dana, platform team) - runs on cluster eu-1, namespace shop
 Affected item: npm express 4.21.2 - checkout API, repository acme/checkout, file package.json
 Applicability: affected; source severity: critical; priority: critical
-express@4.21.2 in Web shop: affected.
+Summary: express@4.21.2 in Web shop: affected.
 • The exact npm identity express and installed version 4.21.2 match affected advisory evidence.
 Fix: 4.22.0
 Rule: Matched library rule at critical severity; source severity remains the minimum.

@@ -172,11 +172,14 @@ function safeText(input: string, length: number, mentions = true): string {
   const cleaned = cleanText(input, Math.max(length, 4000))
     // A lone half of a surrogate pair is not text; services may refuse a message that has one.
     .replace(/\p{Cs}/gu, '\ufffd')
-    // Direction marks, and characters that show as nothing: zero-width and joining marks, the soft
-    // hyphen. Removed before spaces are counted, so that spaces they separated are one run.
-    .replace(/[\r\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '')
-    // Fillers that show as a blank (braille blank, Hangul fillers) are spaces to the reader.
+    // Fillers that show as a blank (braille blank, Hangul fillers) are spaces to the reader. Some
+    // of them count as default-ignorable, so they are turned into spaces first.
     .replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, ' ')
+    // Characters that show as nothing (Unicode's default-ignorable code points: zero-width and
+    // joining marks, direction marks, variation selectors, tag characters, the soft hyphen).
+    // Removed before spaces are counted, so that spaces they separated are one run.
+    // Format characters and the object and annotation marks show as nothing too.
+    .replace(/[\r\p{Default_Ignorable_Code_Point}\p{Cf}\ufff9-\ufffc]/gu, '')
     // A run of blanks moves what follows as far as a line break would.
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim();
@@ -220,6 +223,25 @@ const webUrl = (value: string): boolean => {
     return false;
   }
 };
+/**
+ * The fixed versions, each whole. Many fixed branches (or Go pseudo-versions) can be long: as many
+ * whole versions as fit are shown, and the line says how many more there are.
+ */
+function fixLine(fix: string): string {
+  const versions = singleLine(fix, 4000)
+    .split(/;\s*/)
+    .map((version) => single(version, 120))
+    .filter(Boolean);
+  const shown: string[] = [];
+  let length = 0;
+  for (const version of versions) {
+    if (shown.length && length + version.length + 2 > 300) break;
+    shown.push(version);
+    length += version.length + 2;
+  }
+  const more = versions.length - shown.length;
+  return `Fix: ${shown.join('; ')}${more ? `; and ${more} more (run explain for all)` : ''}`;
+}
 /** One Slack section holds 3,000 characters. */
 const MESSAGE_LIMIT = 2900;
 export function notificationText(job: Notification): { subject: string; text: string } {
@@ -250,7 +272,7 @@ export function notificationText(job: Notification): { subject: string; text: st
   ];
   // The fix, the rule that sent the message, the time and the sources close every message, whole.
   const closing = [
-    ...(a.fix ? [`Fix: ${single(a.fix, 160)}`] : []),
+    ...(a.fix ? [fixLine(a.fix)] : []),
     `Rule: ${single(reason, 180)}`,
     `Assessment time: ${single(a.updated_at, 40)}`,
     ...urls
@@ -259,21 +281,18 @@ export function notificationText(job: Notification): { subject: string; text: st
       .slice(0, 3),
   ].join('\n');
   const SHORTENED = '(Message shortened; run explain for the full finding.)';
-  let room = MESSAGE_LIMIT - closing.length - 1;
+  const room = MESSAGE_LIMIT - closing.length - 1;
+  // Everything fits: no note.
+  if (body.join('\n').length <= room) return { subject, text: [...body, closing].join('\n') };
+  // Otherwise whole lines are kept while they fit with the note that says the rest was left out.
   const kept: string[] = [];
-  let shortened = false;
+  let left = room - (SHORTENED.length + 1);
   for (const line of body) {
-    // Room is kept for the note that says lines were left out.
-    if (line.length + 1 > room - (SHORTENED.length + 1)) {
-      shortened = true;
-      break;
-    }
+    if (line.length + 1 > left) break;
     kept.push(line);
-    room -= line.length + 1;
+    left -= line.length + 1;
   }
-  // Only the last line that fits may make the note unnecessary.
-  if (shortened) kept.push(SHORTENED);
-  return { subject, text: [...kept, closing].join('\n') };
+  return { subject, text: [...kept, SHORTENED, closing].join('\n') };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;
