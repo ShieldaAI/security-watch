@@ -840,7 +840,8 @@ test('a Slack message is retried, failed or left uncertain by what is known abou
   for (const code of ['DNS_FAILED', 'CONNECTION_FAILED'])
     assert.equal(await slackOutcome(fail(new NetworkError(code))), 'pending', code);
   // The request may have been sent.
-  for (const code of ['TIMEOUT', 'RESPONSE_FAILED'])
+  // The codes the HTTP client really uses (src/http.ts).
+  for (const code of ['REQUEST_TIMEOUT', 'REQUEST_FAILED', 'REQUEST_ABORTED', 'RESPONSE_TOO_LARGE'])
     assert.equal(await slackOutcome(fail(new NetworkError(code))), 'unknown', code);
   assert.equal(await slackOutcome(fail(new Error('socket hang up'))), 'unknown');
 });

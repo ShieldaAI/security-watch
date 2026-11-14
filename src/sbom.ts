@@ -146,7 +146,12 @@ export function importCycloneDx(path: string): SbomImport {
           component.digest = `sha256:${String(values[0]).toLowerCase()}`;
         }
       }
-      if (componentIds.has(component.id)) throw new Error('Duplicate SBOM component identity');
+      if (componentIds.has(component.id)) {
+        // The same package listed twice without a reference of its own (nested under two parents)
+        // is one component. A reference used twice is a contradiction in the document.
+        if (typeof ref !== 'string') continue;
+        throw new Error('Duplicate SBOM component identity');
+      }
       componentIds.add(component.id);
       if (typeof ref === 'string') byReference.set(ref, component);
       result.components.push(component);

@@ -303,25 +303,33 @@ function citesVersion(original: string, version: string): boolean {
   const wanted = normal(version).trim();
   if (!wanted) return false;
   const quote = normal(original);
-  const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
+  // A dotted version, possibly with a letter release ("1.1.1w").
+  const dotted = (token: string) => /^v?\d+(?:\.\d+)+[a-z]?$/u.test(token);
   // A short whole number, without a leading zero ("0100" is half of a telephone number).
   const integer = (token: string) => /^(?:0|[1-9]\d{0,3})$/u.test(token);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
     let before = quote.slice(Math.max(0, at - 64), at);
     const after = quote.slice(at + wanted.length, at + wanted.length + 64);
-    // "v2.4.1": the letter belongs to the version, not to a word.
-    if (/(?:^|[^\p{L}\p{N}])v$/iu.test(before) && /^\d/u.test(wanted)) before = before.slice(0, -1);
+    // "v2.4.1", "v.2.4.1", "ver.2.4.1": the abbreviation belongs to the version, not to a word.
+    const abbreviation = /(?:^|[^\p{L}\p{N}])(?:v|ver)\.?$/iu.exec(before);
+    if (abbreviation && /^\d/u.test(wanted))
+      before = before.slice(0, before.length - abbreviation[0].replace(/^[^vV]/u, '').length);
     if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
     if (/^[\p{L}\p{N}]/u.test(after) || /^\.[\dx*]/iu.test(after)) continue;
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
-      /[\p{Sc}#_~+∶±×№⁄∕·]$/u.test(before) ||
+      /[\p{Sc}#_~∶±×№⁄∕·]$/u.test(before) ||
+      /[\p{L}\p{N}]\+$/u.test(before) ||
       // A time ("10:30") or a thousands separator ("4'200"); a quotation mark or a label is not one.
       /\d['’]$/u.test(before) ||
       // After a colon joined to a word or number: a port ("example.com:443"), a vector
       // ("CVSS:3.1"), an address ("::1"), a time.
       /[\p{L}\p{N}:]:$/u.test(before) ||
-      /\p{L}\/$/u.test(before) ||
+      // A protocol version ("HTTP/2", "TLS/1.3"); a product and its version ("Apache/2.4.58") is a
+      // citation.
+      /(?:^|[^\p{L}])(?:https?|http2|tls|ssl|ssh|smb|smtp|imap|pop3|spdy|quic|rtsp|sip|snmp|ftp|ldap)\/$/iu.test(
+        before,
+      ) ||
       // A minus sign ("-5", "(-5)", "x=-5") or a decimal point (".5 seconds").
       /(?:^|[^\p{L}\p{N}.])-$/u.test(before) ||
       /(?:^|[^\p{N}])\.$/u.test(before)
@@ -330,10 +338,12 @@ function citesVersion(original: string, version: string): boolean {
     // After it: a percent sign or a currency (also after a space), a unit of degrees, a protocol
     // ("443/tcp"), a qualifier that makes it another version ("2.4.1.RELEASE", "2.4.1-beta").
     if (
-      /^(?: ?[%‰％٪\p{Sc}°×]|[_~+·∶⁄∕]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(after) ||
+      // A plus sign joined to more is build metadata ("2.4.1+build.5"); alone it means "and later"
+      // ("3.0+ are affected").
+      /^(?: ?[%‰％٪\p{Sc}°×]|[_~·∶⁄∕]|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(after) ||
       // A qualifier that makes it another release ("2.4.1.RELEASE", "5.3.20.Final", "1.0.M2").
       // A file extension does not ("log4j-2.17.1.jar", "foo-1.2.3.tar.gz").
-      /^\.(?:release|final|ga|snapshot|build|sp\d*|cr\d*|rc\d*|m\d+|beta\d*|alpha\d*)(?![\p{L}\p{N}])/iu.test(
+      /^\.(?:release|final|ga|snapshot|build|sp\d*|cr\d*|rc\d*|m\d+|beta\d*|alpha\d*|post\d*|dev\d*|pre(?:view)?\d*|v\d{6,})(?![\p{L}\p{N}])/iu.test(
         after,
       )
     )

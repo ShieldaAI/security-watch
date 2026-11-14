@@ -49,18 +49,22 @@ export function smtpTranscript(): {
   let logged = false;
   let clientSeen = false;
   let serverSeen = false;
+  let notSmtp = false;
   let envelopeStarted = false;
   return {
     observe(entry, line) {
       logged = true;
       const side = typeof entry === 'object' && entry !== null && 'tnx' in entry ? entry.tnx : undefined;
+      // A first line from the server that is not an SMTP reply ("* OK IMAP ready", "SSH-2.0") is
+      // another service on that port: an SMTP client writes nothing to it.
+      if (side === 'server' && !serverSeen && !/^\d{3}(?:[ -]|$)/.test(String(line).trim())) notSmtp = true;
       if (side === 'server') serverSeen = true;
       if (side !== 'client') return;
       clientSeen = true;
       if (/^\s*(?:MAIL|RCPT|DATA|BDAT)\b/i.test(String(line))) envelopeStarted = true;
     },
     envelopeStarted: () => envelopeStarted,
-    nothingHandedOver: () => logged && !envelopeStarted && (clientSeen || !serverSeen),
+    nothingHandedOver: () => logged && !envelopeStarted && (clientSeen || !serverSeen || notSmtp),
   };
 }
 
@@ -183,7 +187,12 @@ function safeText(input: string, length: number, mentions = true): string {
     // A run of blanks moves what follows as far as a line break would.
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim();
-  const text = mentions ? cleaned.replace(/@/g, '@\u200b') : cleaned;
+  // Only a word Slack treats as a group mention ("@channel", "@here", "@everyone") gets an
+  // invisible break; "express@4.21.2" and "@angular/core" stay exactly as written, so they can be
+  // copied and searched for.
+  const text = mentions
+    ? cleaned.replace(/@(?=(?:channel|here|everyone|group)(?![\p{L}\p{N}_]))/giu, '@\u200b')
+    : cleaned;
   // A value that does not fit ends with "…", so a reader never takes a cut value for a whole one
   // ("8.0.3" for "8.0.39"). An emoji is never cut in half.
   return text.length <= length ? text : `${cut(text, length - 1).trimEnd()}…`;
@@ -261,6 +270,7 @@ function fixLine(fix: string): string {
     length += version.length + 2;
   }
   const more = versions.length - shown.length;
+  if (!shown.length) return `Fix: ${versions.length} version(s) too long to show (run explain for all)`;
   return `Fix: ${shown.join('; ')}${more ? `; and ${more} more (run explain for all)` : ''}`;
 }
 /** One Slack section holds 3,000 characters. */
