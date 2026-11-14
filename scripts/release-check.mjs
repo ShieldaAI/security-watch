@@ -14,7 +14,18 @@ if (
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const problem = releaseProblem(manifest, process.env);
 if (problem) throw new Error(problem);
-execFileSync(process.execPath, [process.env.npm_execpath, 'run', 'check'], { cwd: root, stdio: 'inherit' });
+// The publish command's own options reach this script as npm_config_* variables and would be
+// inherited by every npm command the checks run: under `--dry-run` the package check's `npm pack`
+// would write no tarball. The checks run as they do from a plain `npm run check`.
+const checkEnvironment = { ...process.env };
+for (const key of Object.keys(checkEnvironment))
+  if (['npm_config_dry_run', 'npm_config_tag', 'npm_config_otp'].includes(key.toLowerCase()))
+    delete checkEnvironment[key];
+execFileSync(process.execPath, [process.env.npm_execpath, 'run', 'check'], {
+  cwd: root,
+  stdio: 'inherit',
+  env: checkEnvironment,
+});
 // Everything packed apart from the build output must be a tracked file: an ignored file left in a
 // published directory does not show in `git status`.
 const [packed] = JSON.parse(
@@ -24,6 +35,7 @@ const [packed] = JSON.parse(
     {
       cwd: root,
       encoding: 'utf8',
+      env: checkEnvironment,
     },
   ),
 );
