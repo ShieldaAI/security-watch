@@ -595,6 +595,8 @@ async function main(): Promise<void> {
       components: inventory.systems.reduce((sum, s) => sum + s.components.length, 0),
       // Entries that were left out or will not match as written. Scans report the same list.
       import_warnings: inventory.import_warnings ?? [],
+      // Entries accepted as written that may be a typing mistake, such as a capitalised npm name.
+      name_notices: inventory.name_notices ?? [],
       missing_environment_variables: missing,
       database: config.database,
       models_enabled: config.models.enabled,

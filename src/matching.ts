@@ -1,5 +1,5 @@
 import { packageKey } from './ecosystems.js';
-import { everydayWord } from './everyday-words.js';
+import { everydayWord, properName } from './everyday-words.js';
 import type { Ecosystem } from './ecosystems.js';
 import type { Inventory } from './types.js';
 
@@ -46,9 +46,13 @@ function plainWord(name: string): boolean {
   return /^\p{L}+$/u.test(name.trim()) && everydayWord(name);
 }
 
-/** After a name: a version ("Requests 2.32.0", "send@0.19.0") or, for npm, the ".js" suffix. */
+/**
+ * After a name: something only a release is written with. That is "@1.2", "v1.2", a three-part
+ * version ("Requests 2.32.0") or, for npm, the ".js" suffix. A bare decimal is not enough: "send
+ * 1.5 million requests" and "the next 5.5 years" are quantities.
+ */
 function releaseSuffix(ecosystem: Ecosystem): string {
-  return `(?:${ecosystem === 'npm' ? '\\.js(?:[ @]v?\\d+(?:\\.\\d+)?)?|' : ''}[ @]v?\\d+\\.\\d+)`;
+  return `(?:${ecosystem === 'npm' ? '\\.js(?:[ @]v?\\d+(?:\\.\\d+)?)?|' : ''}@v?\\d+\\.\\d+| v\\d+\\.\\d+| \\d+\\.\\d+\\.\\d+)`;
 }
 
 /**
@@ -62,7 +66,29 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
   if (name.length < 3) return false;
   if (bounded(`${escape(name)}${releaseSuffix(component.ecosystem)}`).test(text)) return true;
   if (!mentions(text, name)) return false;
-  return !plainWord(name) || packageContext(text, component.ecosystem);
+  if (!plainWord(name)) return true;
+  return packageContext(text, component.ecosystem) || (properName(name) && namedInSentence(text, name));
+}
+
+const namePatterns = new Map<string, RegExp>();
+/**
+ * Whether the word is written as a name: with a capital straight after a word that has none ("a
+ * flaw in Express"), or opening a sentence that goes on in lower case ("Rails releases patches").
+ * A capital inside a headline in title case shows nothing.
+ */
+function namedInSentence(text: string, name: string): boolean {
+  const word = name.trim();
+  const known = namePatterns.get(word);
+  if (known) return known.test(text);
+  const capitalised = escape(word[0]!.toUpperCase() + word.slice(1).toLowerCase());
+  const end = '(?![\\p{L}\\p{N}_@/\\-])';
+  const pattern = new RegExp(
+    `(?<=(?:^|[^\\p{L}\\p{N}])\\p{Ll}[\\p{L}\\p{N}'’-]*[,:]? )${capitalised}${end}` +
+      `|(?<=^|[.!?]\\s+|\\n)${capitalised}${end}(?= \\p{Ll})`,
+    'u',
+  );
+  namePatterns.set(word, pattern);
+  return pattern.test(text);
 }
 
 export interface InventoryMatcher {
@@ -121,6 +147,7 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
   const packages = new Set<string>();
   const declared: string[] = [];
   const distinctive: string[] = [];
+  const proper = new Set<string>();
   const byEcosystem = new Map<Ecosystem, { plain: string[]; all: string[] }>();
   for (const system of inventory.systems) {
     for (const component of system.components) {
@@ -129,8 +156,10 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
       if (!byEcosystem.has(component.ecosystem)) byEcosystem.set(component.ecosystem, { plain: [], all: [] });
       const names = byEcosystem.get(component.ecosystem)!;
       names.all.push(component.name);
-      if (plainWord(component.name)) names.plain.push(component.name);
-      else distinctive.push(component.name);
+      if (plainWord(component.name)) {
+        names.plain.push(component.name);
+        if (properName(component.name)) proper.add(component.name);
+      } else distinctive.push(component.name);
     }
     for (const product of system.products ?? []) declared.push(product.name, ...product.keywords);
     declared.push(...(system.keywords ?? []));
@@ -147,6 +176,7 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
     declared: declaredTest,
     packageNamed: (text) =>
       distinctiveTest(text) ||
+      [...proper].some((name) => namedInSentence(text, name)) ||
       ecosystemTests.some(
         ({ ecosystem, plain, release }) => release(text) || (packageContext(text, ecosystem) && plain(text)),
       ),

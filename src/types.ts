@@ -105,6 +105,8 @@ export interface System extends InventoryEvidence {
 export interface Inventory {
   systems: System[];
   import_warnings?: string[];
+  /** Entries that are accepted as written but may not be what was meant. They do not degrade a scan. */
+  name_notices?: string[];
 }
 export interface PackageClaim {
   ecosystem: string;

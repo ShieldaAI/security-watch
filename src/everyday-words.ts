@@ -109,11 +109,30 @@ ways weak web week weeks weight well were what when where whether which while wh
 widget width wild will win window windows wire wise wish with within without word words work worker
 workers workflow works world worm worse would wrap wrapper write writer writes wrong year years yes
 yet you young your zero zone
+are async balanced brunch clap commander delegates descriptors err figures finished flatten forwarded
+gauge grunt gulp helmet hosted ink lie math mem meow mute nan negotiator opener pend rand slash tar
+timers ware
 `;
 
-const EVERYDAY = new Set(WORDS.split(/\s+/).filter(Boolean));
+/**
+ * Names of well-known software that are also everyday words. Prose about the software writes them
+ * with a capital in the middle of a sentence ("a flaw in Express", "the Flask framework"); prose
+ * using the word does not ("researchers express concern"). They are everyday words, with that one
+ * extra way to count as a name; see `packageMentioned` in matching.ts.
+ */
+const PROPER = new Set(
+  `bottle celery chef ember express fiber flask ghost gin hyper jest meteor mocha nose passport
+pillow puma pyramid rack rails react rocket salt tide tornado warp`.split(/\s+/),
+);
+
+const EVERYDAY = new Set([...WORDS.split(/\s+/).filter(Boolean), ...PROPER]);
 
 /** Whether a package name is also a word that ordinary prose uses in its everyday sense. */
 export function everydayWord(name: string): boolean {
   return EVERYDAY.has(name.trim().toLowerCase());
+}
+
+/** Whether an everyday word is also the name of well-known software, written with a capital. */
+export function properName(name: string): boolean {
+  return PROPER.has(name.trim().toLowerCase());
 }

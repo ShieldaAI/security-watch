@@ -185,7 +185,7 @@ poll_interval_minutes: 30
 news_lookback_minutes: 40
 ```
 
-Overlapping scans deduplicate findings. After downtime, the worker catches up from the last successful source checkpoint; older tracked advisories and exact package matches remain in scope. See [scan schedules and news windows](docs/configuration.md#scan-schedule-and-news-window).
+Overlapping scans deduplicate findings. After downtime, the worker catches up from the last successful source checkpoint (for cve.now, up to about three months of records; a longer gap is reported); older tracked advisories and exact package matches remain in scope. See [scan schedules and news windows](docs/configuration.md#scan-schedule-and-news-window).
 
 `doctor` validates local configuration and required environment variables, and lists inventory entries that were left out or will not match as written. It exits with status 2 whenever it prints `ok: false`. It does not contact providers, validate a model by spending tokens, or send test messages. A dry run writes no application state, disables model calls and sends no notifications; public advisory/feed requests still occur. For an offline demonstration, run:
 
@@ -236,7 +236,7 @@ python:requests==2.32.3   # billing worker, services/billing/requirements.txt
 
 A line that starts with `#` is still an ordinary comment. When the same library is listed twice with different notes, both notes are kept. Systems and products accept a `note:` field in the inventory file. Notes stay on your machine and in your notifications; they are never sent to advisory sources or AI models. See [notes](docs/configuration.md#notes-telling-readers-where-to-look).
 
-These are examples, not version recommendations. Use the registry's published package spelling, especially for NuGet. npm names are lower case and case-sensitive: `npm:Lodash` is kept but matches nothing published as `lodash`, and `doctor` lists it under `import_warnings`. Omit a version you have not verified; do not substitute `latest`, a version constraint or a guessed release.
+These are examples, not version recommendations. Use the registry's published package spelling, especially for NuGet. npm names are lower case and case-sensitive: `npm:Lodash` is kept but matches nothing published as `lodash`, and `doctor` lists it under `name_notices`. Omit a version you have not verified; do not substitute `latest`, a version constraint or a guessed release.
 
 ```sh
 security-watch normalize-libraries --input ./libraries.txt

@@ -180,6 +180,7 @@ export const inventorySnapshotSchema = z
       .min(1)
       .max(1000),
     import_warnings: z.array(z.string().max(2000)).max(1000).optional(),
+    name_notices: z.array(z.string().max(2000)).max(1000).optional(),
   })
   .refine((inventory) => {
     const ids = new Set(inventory.systems.map((system) => system.id));
@@ -263,6 +264,7 @@ export function loadInventory(path: string): Inventory {
   const parsed = inventorySchema.parse(document.toJS({ maxAliasCount: 0 }));
   const systemIds = new Set<string>();
   const importWarnings: string[] = [];
+  const nameNotices: string[] = [];
   const systems = parsed.systems.map(({ lockfile, libraries, sbom, ...system }) => {
     if (systemIds.has(system.id)) throw new Error(`Duplicate system ID: ${system.id}`);
     systemIds.add(system.id);
@@ -296,10 +298,11 @@ export function loadInventory(path: string): Inventory {
       }
     }
     // Names typed by hand, before anything is imported: a lockfile or SBOM carries the published
-    // spelling, a person may have typed `Lodash` for `lodash`.
+    // spelling, a person may have typed `Lodash` for `lodash`. The entry is valid as written (some
+    // old packages do have capitals), so this is a notice to read once, not a monitoring fault.
     for (const component of system.components) {
-      const warning = capitalisedNpmName(component);
-      if (warning && importWarnings.length < 1000) importWarnings.push(`${system.id}: ${warning}`);
+      const notice = capitalisedNpmName(component);
+      if (notice && nameNotices.length < 1000) nameNotices.push(`${system.id}: ${notice}`);
     }
     if (sbom) {
       const imported = importCycloneDx(resolve(dirname(absolute), sbom));
@@ -332,5 +335,9 @@ export function loadInventory(path: string): Inventory {
     }
     return system;
   });
-  return { systems, ...(importWarnings.length ? { import_warnings: importWarnings } : {}) };
+  return {
+    systems,
+    ...(importWarnings.length ? { import_warnings: importWarnings } : {}),
+    ...(nameNotices.length ? { name_notices: nameNotices } : {}),
+  };
 }

@@ -359,7 +359,7 @@ export async function runScan(options: {
     ...result.errors,
     ...(inventory.import_warnings ?? []).map((message) => ({ source: 'inventory:sbom', message })),
   ];
-  const notices: string[] = [];
+  const notices: string[] = [...(inventory.name_notices ?? [])];
   if (!options.fixture && missingCredentials(config).length)
     errors.push({
       source: 'credentials',

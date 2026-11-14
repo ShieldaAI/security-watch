@@ -61,12 +61,11 @@ test('a capitalised npm name typed by hand is reported; legacy and imported name
     'django',
     'lodash',
   ]);
-  assert.equal(inventory.import_warnings.length, 2);
-  assert.match(
-    inventory.import_warnings.join('\n'),
-    /api: npm package name Express contains capital letters/,
-  );
-  assert.match(inventory.import_warnings.join('\n'), /npm package name Lodash .* Write lodash unless/);
+  // A notice, not an import warning: the entry is valid as written, so it must not degrade scans.
+  assert.equal(inventory.import_warnings, undefined);
+  assert.equal(inventory.name_notices.length, 2);
+  assert.match(inventory.name_notices.join('\n'), /api: npm package name Express contains capital letters/);
+  assert.match(inventory.name_notices.join('\n'), /npm package name Lodash .* Write lodash unless/);
 
   writeFileSync(
     join(directory, 'security-watch.yaml'),
@@ -78,7 +77,10 @@ test('a capitalised npm name typed by hand is reported; legacy and imported name
     timeout: 15_000,
   });
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.equal(JSON.parse(doctor.stdout).import_warnings.length, 2);
+  const report = JSON.parse(doctor.stdout);
+  assert.equal(report.ok, true);
+  assert.deepEqual(report.import_warnings, []);
+  assert.equal(report.name_notices.length, 2);
 });
 
 test('doctor exits with a failing status whenever it reports ok: false', (t) => {

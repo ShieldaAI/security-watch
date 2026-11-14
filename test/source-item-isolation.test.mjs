@@ -266,8 +266,12 @@ test('cve.now retains a valid exact package match after an invalid record in the
   assert.equal(result.evidence.length, 1);
   assert.equal(result.evidence[0].id, 'cve_now:CVE-2026-12345');
   assert.deepEqual(result.evidence[0].packages[0].matched_versions, ['1.2.3']);
-  assert.equal(result.checkpoints.cve_now, OLD);
+  // The package lookup is repeated in full on every poll, so a bad item in it is reported but does
+  // not hold the listing checkpoint: holding it would make every later poll re-read a growing list.
+  assert.equal(result.checkpoints.cve_now, new Date(NOW).toISOString());
   assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0].message, /1 invalid item\(s\) were skipped/);
+  assert.equal(result.coverage[0].status, 'partial');
 });
 
 test('OSV continues after a malformed query item and isolated bad detail, then recovers', async () => {

@@ -56,10 +56,15 @@ export class SourceItemFailures {
     }
   }
 
-  message(source: string): string | undefined {
+  /** What was skipped, for a source that decides for itself how far its checkpoint moves. */
+  summary(source: string): string | undefined {
     return this.count
-      ? `${source}: ${this.count} invalid item(s) were skipped. ${this.first} Collection remains incomplete and its checkpoint was not advanced.`
+      ? `${source}: ${this.count} invalid item(s) were skipped. ${this.first} Collection remains incomplete.`
       : undefined;
+  }
+
+  message(source: string): string | undefined {
+    return this.summary(source)?.replace(/\.$/, ' and its checkpoint was not advanced.');
   }
 
   finish(source: string, evidence: Evidence[]): Evidence[] {
