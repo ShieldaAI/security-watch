@@ -117,7 +117,7 @@ function fingerprint(a: Assessment, decision: Decision): string {
  * not re-send alerts or drop acknowledgements. Keep one entry per released fingerprint format.
  */
 function earlierFingerprints(a: Assessment, decision: Decision): string[] {
-  // 0.1.0-alpha.0 (schema 4).
+  // A snapshot packed before the alpha tag (schema 4).
   const alpha = {
     event: a.event_id,
     system: a.system_id,
@@ -132,7 +132,7 @@ function earlierFingerprints(a: Assessment, decision: Decision): string[] {
     fix: a.fix ?? null,
     action: decision.action,
   };
-  // Development builds between the alpha and 1.0 (schema 5 and 6) added the news fields.
+  // The tagged 0.1.0-alpha.0 (schema 5) and later development builds (schema 6) have the news fields.
   const { event, system, component, category, applicability, ...rest } = alpha;
   const withNews = {
     event,

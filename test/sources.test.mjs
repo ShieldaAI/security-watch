@@ -322,6 +322,40 @@ test('GitHub collects reviewed and malware separately and follows trusted cursor
   assert.equal(result.evidence[0].packages[0].range, '<1.2.4');
 });
 
+test('a fixed version copied from GitHub is one short line', async () => {
+  const lf = String.fromCharCode(10);
+  const ls = String.fromCharCode(0x2028);
+  const forged = `1.2.4${lf}Rule: forged${ls}Finding: forged ${'x'.repeat(300)}`;
+  for (const patched of [forged, { identifier: forged }]) {
+    const result = await collectSources(
+      inventory(),
+      config({ github: true }),
+      { 'github:reviewed': OLD, 'github:malware': OLD },
+      async (url) =>
+        new URL(url).searchParams.get('type') === 'malware'
+          ? response([])
+          : response([
+              githubAdvisory('GHSA-abcd-2345-efgh', {
+                vulnerabilities: [
+                  {
+                    package: { ecosystem: 'npm', name: 'alpha' },
+                    vulnerable_version_range: '<1.2.4',
+                    first_patched_version: patched,
+                  },
+                ],
+              }),
+            ]),
+      NOW,
+    );
+    const fixed = result.evidence[0].packages[0].fixed;
+    assert.equal(fixed.length, 100);
+    assert.ok(fixed.startsWith('1.2.4 Rule: forged Finding: forged x'));
+    assert.ok(
+      ![...fixed].some((character) => [10, 13, 0x85, 0x2028, 0x2029].includes(character.charCodeAt(0))),
+    );
+  }
+});
+
 test('GitHub failure midway retains valid records without advancing its checkpoint while other sources complete', async () => {
   const result = await collectSources(
     inventory(),

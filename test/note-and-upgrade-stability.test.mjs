@@ -34,7 +34,7 @@ const modelConfig = parseConfig({
   policy: { news: { levels: ['high', 'critical'], channels: ['slack'] } },
   notifications: { slack: { webhook_url_env: 'STABLE_HOOK' } },
 });
-const productInventory = ({ note, productNote, owner }) => ({
+const productInventory = ({ note, productNote, owner, componentNote }) => ({
   systems: [
     {
       id: 'prod',
@@ -45,7 +45,15 @@ const productInventory = ({ note, productNote, owner }) => ({
       exposure: 'internal',
       criticality: 'high',
       updated_at: at,
-      components: [],
+      components: [
+        {
+          id: 'lib',
+          ecosystem: 'npm',
+          name: 'zz-unrelated-lib',
+          version: '1.0.0',
+          ...(componentNote ? { note: componentNote } : {}),
+        },
+      ],
       products: [
         {
           name: 'Example Database',
@@ -145,6 +153,8 @@ test('editing notes or the owner creates no revision, review, model request or d
     { note: 'rack B (moved)' },
     { note: 'rack B (moved)', productNote: 'primary cluster' },
     { note: 'rack B (moved)', productNote: 'replica cluster', owner: 'Database team' },
+    { note: 'rack B (moved)', componentNote: 'vendored copy, see wiki' },
+    { componentNote: 'vendored copy, moved to monorepo' },
     {},
   ].entries()) {
     await runScan({
@@ -158,7 +168,7 @@ test('editing notes or the owner creates no revision, review, model request or d
     assert.deepEqual(snapshot(store, seen), settled, JSON.stringify(edit));
   }
   assert.ok(
-    !seen.model.some((body) => /rack|cluster|Database team/.test(body)),
+    !seen.model.some((body) => /rack|cluster|Database team|vendored/.test(body)),
     'notes never reach the model',
   );
   // The stored finding still shows the latest note to whoever opens it.
@@ -284,14 +294,19 @@ const advisory = (id, name) => ({
 });
 const fixture = [advisory('CVE-2026-40001', 'alpha'), advisory('CVE-2026-40002', 'beta')];
 const sha = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-/** The fingerprint 0.1.0-alpha.0 stored: these fields, in this order. */
-const alphaFingerprint = (a, action) =>
+/**
+ * The fingerprints earlier builds stored: these fields, in this order. The tagged 0.1.0-alpha.0
+ * (schema 5) has the two news fields after the applicability; a snapshot packed before the tag
+ * (schema 4) has not. Both are written out here, not derived from the current code.
+ */
+const alphaFingerprint = (a, action, newsFields) =>
   sha({
     event: a.event_id,
     system: a.system_id,
     component: a.component_id,
     category: a.category,
     applicability: a.applicability,
+    ...(newsFields ? { news_classification: null, news_impact: null } : {}),
     severity: a.source_severity,
     priority: a.priority,
     exploited: a.exploited,
@@ -300,8 +315,11 @@ const alphaFingerprint = (a, action) =>
     fix: a.fix ?? null,
     action,
   });
-/** The tables 0.1.0-alpha.0 created (schema 4), with two delivered findings, one acknowledged. */
-function alphaDatabase(path, findings) {
+/**
+ * The tables of the earliest schema (4), with two delivered findings, one acknowledged. Migration
+ * from schema 5 itself is covered by the store tests; here the stored fingerprint is what matters.
+ */
+function alphaDatabase(path, findings, newsFields) {
   const db = new DatabaseSync(path);
   db.exec(`
     CREATE TABLE evidence (source TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source,id));
@@ -326,7 +344,12 @@ function alphaDatabase(path, findings) {
     const payload = JSON.stringify(finding);
     db.prepare(
       'INSERT INTO findings(id,payload,fingerprint,revision,acknowledged_revision) VALUES(?,?,?,1,?)',
-    ).run(finding.id, payload, alphaFingerprint(finding, decision.action), index === 0 ? 1 : null);
+    ).run(
+      finding.id,
+      payload,
+      alphaFingerprint(finding, decision.action, newsFields),
+      index === 0 ? 1 : null,
+    );
     db.prepare(
       'INSERT INTO finding_revisions(finding_id,revision,payload,decision,recorded_at) VALUES(?,1,?,?,?)',
     ).run(finding.id, payload, JSON.stringify(decision), now);
@@ -343,66 +366,73 @@ function alphaDatabase(path, findings) {
   chmodSync(path, 0o600);
 }
 
-test('upgrading a 0.1.0-alpha.0 database keeps revisions, alerts and acknowledgements of unchanged findings', async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), 'security-watch-upgrade-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const path = join(directory, 'watch.db');
-  // What the alpha stored: the plain assessment, with none of the fields added since.
-  const findings = assess(shop, fixture, libraryConfig, now);
-  assert.equal(findings.length, 2);
-  assert.ok(findings.every((finding) => finding.applicability === 'affected'));
-  alphaDatabase(path, findings);
+for (const [build, newsFields] of [
+  ['the tagged 0.1.0-alpha.0', true],
+  ['a snapshot from before the alpha tag', false],
+])
+  test(`upgrading a database written by ${build} keeps revisions, alerts and acknowledgements of unchanged findings`, async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'security-watch-upgrade-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const path = join(directory, 'watch.db');
+    // What the alpha stored: the plain assessment, with none of the fields added since.
+    const findings = assess(shop, fixture, libraryConfig, now);
+    assert.equal(findings.length, 2);
+    assert.ok(findings.every((finding) => finding.applicability === 'affected'));
+    alphaDatabase(path, findings, newsFields);
 
-  const store = new Store(path);
-  t.after(() => store.close());
-  assert.equal(SCHEMA_VERSION, 7);
-  const report = await runScan({
-    config: libraryConfig,
-    inventory: shop,
-    store,
-    fixture,
-    now: now + 120_000,
+    const store = new Store(path);
+    t.after(() => store.close());
+    assert.equal(SCHEMA_VERSION, 7);
+    const report = await runScan({
+      config: libraryConfig,
+      inventory: shop,
+      store,
+      fixture,
+      now: now + 120_000,
+    });
+    const current = report.findings.filter((finding) => finding.category !== 'health');
+    assert.deepEqual(
+      current.map((finding) => finding.id).sort(),
+      findings.map((finding) => finding.id).sort(),
+    );
+    // The new release does add fields to the stored finding; they are not a new security event.
+    assert.ok(
+      findings.every((finding) => {
+        const saved = store.getFinding(finding.id);
+        return saved.remediation && saved.location;
+      }),
+    );
+    for (const finding of findings) assert.equal(store.history(finding.id).length, 1, 'no new revision');
+    assert.deepEqual(
+      store
+        .jobs()
+        .map((job) => [job.id, job.revision, job.status])
+        .sort(),
+      [
+        ['job-0', 1, 'accepted'],
+        ['job-1', 1, 'accepted'],
+      ],
+      'no new delivery job',
+    );
+    const controls = store.controls(findings[0].id);
+    assert.equal(controls.acknowledged, true, 'the acknowledgement survives');
+    assert.equal(controls.revision, 1);
+
+    // A second scan, now comparing against fingerprints in the current format, is equally quiet.
+    await runScan({ config: libraryConfig, inventory: shop, store, fixture, now: now + 240_000 });
+    for (const finding of findings) assert.equal(store.history(finding.id).length, 1);
+    assert.equal(store.jobs().length, 2);
+
+    // A real change after the upgrade is still a new revision with its own alert.
+    const exploited = fixture.map((item) =>
+      item.id === 'CVE-2026-40002' ? { ...item, exploited: true } : item,
+    );
+    await runScan({ config: libraryConfig, inventory: shop, store, fixture: exploited, now: now + 360_000 });
+    const changed = findings.find((finding) => finding.event_id === 'CVE-2026-40002');
+    assert.equal(store.history(changed.id).length, 2);
+    assert.ok(
+      store
+        .jobs()
+        .some((job) => job.finding_id === changed.id && job.revision === 2 && job.status === 'pending'),
+    );
   });
-  const current = report.findings.filter((finding) => finding.category !== 'health');
-  assert.deepEqual(current.map((finding) => finding.id).sort(), findings.map((finding) => finding.id).sort());
-  // The new release does add fields to the stored finding; they are not a new security event.
-  assert.ok(
-    findings.every((finding) => {
-      const saved = store.getFinding(finding.id);
-      return saved.remediation && saved.location;
-    }),
-  );
-  for (const finding of findings) assert.equal(store.history(finding.id).length, 1, 'no new revision');
-  assert.deepEqual(
-    store
-      .jobs()
-      .map((job) => [job.id, job.revision, job.status])
-      .sort(),
-    [
-      ['job-0', 1, 'accepted'],
-      ['job-1', 1, 'accepted'],
-    ],
-    'no new delivery job',
-  );
-  const controls = store.controls(findings[0].id);
-  assert.equal(controls.acknowledged, true, 'the acknowledgement survives');
-  assert.equal(controls.revision, 1);
-
-  // A second scan, now comparing against fingerprints in the current format, is equally quiet.
-  await runScan({ config: libraryConfig, inventory: shop, store, fixture, now: now + 240_000 });
-  for (const finding of findings) assert.equal(store.history(finding.id).length, 1);
-  assert.equal(store.jobs().length, 2);
-
-  // A real change after the upgrade is still a new revision with its own alert.
-  const exploited = fixture.map((item) =>
-    item.id === 'CVE-2026-40002' ? { ...item, exploited: true } : item,
-  );
-  await runScan({ config: libraryConfig, inventory: shop, store, fixture: exploited, now: now + 360_000 });
-  const changed = findings.find((finding) => finding.event_id === 'CVE-2026-40002');
-  assert.equal(store.history(changed.id).length, 2);
-  assert.ok(
-    store
-      .jobs()
-      .some((job) => job.finding_id === changed.id && job.revision === 2 && job.status === 'pending'),
-  );
-});

@@ -13,7 +13,7 @@ import type {
   SourceResult,
 } from './types.js';
 import { cleanText, hash, highest, singleLine, timestamp } from './util.js';
-import { collectCveNow, evidenceRelevant } from './cve-now.js';
+import { collectCveNow, evidenceRelevant, type CveNowState } from './cve-now.js';
 import { VENDOR_FEEDS, vendorArticleBody, vendorArticleTarget, type VendorFeed } from './vendor-sources.js';
 import {
   exactLibraryVersion,
@@ -1207,16 +1207,27 @@ export async function collectSources(
       },
     });
   }
+  const cveNowState: CveNowState = { missing: checkpoints['cve_now:missing'] };
   if (config.sources.cve_now)
     jobs.push({
       source: 'cve_now',
-      run: () => collectCveNow(inventory, checkpoints.cve_now, previousEvidence, result.evidence, http, now),
+      run: () =>
+        collectCveNow(
+          inventory,
+          checkpoints.cve_now,
+          previousEvidence,
+          result.evidence,
+          http,
+          now,
+          cveNowState,
+        ),
     });
   for (const job of jobs) {
     const errorStart = result.errors.length;
     let collected: Evidence[] | FeedResult = [];
     let failure: unknown;
     let incomplete = false;
+    let packageResults: 'complete' | undefined;
     try {
       collected = await job.run();
       if (!Array.isArray(collected) && collected.failure) {
@@ -1231,8 +1242,12 @@ export async function collectSources(
         collected = error.evidence;
         // An ordered source that ran out of room continues from the last record it processed.
         if (error.resume) result.checkpoints[job.source] = error.resume;
+        packageResults = error.packageResults;
       }
     }
+    // Identifiers cve.now did not have, and when each was last asked for.
+    if (job.source === 'cve_now' && cveNowState.next !== undefined)
+      result.checkpoints['cve_now:missing'] = cveNowState.next;
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
       const modified = Date.parse(item.modified_at);
       if (Number.isFinite(modified) && modified <= now + 5 * 60_000) return true;
@@ -1240,6 +1255,8 @@ export async function collectSources(
         'Source returned an invalid or future modification timestamp; collection is incomplete.',
       );
       incomplete = true;
+      // The record left out here may be one for an inventory package.
+      packageResults = undefined;
       return false;
     });
     result.evidence.push(...evidence);
@@ -1302,6 +1319,7 @@ export async function collectSources(
           }
         : {}),
       status: complete ? 'complete' : evidence.length ? 'partial' : 'failed',
+      ...(!complete && packageResults ? { package_results: packageResults } : {}),
       freshness: !Number.isFinite(successTime)
         ? 'never'
         : successTime <= now + 300_000 &&

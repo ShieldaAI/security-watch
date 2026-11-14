@@ -159,6 +159,8 @@ function withoutUnsupportedExclusion(
   const incomplete = coverage.some(
     (receipt) =>
       receipt.status !== 'complete' &&
+      // The source read every record for the inventory's packages; it missed something else.
+      receipt.package_results !== 'complete' &&
       [...sources].some((source) => source === receipt.source || receipt.source.startsWith(`${source}:`)),
   );
   if (!incomplete) return finding;

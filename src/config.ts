@@ -44,12 +44,22 @@ function sameModel(first: ModelSpec, second: ModelSpec): boolean {
   const address = (spec: ModelSpec): string => {
     try {
       const url = new URL(modelEndpoint(spec));
-      return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}`;
+      let path = url.pathname;
+      try {
+        path = decodeURIComponent(path);
+      } catch {
+        // Keep the path as written.
+      }
+      // A trailing dot on the host, doubled or trailing slashes, percent-encoding and letter case
+      // are different spellings of one address.
+      const host = url.hostname.toLowerCase().replace(/\.$/, '');
+      return `${url.protocol}//${host}:${url.port}${path.replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()}`;
     } catch {
-      return spec.endpoint ?? '';
+      return (spec.endpoint ?? '').trim().toLowerCase();
     }
   };
-  return first.model.toLowerCase() === second.model.toLowerCase() && address(first) === address(second);
+  const name = (spec: ModelSpec) => spec.model.trim().toLowerCase();
+  return name(first) === name(second) && address(first) === address(second);
 }
 
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);

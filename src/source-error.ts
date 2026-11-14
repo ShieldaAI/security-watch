@@ -26,6 +26,11 @@ export class PartialSourceError extends SourceError {
     public readonly evidence: Evidence[],
     /** How far an ordered collection got. The source continues from here on its next run. */
     public readonly resume?: string,
+    /**
+     * Set when everything the source knows about the inventory's own packages was read, and only
+     * other records are missing. Version exclusions drawn from the source then still hold.
+     */
+    public readonly packageResults?: 'complete',
   ) {
     super(message);
   }

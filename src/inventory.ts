@@ -265,6 +265,15 @@ export function loadInventory(path: string): Inventory {
   const systemIds = new Set<string>();
   const importWarnings: string[] = [];
   const nameNotices: string[] = [];
+  // A hostile or broken import can produce a warning per entry. Keep a bounded number of bounded,
+  // single-line messages and say how many more there were.
+  let omittedWarnings = 0;
+  const warn = (system: string, warnings: string[]): void => {
+    for (const warning of warnings) {
+      if (importWarnings.length < 200) importWarnings.push(singleLine(`${system}: ${warning}`, 400));
+      else omittedWarnings++;
+    }
+  };
   const systems = parsed.systems.map(({ lockfile, libraries, sbom, ...system }) => {
     if (systemIds.has(system.id)) throw new Error(`Duplicate system ID: ${system.id}`);
     systemIds.add(system.id);
@@ -313,12 +322,12 @@ export function loadInventory(path: string): Inventory {
           ...imported.dependencies,
         ]);
       }
-      importWarnings.push(...imported.warnings.map((warning) => `${system.id}: ${warning}`));
+      warn(system.id, imported.warnings);
     }
     if (lockfile) {
       const imported = importLockfile(resolve(dirname(absolute), lockfile));
       system.components.push(...imported.components);
-      importWarnings.push(...imported.warnings.map((warning) => `${system.id}: ${warning}`));
+      warn(system.id, imported.warnings);
     }
     if (system.components.length > 20_000) throw new Error(`System ${system.id} exceeds 20000 components`);
     const componentIds = new Set<string>();
@@ -335,6 +344,7 @@ export function loadInventory(path: string): Inventory {
     }
     return system;
   });
+  if (omittedWarnings) importWarnings.push(`${omittedWarnings} more import warning(s) are not shown.`);
   return {
     systems,
     ...(importWarnings.length ? { import_warnings: importWarnings } : {}),

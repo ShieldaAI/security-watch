@@ -332,6 +332,11 @@ export interface CoverageReceipt {
   evidence_count: number;
   errors: string[];
   scope: string;
+  /**
+   * Present on an incomplete receipt when the source still read every record for the inventory's own
+   * packages; what it missed are other records. Version exclusions from the source remain supported.
+   */
+  package_results?: 'complete';
 }
 export interface InventoryDrift {
   system_id: string;

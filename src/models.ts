@@ -279,16 +279,27 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
 
 /**
  * Whether a quote states this version as written. A digit that is merely part of another number or
- * identifier ("4" inside "4.2" or "CVE-2026-40001") is not a citation of version 4.
+ * identifier ("4" inside "4.2" or "CVE-2026-40001") is not a citation of version 4. Either end of a
+ * range written with a hyphen ("2.0-2.4") is a citation, when both ends are dotted versions.
  */
 function citesVersion(quote: string, version: string): boolean {
   const wanted = version.trim();
   if (!wanted) return false;
-  const pattern = new RegExp(
-    `(?<![\\p{L}\\p{N}])(?<!\\d[.\\-])${wanted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}]|[.\\-]\\d)`,
-    'u',
-  );
-  return pattern.test(quote);
+  const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
+  for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
+    const before = quote.slice(Math.max(0, at - 64), at);
+    const after = quote.slice(at + wanted.length, at + wanted.length + 64);
+    if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
+    if (/^[\p{L}\p{N}]/u.test(after) || /^\.\d/u.test(after)) continue;
+    // Joined to another number by a hyphen: a range when both sides are dotted versions, and
+    // otherwise one identifier ("CVE-2026-40001", "1.0.0-1").
+    const left = /([\p{L}\p{N}.]*\d)-$/u.exec(before)?.[1];
+    if (left !== undefined && !(dotted(wanted) && dotted(left))) continue;
+    const right = /^-(\d[\p{L}\p{N}.]*)/u.exec(after)?.[1];
+    if (right !== undefined && !(dotted(wanted) && dotted(right.replace(/\.$/u, '')))) continue;
+    return true;
+  }
+  return false;
 }
 
 function verifiedTargetAliases(eventId: string, evidence: Evidence[]): string[] {

@@ -34,6 +34,36 @@ class EmailNotSentError extends Error {
   }
 }
 
+/**
+ * What the mail transport's transaction log shows about one SMTP session. "No MAIL FROM was logged"
+ * proves that none was written only if the log reports what the client writes. That is shown by a
+ * logged client command (its EHLO comes before anything else), or by a session that ended before
+ * the server said anything (a refused connection, a failed TLS handshake), where there was nothing
+ * to write. Server replies without any client command mean the log cannot be relied on.
+ */
+export function smtpTranscript(): {
+  observe: (entry: unknown, line: unknown) => void;
+  envelopeStarted: () => boolean;
+  nothingHandedOver: () => boolean;
+} {
+  let logged = false;
+  let clientSeen = false;
+  let serverSeen = false;
+  let envelopeStarted = false;
+  return {
+    observe(entry, line) {
+      logged = true;
+      const side = typeof entry === 'object' && entry !== null && 'tnx' in entry ? entry.tnx : undefined;
+      if (side === 'server') serverSeen = true;
+      if (side !== 'client') return;
+      clientSeen = true;
+      if (/^\s*(?:MAIL|RCPT|DATA|BDAT)\b/i.test(String(line))) envelopeStarted = true;
+    },
+    envelopeStarted: () => envelopeStarted,
+    nothingHandedOver: () => logged && !envelopeStarted && (clientSeen || !serverSeen),
+  };
+}
+
 export const sendEmail: EmailSender = async (message) => {
   message.signal?.throwIfAborted();
   const url = new URL(message.url);
@@ -48,20 +78,9 @@ export const sendEmail: EmailSender = async (message) => {
   // The transport labels every socket error, timeout and unexpected close the same way at any stage,
   // including after the message body was transferred. The only proof that nothing was handed over is
   // that the client never wrote MAIL FROM, so the conversation is observed through the transport's
-  // own transaction log. `observed` shows that log is working; without it nothing is assumed.
-  let observed = false;
-  let envelopeStarted = false;
-  const observe = (entry: unknown, line: unknown): void => {
-    observed = true;
-    if (
-      typeof entry === 'object' &&
-      entry !== null &&
-      'tnx' in entry &&
-      entry.tnx === 'client' &&
-      /^\s*(?:MAIL|RCPT|DATA|BDAT)\b/i.test(String(line))
-    )
-      envelopeStarted = true;
-  };
+  // own transaction log.
+  const transcript = smtpTranscript();
+  const observe = transcript.observe;
   const transport = nodemailer.createTransport({
     logger: {
       level: () => undefined,
@@ -137,8 +156,7 @@ export const sendEmail: EmailSender = async (message) => {
       message.signal?.aborted ||
       error instanceof EmailNotSentError ||
       statusCode(error) !== undefined ||
-      envelopeStarted ||
-      !observed
+      !transcript.nothingHandedOver()
     )
       throw error;
     throw new EmailNotSentError('session');
