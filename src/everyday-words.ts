@@ -1,3 +1,5 @@
+import { WORD_FILTER_BITS, WORD_FILTER_DATA, WORD_FILTER_HASHES } from './word-filter.js';
+
 /**
  * Words that ordinary security prose uses in their everyday sense and that are also package names
  * ("send a crafted request", "buffer overflow", "session cookie", "the next release"). A package
@@ -115,24 +117,111 @@ timers ware
 `;
 
 /**
- * Names of well-known software that are also everyday words. Prose about the software writes them
- * with a capital in the middle of a sentence ("a flaw in Express", "the Flask framework"); prose
- * using the word does not ("researchers express concern"). They are everyday words, with that one
- * extra way to count as a name; see `packageMentioned` in matching.ts.
+ * Terms of security and software writing that no 1934 dictionary has, and that are package names
+ * too ("xss", "cors", "rollup", "punycode"). They are everyday words of this kind of text.
+ */
+const JARGON = `
+acl aes ajax ansi api apt argon ascii auth backdoor base64 bcrypt bluetooth botnet cdn cgi cli cms
+config cookie cors cpu crc csrf css csv cve cvss cwe ddos dll dns dom dos ecdsa edr email eof exe
+exif ftp gif gpu grpc gui gzip hmac html http https iam icmp ide idor imap ini internet iot ipc ipv4
+ipv6 jar jpeg jpg json jwt kev ldap lfi llm login mac malware mfa mime mitm mqtt nfc ntlm ntp oauth
+oidc online openid otp pbkdf pdf pem phishing php pid pki plugin png pop3 posix punycode ram ransomware
+rbac rce regex rest rfc rollup rootkit rpc rsa rss saml sbom sdk sha shellcode siem smb smtp snmp soc
+socks spyware sql ssh ssl ssrf sso stderr stdin stdout svg tcp telnet tls toml totp tty udp uid unicode
+unix uri url usb utf utf8 uuid vpn waf webhook websocket wifi xdr xml xss xxe yaml zip
+changelog cron daemon distro dotfile firmware hostname hyperlink kernel localhost middleware namespace
+passphrase plaintext runtime screenshot sudo sysadmin timestamp username whitelist blacklist wildcard
+akira clop cobalt conti ghost hive lazarus lockbit medusa royal salt sandworm tesla tornado typhoon
+`;
+
+/**
+ * Names of well-known libraries that are also dictionary words. Prose about the software writes
+ * the name with a capital and may open a sentence with it ("Rails releases patches", "Electron
+ * fixes a sandbox escape"); see `packageMentioned` in matching.ts.
  */
 const PROPER = new Set(
-  `bottle celery chef ember express fiber flask ghost gin hyper jest meteor mocha nose passport
-pillow puma pyramid rack rails react rocket salt tide tornado warp`.split(/\s+/),
+  `angular backbone bootstrap bottle celery cobra composer cypress electron ember express fiber
+flask gin guava hibernate husky hyper jasmine jest karma meteor mocha mongoose mustache nest nose
+pandas pillow puma puppeteer pyramid rack rails react rocket sass spring struts stylus tide typescript
+viper warp yarn alembic anthropic apollo babel bundler cheerio drizzle faraday jackson playwright poetry
+rake storybook svelte thor tox transformers winston`.split(/\s+/),
 );
 
-const EVERYDAY = new Set([...WORDS.split(/\s+/).filter(Boolean), ...PROPER]);
+const EVERYDAY = new Set([...WORDS.split(/\s+/), ...JARGON.split(/\s+/)].filter(Boolean));
 
-/** Whether a package name is also a word that ordinary prose uses in its everyday sense. */
+/** Whether a name is one of the commonest words of security prose ("send", "buffer", "next"). */
 export function everydayWord(name: string): boolean {
-  return EVERYDAY.has(name.trim().toLowerCase());
+  const word = name.trim().toLowerCase();
+  return EVERYDAY.has(word) && !PROPER.has(word);
 }
 
-/** Whether an everyday word is also the name of well-known software, written with a capital. */
+/** Whether a dictionary word is also the name of a well-known library, written with a capital. */
 export function properName(name: string): boolean {
   return PROPER.has(name.trim().toLowerCase());
+}
+
+let filter: Uint8Array | undefined;
+function inDictionary(word: string): boolean {
+  if (word.length < 3 || word.length > 12 || !/^[a-z]+$/.test(word)) return false;
+  filter ??= Uint8Array.from(Buffer.from(WORD_FILTER_DATA.replace(/\s+/g, ''), 'base64'));
+  let first = 0x811c9dc5;
+  let second = 0x01000193;
+  for (let index = 0; index < word.length; index++) {
+    const code = word.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193) >>> 0;
+    second = Math.imul(second ^ code, 0x5bd1e995) >>> 0;
+  }
+  second |= 1;
+  for (let round = 0; round < WORD_FILTER_HASHES; round++) {
+    const position = ((first + Math.imul(round, second)) >>> 0) % WORD_FILTER_BITS;
+    if (!(filter[position >> 3]! & (1 << (position & 7)))) return false;
+  }
+  return true;
+}
+
+/** The word and the base forms it may be an inflection of ("entities", "requests", "executing"). */
+function baseForms(word: string): string[] {
+  const forms = [word];
+  if (word.endsWith('ies')) forms.push(`${word.slice(0, -3)}y`);
+  if (word.endsWith('es')) forms.push(word.slice(0, -2));
+  if (word.endsWith('s')) forms.push(word.slice(0, -1));
+  if (word.endsWith('ed')) forms.push(word.slice(0, -2), word.slice(0, -1));
+  if (word.endsWith('ing')) forms.push(word.slice(0, -3), `${word.slice(0, -3)}e`);
+  if (word.endsWith('er') || word.endsWith('or')) forms.push(word.slice(0, -2), `${word.slice(0, -2)}e`);
+  return forms;
+}
+
+/**
+ * Whether a single word is an English word, a term of security writing, or an inflection of one.
+ * Names known to be library names that the dictionary filter would wrongly claim go in DISTINCTIVE.
+ */
+const DISTINCTIVE = new Set<string>(['chokidar', 'hapi', 'multer', 'nanoid', 'redux', 'spacy']);
+function englishWord(word: string): boolean {
+  if (DISTINCTIVE.has(word)) return false;
+  return EVERYDAY.has(word) || PROPER.has(word) || baseForms(word).some(inDictionary);
+}
+
+/**
+ * Compounds that security prose writes with hyphens in their ordinary sense. Any other hyphenated
+ * name ("left-pad", "is-odd") is specific enough to be the package wherever it is written out.
+ */
+const COMPOUNDS = new Set(
+  `add-on back-end brute-force built-in buffer-overflow client-side command-line content-type
+cross-origin cross-site denial-of-service diffie-hellman end-to-end front-end high-severity log-in
+long-term man-in-the-middle multi-factor open-source opt-in opt-out out-of-bounds plug-in pre-auth
+proof-of-concept read-only real-time same-origin server-side set-cookie set-up side-channel sign-in
+single-sign-on third-party time-based two-factor use-after-free user-agent zero-click zero-day
+zero-trust`.split(/\s+/),
+);
+
+/**
+ * Whether a package name reads as ordinary English: one word ("entities", "scheduler", "immediate")
+ * or a compound of everyday prose ("side-channel", "zero-day"). Prose uses such a name in its
+ * ordinary sense far more often than it names the package, so a mention of it needs more than the
+ * word itself. A name that is not English ("axios", "lodash", "webpack") does not.
+ */
+export function dictionaryName(name: string): boolean {
+  const word = name.trim().toLowerCase();
+  if (EVERYDAY.has(word) || PROPER.has(word) || COMPOUNDS.has(word)) return true;
+  return /^[a-z]+$/.test(word) && englishWord(word);
 }

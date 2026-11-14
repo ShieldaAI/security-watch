@@ -66,6 +66,18 @@ function date(value: unknown): string {
   if (!Number.isFinite(Date.parse(input))) throw new SourceError('Invalid source date.');
   return new Date(input).toISOString();
 }
+/** A news story is linked to at most this many advisories: the first identifiers it cites. */
+const MAX_STORY_IDENTIFIERS = 100;
+/**
+ * The advisory identifiers a story cites, in the order they appear. A roundup can list hundreds;
+ * each one becomes a lookup and a candidate finding, so only the first ones are followed.
+ */
+function citedIdentifiers(text: string): string[] {
+  return aliases(text.match(/\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi) ?? []).slice(
+    0,
+    MAX_STORY_IDENTIFIERS,
+  );
+}
 function aliases(values: unknown[]): string[] {
   return [
     ...new Set(
@@ -976,10 +988,6 @@ async function feed(
           Date.parse(sourceModified) >= window.lateCutoff;
         if (!late) return undefined;
       }
-      const foundAliases =
-        `${title}\n${description}\n${link}`.match(
-          /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
-        ) ?? [];
       const evidence: Evidence = {
         id,
         source,
@@ -987,7 +995,7 @@ async function feed(
         title,
         url: link,
         description,
-        aliases: aliases(foundAliases),
+        aliases: citedIdentifiers(`${title}\n${description}\n${link}`),
         severity: severity(xmlText(entry.severity)),
         modified_at: modified,
         fetched_at: timestamp(now),
@@ -1080,11 +1088,7 @@ async function hackerNews(http: HttpClient, now: number, window: NewsWindow): Pr
           entry.description = full.slice(0, 16_000);
           entry.content_status = full.length <= 16_000 ? 'full' : 'excerpt';
           entry.url = url;
-          entry.aliases = aliases(
-            `${entry.title}\n${entry.description}`.match(
-              /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
-            ) ?? [],
-          );
+          entry.aliases = citedIdentifiers(`${entry.title}\n${entry.description}`);
         } catch (error) {
           if (sourceCanceled(error)) throw error;
           // Fetch/parse failures must not erase the headline and feed excerpt.
@@ -1143,11 +1147,7 @@ async function vendorFeed(
           if (!visible.includes(title) || visible.replaceAll(title, '').trim().length < 40) return;
           entry.description = text.slice(0, 16_000);
           entry.content_status = text.length <= 16_000 ? 'full' : 'excerpt';
-          entry.aliases = aliases(
-            `${entry.title}\n${entry.description}`.match(
-              /\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi,
-            ) ?? [],
-          );
+          entry.aliases = citedIdentifiers(`${entry.title}\n${entry.description}`);
         } catch (error) {
           if (sourceCanceled(error)) throw error;
           // Keep the validated feed excerpt when the vendor page cannot be read safely.
@@ -1207,7 +1207,10 @@ export async function collectSources(
       },
     });
   }
-  const cveNowState: CveNowState = { missing: checkpoints['cve_now:missing'] };
+  const cveNowState: CveNowState = {
+    missing: checkpoints['cve_now:missing'],
+    troubled: checkpoints['cve_now:troubled'],
+  };
   if (config.sources.cve_now)
     jobs.push({
       source: 'cve_now',
@@ -1248,6 +1251,9 @@ export async function collectSources(
     // Identifiers cve.now did not have, and when each was last asked for.
     if (job.source === 'cve_now' && cveNowState.next !== undefined)
       result.checkpoints['cve_now:missing'] = cveNowState.next;
+    // Identifiers whose requests failed, so that the next poll asks for them last.
+    if (job.source === 'cve_now' && cveNowState.nextTroubled !== undefined)
+      result.checkpoints['cve_now:troubled'] = cveNowState.nextTroubled;
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
       const modified = Date.parse(item.modified_at);
       if (Number.isFinite(modified) && modified <= now + 5 * 60_000) return true;

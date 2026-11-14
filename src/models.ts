@@ -279,24 +279,40 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
 
 /**
  * Whether a quote states this version as written. A digit that is merely part of another number or
- * identifier ("4" inside "4.2" or "CVE-2026-40001") is not a citation of version 4. Either end of a
- * range written with a hyphen ("2.0-2.4") is a citation, when both ends are dotted versions.
+ * identifier is not a citation: "4" inside "4.2", "4,200", "3/4" or "CVE-2026-40001". A "v" before
+ * the version is part of how versions are written ("v2.4.1"). Either end of a range written with a
+ * hyphen is a citation ("2.0-2.4", "versions 12-16"), and so is the version after a name joined by
+ * a hyphen ("exampledb2-2.4.52").
  */
 function citesVersion(quote: string, version: string): boolean {
   const wanted = version.trim();
   if (!wanted) return false;
   const dotted = (token: string) => /^v?\d+(?:\.\d+)+$/u.test(token);
+  const integer = (token: string) => /^\d{1,4}$/u.test(token);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
-    const before = quote.slice(Math.max(0, at - 64), at);
+    let before = quote.slice(Math.max(0, at - 64), at);
     const after = quote.slice(at + wanted.length, at + wanted.length + 64);
-    if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
-    if (/^[\p{L}\p{N}]/u.test(after) || /^\.\d/u.test(after)) continue;
-    // Joined to another number by a hyphen: a range when both sides are dotted versions, and
-    // otherwise one identifier ("CVE-2026-40001", "1.0.0-1").
-    const left = /([\p{L}\p{N}.]*\d)-$/u.exec(before)?.[1];
-    if (left !== undefined && !(dotted(wanted) && dotted(left))) continue;
-    const right = /^-(\d[\p{L}\p{N}.]*)/u.exec(after)?.[1];
-    if (right !== undefined && !(dotted(wanted) && dotted(right.replace(/\.$/u, '')))) continue;
+    // "v2.4.1": the letter belongs to the version, not to a word.
+    if (/(?:^|[^\p{L}\p{N}])v$/iu.test(before) && /^\d/u.test(wanted)) before = before.slice(0, -1);
+    if (/[\p{L}\p{N}]$/u.test(before) || /\d[.,/]$/u.test(before)) continue;
+    if (/^[\p{L}\p{N}]/u.test(after) || /^[.,/]\d/u.test(after)) continue;
+    // Joined to something by a hyphen. Two dotted versions, or two short whole numbers on their
+    // own, are a range. A name before a dotted version is a name and its version. Anything else is
+    // one identifier ("CVE-2026-40001", "1.0.0-1", "2026-11-14").
+    const left = /([\p{L}\p{N}.]*[\p{L}\p{N}])-$/u.exec(before);
+    const right = /^-(\d[\p{L}\p{N}.]*)/u.exec(after);
+    if (left) {
+      const token = left[1]!;
+      const chained = /-$/u.test(before.slice(0, left.index)) || right !== null;
+      const range = (dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token) && !chained);
+      const named = dotted(wanted) && /\p{L}/u.test(token) && !dotted(token);
+      if (!range && !named) continue;
+    }
+    if (right) {
+      const token = right[1]!.replace(/\.$/u, '');
+      const chained = /^-/u.test(after.slice(right[0].length)) || left !== null;
+      if (!((dotted(wanted) && dotted(token)) || (integer(wanted) && integer(token) && !chained))) continue;
+    }
     return true;
   }
   return false;

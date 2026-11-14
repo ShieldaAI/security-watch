@@ -380,12 +380,13 @@ export async function runScan(options: {
     !config.sources.github &&
     !config.sources.kev &&
     !config.sources.feeds.length &&
+    !config.sources.vendor_feeds?.length &&
     !options.fixture
   )
     errors.push({ source: 'sources', message: 'All sources are disabled.' });
   if (
     !options.fixture &&
-    (config.sources.hacker_news || config.sources.feeds.length) &&
+    (config.sources.hacker_news || config.sources.feeds.length || config.sources.vendor_feeds?.length) &&
     !config.models.enabled
   )
     // Running without a model is a supported setup, not a fault: say what it means and carry on.

@@ -52,13 +52,21 @@ function sameModel(first: ModelSpec, second: ModelSpec): boolean {
       }
       // A trailing dot on the host, doubled or trailing slashes, percent-encoding and letter case
       // are different spellings of one address.
-      const host = url.hostname.toLowerCase().replace(/\.$/, '');
+      let host = url.hostname.toLowerCase().replace(/\.$/, '');
+      // Every name for this machine is one address.
+      if (['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(host)) host = 'localhost';
       return `${url.protocol}//${host}:${url.port}${path.replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()}`;
     } catch {
       return (spec.endpoint ?? '').trim().toLowerCase();
     }
   };
-  const name = (spec: ModelSpec) => spec.model.trim().toLowerCase();
+  // "models/gemini-x" and "gemini-x", or "llama3" and "llama3:latest", are one model.
+  const name = (spec: ModelSpec) =>
+    spec.model
+      .trim()
+      .toLowerCase()
+      .replace(/^models\//, '')
+      .replace(/:latest$/, '');
   return name(first) === name(second) && address(first) === address(second);
 }
 

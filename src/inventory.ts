@@ -4,7 +4,7 @@ import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
 import {
-  capitalisedNpmName,
+  capitalisedName,
   exactLibraryVersion,
   mergeNotes,
   normalizeEcosystem,
@@ -268,6 +268,7 @@ export function loadInventory(path: string): Inventory {
   // A hostile or broken import can produce a warning per entry. Keep a bounded number of bounded,
   // single-line messages and say how many more there were.
   let omittedWarnings = 0;
+  let omittedNotices = 0;
   const warn = (system: string, warnings: string[]): void => {
     for (const warning of warnings) {
       if (importWarnings.length < 200) importWarnings.push(singleLine(`${system}: ${warning}`, 400));
@@ -279,10 +280,11 @@ export function loadInventory(path: string): Inventory {
     systemIds.add(system.id);
     if (libraries) {
       const groups = Array.isArray(libraries) ? [[undefined, libraries] as const] : Object.entries(libraries);
-      const added = new Set(
-        system.components.map((component) =>
+      const added = new Map(
+        system.components.map((component) => [
           JSON.stringify([component.ecosystem, component.name, component.version ?? null]),
-        ),
+          component,
+        ]),
       );
       let count = 0;
       for (const [ecosystem, entries] of groups) {
@@ -291,18 +293,16 @@ export function loadInventory(path: string): Inventory {
           if (++count > 20_000) throw new Error(`System ${system.id} exceeds 20000 library entries`);
           const library = parseLibrary(entry, ecosystem);
           const key = JSON.stringify([library.ecosystem, library.name, library.version ?? null]);
-          if (added.has(key)) {
+          const existing = added.get(key);
+          if (existing) {
             // The same library listed twice keeps every place it was said to be used.
-            const existing = system.components.find(
-              (component) =>
-                JSON.stringify([component.ecosystem, component.name, component.version ?? null]) === key,
-            );
-            const note = existing && mergeNotes(existing.note, library.note);
-            if (existing && note) existing.note = note;
+            const note = mergeNotes(existing.note, library.note);
+            if (note) existing.note = note;
             continue;
           }
-          added.add(key);
-          system.components.push({ id: `library:${hash(key).slice(0, 24)}`, ...library });
+          const component = { id: `library:${hash(key).slice(0, 24)}`, ...library };
+          added.set(key, component);
+          system.components.push(component);
         }
       }
     }
@@ -310,8 +310,10 @@ export function loadInventory(path: string): Inventory {
     // spelling, a person may have typed `Lodash` for `lodash`. The entry is valid as written (some
     // old packages do have capitals), so this is a notice to read once, not a monitoring fault.
     for (const component of system.components) {
-      const notice = capitalisedNpmName(component);
-      if (notice && nameNotices.length < 1000) nameNotices.push(`${system.id}: ${notice}`);
+      const notice = capitalisedName(component);
+      if (!notice) continue;
+      if (nameNotices.length < 200) nameNotices.push(`${system.id}: ${notice}`);
+      else omittedNotices++;
     }
     if (sbom) {
       const imported = importCycloneDx(resolve(dirname(absolute), sbom));
@@ -345,6 +347,7 @@ export function loadInventory(path: string): Inventory {
     return system;
   });
   if (omittedWarnings) importWarnings.push(`${omittedWarnings} more import warning(s) are not shown.`);
+  if (omittedNotices) nameNotices.push(`${omittedNotices} more name notice(s) are not shown.`);
   return {
     systems,
     ...(importWarnings.length ? { import_warnings: importWarnings } : {}),

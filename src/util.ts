@@ -11,13 +11,19 @@ export function timestamp(now = Date.now()): string {
   return new Date(now).toISOString();
 }
 export function cleanText(value: string, max = 4000): string {
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, max);
+  return cut(value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), max);
 }
 /**
  * Characters that end or disturb a line: control characters (including NEL, U+0085) and the Unicode
  * line and paragraph separators. Mail clients and chat applications render them as line breaks.
  */
 export const LINE_BREAKING = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+/** The first `max` UTF-16 units of a text, without leaving half of a surrogate pair at the end. */
+export function cut(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const end = max > 0 && (value.charCodeAt(max - 1) & 0xfc00) === 0xd800 ? max - 1 : max;
+  return value.slice(0, end);
+}
 const lineBreaking = (code: number) =>
   code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
 /** Spaces that are not line-breaking characters; with those, everything `\s` matches. */
@@ -60,7 +66,7 @@ export function singleLine(value: string, max = 4000): string {
     index--;
   }
   out += value.slice(start, Math.min(length, start + Math.max(0, max - out.length)));
-  return out.slice(0, max).trimEnd();
+  return cut(out, max).trimEnd();
 }
 
 /** A review binds JSON content independently of object insertion order. Array order is retained. */

@@ -166,9 +166,21 @@ test('four adjacent unusable new records do not stop the records after them from
   assert.match(result.errors[0].message, /4 advisory detail request\(s\) failed/);
 });
 
-for (const [name, answer] of [
-  ['no longer serves', () => ({ status: 404, headers: {}, body: '' })],
-  ['serves in a form that cannot be used', (id) => json({ id, status: 'reserved', title: id })],
+// A record about an inventory package that is gone keeps its last content. So does a record kept
+// for a declared keyword when the service serves it in a form that cannot be used.
+for (const [name, answer, packages, inv] of [
+  [
+    'no longer serves',
+    () => ({ status: 404, headers: {}, body: '' }),
+    [{ ecosystem: 'npm', name: 'alpha', range: '<0.9.0' }],
+    inventory(),
+  ],
+  [
+    'serves in a form that cannot be used, and that is not about an inventory package,',
+    (id) => json({ id, status: 'reserved', title: id }),
+    [],
+    inventory({ keywords: ['alpha flaw'] }),
+  ],
 ])
   test(`a stored record the service ${name} keeps its last content and stays current`, async () => {
     const id = 'CVE-2026-85000';
@@ -183,7 +195,7 @@ for (const [name, answer] of [
       severity: 'critical',
       modified_at: iso(NOW - 10 * DAY),
       fetched_at: iso(NOW - HOUR),
-      packages: [{ ecosystem: 'npm', name: 'alpha', range: '<0.9.0' }],
+      packages,
     };
     const state = {};
     const result = await poll(
@@ -193,6 +205,7 @@ for (const [name, answer] of [
       state,
       checkpoint,
       [kept],
+      inv,
     );
     assert.deepEqual(state.details, [id], 'the service was asked');
     assert.deepEqual(result.errors, []);
@@ -204,6 +217,51 @@ for (const [name, answer] of [
     assert.deepEqual(current.packages, kept.packages);
     assert.equal(current.modified_at, kept.modified_at);
   });
+
+test('a stored record about an inventory package that is served in an unusable form is reported', async () => {
+  // The service still has the record but in a status this application does not know. Its ranges
+  // may have changed, so the stored ones must not go on counting as current.
+  const id = 'CVE-2026-85002';
+  const kept = {
+    id: `cve_now:${id}`,
+    source: 'cve_now',
+    kind: 'advisory',
+    title: id,
+    url: 'https://cve.now/x',
+    description: 'alpha flaw',
+    aliases: [id],
+    severity: 'critical',
+    modified_at: iso(NOW - 10 * DAY),
+    fetched_at: iso(NOW - HOUR),
+    packages: [{ ecosystem: 'npm', name: 'alpha', range: '<0.9.0' }],
+  };
+  const other = listedAt('CVE-2026-85003', 5 * 60_000);
+  const result = await poll(
+    [other],
+    (wanted) => (wanted === id ? json({ id, status: 'superseded', title: id }) : undefined),
+    NOW,
+    {},
+    checkpoint,
+    [kept],
+  );
+  assert.match(
+    result.errors[0].message,
+    /1 advisory detail request\(s\) failed.*unsupported advisory status/,
+  );
+  assert.equal(result.coverage[0].status, 'partial');
+  assert.equal(
+    result.coverage[0].package_results,
+    undefined,
+    'exclusions from this source are not supported',
+  );
+  assert.equal(
+    result.evidence.find((item) => item.id === kept.id),
+    undefined,
+    'no refreshed copy is made up',
+  );
+  // It does not hold the checkpoint: it was not found through the listing.
+  assert.equal(result.checkpoints.cve_now, iso(NOW));
+});
 
 test('a stored record that fails with a server error is still reported', async () => {
   const id = 'CVE-2026-85001';

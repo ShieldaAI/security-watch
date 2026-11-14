@@ -109,6 +109,10 @@ function recordCooldown(origin: string, status: number, retryAfter: string | str
 export function isPublicAddress(address: string): boolean {
   try {
     const parsed = ipaddr.process(address);
+    // ::a.b.c.d, the deprecated IPv4-compatible form, is no public destination: a stack that
+    // still routes it reaches the embedded IPv4 address, which may be this machine.
+    if (parsed.kind() === 'ipv6' && (parsed as ipaddr.IPv6).parts.slice(0, 6).every((part) => part === 0))
+      return false;
     return parsed.range() === 'unicast';
   } catch {
     return false;
@@ -199,7 +203,7 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
           agent: false,
           signal: options.signal,
           headers: {
-            'user-agent': 'Shielda-Security-Watch/0.1',
+            'user-agent': 'Shielda-Security-Watch/1.0',
             'accept-encoding': 'identity',
             ...options.headers,
           },

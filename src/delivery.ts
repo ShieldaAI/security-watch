@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { createConnection, type Socket } from 'node:net';
 import type { Assessment, Config, HttpClient, Notification } from './types.js';
-import { cleanText, singleLine } from './util.js';
+import { cleanText, cut, singleLine } from './util.js';
 import { decide } from './assessment.js';
 import { Store } from './store.js';
 import { NetworkError } from './http.js';
@@ -168,10 +168,11 @@ export const sendEmail: EmailSender = async (message) => {
 };
 
 function safeText(input: string, length: number): string {
-  return cleanText(input, length)
+  const cleaned = cleanText(input, length)
     .replace(/[\r\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
-    .replace(/@/g, '@\u200b')
-    .slice(0, length);
+    .replace(/@/g, '@\u200b');
+  // An emoji cut in half would leave text some services refuse.
+  return cut(cleaned, length);
 }
 /**
  * One value for one line of a message. Advisory text, model output and inventory names are placed
@@ -179,7 +180,8 @@ function safeText(input: string, length: number): string {
  * forge the next label, so every break becomes a space.
  */
 function single(value: string, length: number): string {
-  return safeText(singleLine(value), length);
+  // A long run of spaces can push the rest of a value onto what looks like a line of its own.
+  return safeText(singleLine(value).replace(/[^\S\n]{2,}/g, ' '), length);
 }
 /** The operator's own inventory names and notes, so the reader knows where to check. */
 function locationLines(a: Assessment, length: number): string[] {
@@ -205,7 +207,7 @@ export function notificationText(job: Notification): { subject: string; text: st
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
   const urls = a.urls.filter(webUrl);
-  const lines = [
+  const body = [
     subject,
     `Finding: ${single(a.id, 200)}`,
     `Delivery: ${single(job.id, 200)}`,
@@ -225,11 +227,15 @@ export function notificationText(job: Notification): { subject: string; text: st
     single(a.summary, 750),
     ...a.reasons.slice(0, 4).map((r) => `• ${single(r, 180)}`),
     ...(a.fix ? [`Fix: ${single(a.fix, 160)}`] : []),
+  ].join('\n');
+  // The rule that sent the message, the time and the sources close every message. When the text
+  // is too long for one Slack section, the middle is shortened, never these lines.
+  const closing = [
     `Rule: ${single(reason, 180)}`,
     `Assessment time: ${single(a.updated_at, 40)}`,
     ...urls.slice(0, 3).map((u) => single(u, 320)),
-  ];
-  return { subject, text: lines.join('\n').slice(0, 2900) };
+  ].join('\n');
+  return { subject, text: `${cut(body, 2900 - closing.length - 1)}\n${closing}` };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;

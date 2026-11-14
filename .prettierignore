@@ -9,3 +9,4 @@ package-lock.json
 security-watch.yaml
 systems.yaml
 .docker-check-*/
+src/word-filter.ts

@@ -213,15 +213,23 @@ export function exactLibraryVersion(value: string, ecosystem?: Ecosystem): strin
 const LEGACY_NPM_NAMES = new Set(['JSONStream', 'Base64', 'JSONPath', 'JSONSelect']);
 
 /**
- * What to tell the operator about an npm name typed by hand with capital letters. npm names are
- * case-sensitive, and every name registered since 2017 is lower case: `Lodash` is not `lodash`, and
- * an entry spelled that way matches no advisory. A few packages from before that rule keep their
- * capitals, so the name is accepted, and anything but a known legacy name is reported.
+ * What to tell the operator about a name typed by hand with capital letters, in a registry that
+ * compares names by exact spelling and publishes them in lower case. npm: every name registered
+ * since 2017 is lower case, so `Lodash` is not `lodash` and matches no advisory; a few packages
+ * from before that rule keep their capitals, so the name is accepted, and anything but a known
+ * legacy name is pointed out. RubyGems, Hex and Pub: `Rails`, `Phoenix` and `Flutter_Bloc` are not
+ * the published `rails`, `phoenix` and `flutter_bloc`.
  */
-export function capitalisedNpmName(component: { ecosystem: Ecosystem; name: string }): string | undefined {
-  if (component.ecosystem !== 'npm' || component.name === component.name.toLowerCase()) return undefined;
-  if (LEGACY_NPM_NAMES.has(component.name)) return undefined;
-  return `npm package name ${component.name} contains capital letters. npm names are case-sensitive and current names are lower case, so this entry matches only advisories published for exactly that spelling. Write ${component.name.toLowerCase()} unless this is a package from before 2017 that kept its capitals; names imported from a lockfile or SBOM are taken as published.`;
+export function capitalisedName(component: { ecosystem: Ecosystem; name: string }): string | undefined {
+  const { ecosystem, name } = component;
+  if (name === name.toLowerCase()) return undefined;
+  if (ecosystem === 'npm') {
+    if (LEGACY_NPM_NAMES.has(name)) return undefined;
+    return `npm package name ${name} contains capital letters. npm names are case-sensitive and current names are lower case, so this entry matches only advisories published for exactly that spelling. Write ${name.toLowerCase()} unless this is a package from before 2017 that kept its capitals; names imported from a lockfile or SBOM are taken as published.`;
+  }
+  if (ecosystem === 'RubyGems' || ecosystem === 'Hex' || ecosystem === 'Pub')
+    return `${ecosystem} package name ${name} contains capital letters. Names are compared by exact spelling and are almost always published in lower case, so this entry matches only advisories published for exactly that spelling. Write ${name.toLowerCase()} unless the package really is published with capitals; names imported from an SBOM are taken as published.`;
+  return undefined;
 }
 
 export interface Library {
