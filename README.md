@@ -269,6 +269,8 @@ docker run --rm --user 0 --entrypoint chown \
   shielda-security-watch "$(id -u):$(id -g)" /data
 docker run --rm --name security-watch \
   --user "$(id -u):$(id -g)" \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp \
   --env-file ./watch/.env \
   --mount type=bind,src="$(pwd)/watch/security-watch.yaml",dst=/config/security-watch.yaml,readonly \
   --mount type=bind,src="$(pwd)/watch/systems.yaml",dst=/config/systems.yaml,readonly \
@@ -382,7 +384,7 @@ The corpus contains source-derived synthetic scenarios with fictional inventorie
 
 ## Boundaries and privacy
 
-cve.now stack queries disclose deduplicated npm package names and versions; lockfiles and deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives relevant components/products/keywords and deployment context from the matched system, plus selected evidence. Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
+cve.now stack queries disclose deduplicated npm package names and versions; lockfiles and deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives, under the default `minimal` disclosure profile, the matched package and product names and versions plus selected evidence; the `deployment-context` profile adds environment, exposure, criticality and matching keywords (see [SECURITY.md](SECURITY.md)). Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
 
 Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no automatic application telemetry. An explicitly configured heartbeat service receives success pings and normal request metadata. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
 

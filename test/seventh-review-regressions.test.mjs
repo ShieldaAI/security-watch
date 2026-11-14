@@ -176,7 +176,7 @@ test('single transient failures do not flip exclusions or send alerts', async ()
 
 // ---- Re-read records do not hold the checkpoint --------------------------------------------------
 
-test('a listed record that is already stored and fails when read again is not owed', async () => {
+test('a listed record that is already stored is not read again, and is not owed', async () => {
   const id = 'CVE-2026-82001';
   const stored = {
     id: `cve_now:${id}`,
@@ -191,17 +191,21 @@ test('a listed record that is already stored and fails when read again is not ow
     fetched_at: iso(NOW - 30 * 60_000),
     packages: [],
   };
+  const details = [];
   const http = async (url) => {
     const { pathname } = new URL(url);
     if (pathname === '/stack') return json({ packages: 1, entries: [] });
     if (pathname === '/api/v1/entries')
       return json({ entries: [{ id, publishedAt: iso(NOW - 40 * 60_000) }] });
+    details.push(pathname);
     return failing(503);
   };
   const result = await collectSources(inventory(), sources, { cve_now: iso(NOW - 30 * 60_000) }, http, NOW, [
     stored,
   ]);
-  assert.match(result.errors[0].message, /advisory detail request\(s\) failed/);
+  // It was read on the poll that listed it first; the checkpoint's overlap does not spend a request.
+  assert.deepEqual(details, []);
+  assert.deepEqual(result.errors, []);
   assert.equal(result.checkpoints.cve_now, iso(NOW), 'the checkpoint is not held');
   assert.equal(result.checkpoints['cve_now:owed'], '[]');
 });

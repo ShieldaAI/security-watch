@@ -342,7 +342,8 @@ test('reasons give way before links do', () => {
 test('every prerelease form goes to the next tag', () => {
   for (const version of ['1.0.0-rc.1', '1.0.0-beta.2', '1.0.0-alpha', '2.0.0-0', '1.1.0-next.3'])
     assert.equal(releaseTag(version), 'next', version);
-  for (const version of ['1.0.0', '2.3.4']) assert.equal(releaseTag(version), 'latest', version);
+  for (const version of ['1.0.0', '2.3.4', '1.0.0+build-5', '1.0.0+sha.ab-1'])
+    assert.equal(releaseTag(version), 'latest', version);
 });
 
 /** A stand-in for git and npm that records each command and answers as the case needs. */

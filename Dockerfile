@@ -23,6 +23,7 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY LICENSE ./
 RUN mkdir -p /data /config && chown node:node /data /config
 USER node
 VOLUME ["/data"]

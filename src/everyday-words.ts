@@ -199,6 +199,8 @@ function inDictionary(word: string): boolean {
 function baseForms(word: string): string[] {
   const forms = [word];
   if (word.endsWith('ies')) forms.push(`${word.slice(0, -3)}y`);
+  // "denied", "verified", "prettier", "happiest": the -y word they come from.
+  if (/(?:ied|ier|iest)$/.test(word)) forms.push(`${word.replace(/(?:ied|ier|iest)$/, '')}y`);
   if (word.endsWith('es')) forms.push(word.slice(0, -2));
   if (word.endsWith('s')) forms.push(word.slice(0, -1));
   if (word.endsWith('ed')) forms.push(word.slice(0, -2), word.slice(0, -1));

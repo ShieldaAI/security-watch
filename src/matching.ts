@@ -123,6 +123,8 @@ function namedAsPackage(
           `${before}${registry} ${kinds} (?:${item}, ){0,4}${item},? and ${listName}${after}`,
           `${before}(?:${item}, ){0,4}${listName}(?:, ${item}){0,4},? and ${item} ${registry} ${kinds}${after}`,
           `${before}(?:${item}, ){0,4}${item},? and ${listName} ${registry} ${kinds}${after}`,
+          // "chalk, debug and 16 other npm packages": the commonest way a compromise report lists them.
+          `${before}(?:${item}, ){0,6}${listName}(?:, ${item}){0,6},? and \\d+ (?:other |more )?${registry} ${kinds}${after}`,
         ].join('|'),
         'iu',
       ),
@@ -178,7 +180,7 @@ patched update updated upgrade upgraded fixed fix fixes affected affects up down
 was were be all any each every than then latest earliest older newer later earlier`.split(/\s+/),
 );
 const QUANTITY =
-  '(?i:%|percent|thousand|million|billion|trillion|times|x|[kmgt]b|bytes|seconds?|minutes?|hours?|days?|weeks?|months?|years?|cvss|severity|score|rated|rating|out of|bn|usd|eur|dollars?)(?![\\p{L}\\p{N}])';
+  '(?i:%|percent|thousand|million|billion|trillion|times|x|[kmgt]b|bytes|seconds?|minutes?|hours?|days?|weeks?|months?|years?|cvss|severity|score|rated|rating|out of|bn|usd|eur|gbp|jpy|euros?|pounds?|dollars?|btc|eth|xmr|usdt|ltc|bitcoins?|ether|monero)(?![\\p{L}\\p{N}])';
 const boundary = { before: '(?<![\\p{L}\\p{N}_@/\\-])', after: '(?![\\p{L}\\p{N}_@/\\-])' };
 /** A name with its first letter in upper case and the rest in either case. */
 const capitalised = (name: string) =>
@@ -280,6 +282,10 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
 export function packageMentioned(text: string, component: { ecosystem: Ecosystem; name: string }): boolean {
   const name = component.name.trim();
   if (name.length < 2) return false;
+  // News names a Maven library by its artifact ("jackson-databind", "SnakeYAML"), not by its
+  // coordinates. An artifact name that is not English is the library wherever it appears.
+  const artifact = mavenArtifact(component);
+  if (artifact && packageMentioned(text, { ecosystem: 'Maven', name: artifact })) return true;
   // One story is compared with every component, and a story that cites many advisories is
   // compared again for each of them: remember the answers for the texts seen last.
   let seen = recent.get(text);
@@ -305,6 +311,12 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
     seen.answers.set(key, answer);
   }
   return answer;
+}
+/** The artifact of Maven coordinates, when news can name the library by it alone. */
+function mavenArtifact(component: { ecosystem: Ecosystem; name: string }): string | undefined {
+  if (component.ecosystem !== 'Maven') return undefined;
+  const artifact = component.name.trim().split(':')[1];
+  return artifact && artifact.length >= 5 && nameKind(artifact) === 'distinctive' ? artifact : undefined;
 }
 /** How many texts, and how many compiled names, are remembered before starting over. */
 const RECENT_TEXTS = 32;
@@ -462,44 +474,46 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
   if (cached && cached.shape === current) return cached.matcher;
   const packages = new Set<string>();
   const declared: string[] = [];
-  const distinctive: string[] = [];
-  const named: string[] = [];
-  const byEcosystem = new Map<Ecosystem, { common: string[]; dictionary: string[]; all: string[] }>();
+  /** Each package name once per ecosystem, with the words it is made of. */
+  const names = new Map<string, { component: { ecosystem: Ecosystem; name: string }; parts: string[] }>();
   for (const system of inventory.systems) {
     for (const component of system.components) {
       const key = packageKey(component);
       if (key) packages.add(key);
-      if (!byEcosystem.has(component.ecosystem))
-        byEcosystem.set(component.ecosystem, { common: [], dictionary: [], all: [] });
-      const names = byEcosystem.get(component.ecosystem)!;
-      names.all.push(component.name);
-      const kind = nameKind(component.name);
-      if (kind === 'distinctive') distinctive.push(component.name);
-      else names[kind].push(component.name);
-      if (kind === 'dictionary') named.push(component.name);
+      const name = component.name.trim();
+      const id = `${component.ecosystem}\n${name}`;
+      if (name.length >= 2 && !names.has(id)) {
+        // Maven coordinates are looked for by their artifact; `packageMentioned` tests both.
+        const artifact = mavenArtifact(component);
+        names.set(id, {
+          component: { ecosystem: component.ecosystem, name },
+          parts: (artifact ?? name).toLowerCase().match(/[a-z0-9]+/g) ?? [],
+        });
+      }
     }
     for (const product of system.products ?? []) declared.push(product.name, ...product.keywords);
     declared.push(...(system.keywords ?? []));
   }
+  const candidates = [...names.values()];
   const declaredTest = anyOf(declared);
-  const distinctiveTest = anyOf(distinctive);
-  const namedTest = writtenAsName([...new Set(named)]);
-  const ecosystemTests = [...byEcosystem].map(([ecosystem, names]) => ({
-    ecosystem,
-    // The same rules as `packageMentioned`, for every name of the ecosystem at once.
-    common: namedAsPackage(names.common, ecosystem, true),
-    dictionary: namedAsPackage(names.dictionary, ecosystem, false),
-    release: releaseTest(names.all, ecosystem),
-  }));
   const matcher: InventoryMatcher = {
     packages,
     declared: declaredTest,
-    packageNamed: (text) =>
-      distinctiveTest(text) ||
-      namedTest(text) ||
-      ecosystemTests.some(
-        ({ common, dictionary, release }) => release(text) || dictionary(text) || common(text),
-      ),
+    // The same rules as `packageMentioned`. A name can only be named where its words appear, so the
+    // words of the text are looked up first and only the names found there are tested: a long story
+    // compared with thousands of names costs one pass over the story.
+    packageNamed: (text) => {
+      const lower = text.toLowerCase();
+      const words = new Set(lower.match(/[a-z0-9]+/g) ?? []);
+      return candidates.some(
+        ({ component, parts }) =>
+          (parts.length
+            ? parts.every(
+                (part, index) => words.has(part) || (index === parts.length - 1 && words.has(`${part}js`)),
+              )
+            : lower.includes(component.name.toLowerCase())) && packageMentioned(text, component),
+      );
+    },
   };
   matchers.set(inventory, { shape: current, matcher });
   return matcher;

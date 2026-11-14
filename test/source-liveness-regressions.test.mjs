@@ -343,8 +343,15 @@ test('stored OSV records that no longer exist do not stop the refresh of later o
   const result = await collectSources(inv, config({ osv: true }), {}, http, NOW, previous);
   assert.equal(asked.length, 10);
   assert.deepEqual(result.errors, []);
-  assert.equal(result.evidence.length, 1);
-  assert.equal(result.evidence[0].withdrawn, true);
+  // The live record is refreshed; each record OSV no longer serves keeps its last known content,
+  // confirmed as current, so exclusions resting on it do not age into urgent "unknown" results.
+  assert.equal(result.evidence.length, 10);
+  assert.equal(result.evidence.find((item) => item.id === 'osv:GHSA-live-0000-0000').withdrawn, true);
+  for (const item of result.evidence.filter((entry) => entry.id.includes('gone'))) {
+    assert.equal(item.fetched_at, iso(NOW));
+    assert.equal(item.modified_at, iso(NOW - HOUR));
+    assert.deepEqual(item.packages, stored('x').packages);
+  }
 
   // A missing record that the current query still names is a real failure.
   const named = await collectSources(

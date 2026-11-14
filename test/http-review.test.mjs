@@ -134,7 +134,8 @@ test('response bytes, request bytes, timeout and redirect loops are bounded', as
     );
     await assert.rejects(safeHttp(`${target.url}/loop`, { allowPrivate: true }), /REDIRECT_DENIED/);
     await assert.rejects(
-      safeHttp(`${target.url}/slow`, { allowPrivate: true, timeoutMs: 25 }),
+      // The response never ends; the limit is long enough that connecting under load fits in it.
+      safeHttp(`${target.url}/slow`, { allowPrivate: true, timeoutMs: 750 }),
       /REQUEST_TIMEOUT|RESPONSE_FAILED/,
     );
     await assert.rejects(

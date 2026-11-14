@@ -54,7 +54,7 @@ function eventId(ids: string[]): string {
 }
 
 /** Only advisory alias claims merge events. A multi-CVE news story must not merge its subjects. */
-function groupEvidence(input: Evidence[]): Group[] {
+function groupEvidence(input: Evidence[], knownEvents: ReadonlySet<string> = new Set()): Group[] {
   const evidence = newestEvidence(input);
   const parents = new Map<string, string>();
   const find = (value: string): string => {
@@ -83,7 +83,11 @@ function groupEvidence(input: Evidence[]): Group[] {
   const aliasGroups = new Map<string, Group>();
   for (const group of groups.values()) {
     const ids = [...new Set(group.evidence.flatMap(identifiers))];
-    group.event = eventId(ids);
+    // An event already reported under one of its identifiers keeps it: a record that gains a GHSA
+    // alias, or is re-filed under another identifier, is the same vulnerability and must not be
+    // retired and raised again as a new finding.
+    const known = ids.filter((id) => knownEvents.has(id));
+    group.event = eventId(known.length ? known : ids);
     for (const id of ids) aliasGroups.set(id, group);
   }
   const news = new Map<string, Group>();
@@ -243,6 +247,8 @@ export function assess(
    * evidence does not count as stale merely because the refresh has not happened yet.
    */
   evidenceAsOf = now,
+  /** Event identifiers of findings already reported; an event keeps the one it was reported under. */
+  knownEvents: ReadonlySet<string> = new Set(),
 ): Assessment[] {
   const output: Assessment[] = [];
   const index = new Map<System, Map<string, Component[]>>();
@@ -256,7 +262,7 @@ export function assess(
     }
     index.set(system, byKey);
   }
-  for (const group of groupEvidence(evidence)) {
+  for (const group of groupEvidence(evidence, knownEvents)) {
     const advisories = group.evidence.filter((item) => item.kind === 'advisory');
     const isNews = advisories.length === 0;
     const identifiedNews =
@@ -375,7 +381,10 @@ export function assess(
           );
         });
         if (staleEvidence) {
-          if (result.applicability === 'not_affected') result.applicability = 'unknown';
+          if (result.applicability === 'not_affected') {
+            result.applicability = 'unknown';
+            result.stale_exclusion = true;
+          }
           result.reasons.push(
             'Advisory evidence is stale; retained positive matches are historical and cannot prove current exclusion.',
           );
@@ -583,6 +592,16 @@ export function decide(assessment: Assessment, config: Config): Decision {
   if (!channels.length)
     return { action: 'record', channels: [], reason: 'This category has no configured delivery channels.' };
   if (uncertain) {
+    // Every supported range excludes the installed version; only the age of the evidence is in
+    // question. That is a source outage, which the source's health finding reports on its own
+    // channels: an urgent alert for every exclusion would repeat it on every outage.
+    if (assessment.stale_exclusion)
+      return {
+        action: 'digest',
+        channels,
+        reason:
+          'The advisory ranges exclude this installed version, but the advisory evidence is out of date (see the source health finding); included in the review digest.',
+      };
     if (
       policy.urgent_unknown &&
       severityRank[highest(assessment.source_severity, assessment.priority)] >= severityRank.critical

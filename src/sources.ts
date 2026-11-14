@@ -486,10 +486,15 @@ async function osv(
     const allIds = [...ids];
     let failures = 0;
     let firstFailure: string | undefined;
-    // A stored record that OSV no longer serves is gone, not a failed request: its stored copy ages
-    // out as stale evidence, and it must not stop the refresh of the records after it.
+    // A stored record that OSV no longer serves is gone, not a failed request: it must not stop the
+    // refresh of the records after it, and, as with cve.now, its last known content stays current.
+    // Letting it age out would turn every exclusion resting on it into an urgent "unknown" on every
+    // scan while OSV itself answers normally.
     const gone = (id: string, reason: unknown) =>
       !matched.has(id) && reason instanceof SourceHttpError && reason.status === 404;
+    const storedCopy = new Map(
+      previous.filter((item) => item.source === 'osv').map((item) => [item.id.slice(4), item]),
+    );
     for (let index = 0; index < allIds.length; index += 4) {
       const batch = allIds.slice(index, index + 4);
       const settled = await Promise.allSettled(
@@ -512,7 +517,10 @@ async function osv(
       if (canceled) throw canceled.reason;
       for (const [position, item] of settled.entries()) {
         if (item.status === 'fulfilled') results.push(item.value);
-        else if (!gone(batch[position]!, item.reason)) {
+        else if (gone(batch[position]!, item.reason)) {
+          const copy = storedCopy.get(batch[position]!);
+          if (copy) results.push({ ...copy, fetched_at: timestamp(now) });
+        } else {
           failures++;
           firstFailure ??=
             item.reason instanceof SourceError ? item.reason.message : 'Source request failed.';
@@ -631,10 +639,15 @@ async function github(
   config: Config,
   http: HttpClient,
   now: number,
+  inventory: Inventory,
+  stored: Evidence[],
 ): Promise<Evidence[]> {
-  const previous = checkpoint === undefined ? now - 7 * 24 * HOUR : Date.parse(checkpoint);
-  if (!Number.isFinite(previous) || previous > now)
+  const saved = checkpoint === undefined ? undefined : Date.parse(checkpoint);
+  if (saved !== undefined && !Number.isFinite(saved))
     throw new SourceError('Invalid source checkpoint; reset it before collecting.');
+  // A checkpoint ahead of the clock (a clock that was wrong, then corrected) would never be reached:
+  // collection starts as on a new installation, as cve.now does.
+  const previous = saved === undefined || saved > now ? now - 7 * 24 * HOUR : saved;
   const start = Math.max(0, previous - HOUR);
   const url = new URL(GITHUB);
   url.searchParams.set('type', type);
@@ -690,6 +703,26 @@ async function github(
       const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
       next = nextGithubLink(link);
     }
+    // Every record modified since the window's start has been read. A stored record fetched after
+    // that start and not among them is unchanged, so it is confirmed as current: without this an
+    // exclusion drawn from it would turn into an urgent "unknown" two poll intervals after it was
+    // first read, while GitHub answers normally. Only records for the inventory's packages matter.
+    const names = new Set(
+      inventory.systems.flatMap((system) =>
+        system.components.map((component) => component.name.toLowerCase()),
+      ),
+    );
+    // A record that could not be read may be the new version of a stored one: nothing is confirmed.
+    if (invalid.message('GitHub') === undefined)
+      for (const item of stored)
+        if (
+          item.source === `github:${type}` &&
+          !evidence.has(item.id) &&
+          Date.parse(item.fetched_at) >= start &&
+          Date.parse(item.fetched_at) <= now &&
+          item.packages.some((claim) => names.has(claim.name.toLowerCase()))
+        )
+          evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
     return invalid.finish('GitHub', [...evidence.values()]);
   } catch (error) {
     throwSourceFailure(error, [...evidence.values()]);
@@ -1188,7 +1221,8 @@ export async function collectSources(
     for (const type of ['reviewed', 'malware'] as const)
       jobs.push({
         source: `github:${type}`,
-        run: () => github(type, checkpoints[`github:${type}`], config, http, now),
+        run: () =>
+          github(type, checkpoints[`github:${type}`], config, http, now, inventory, previousEvidence),
       });
   if (config.sources.kev) jobs.push({ source: 'kev', run: () => kev(http, now, previousEvidence) });
   for (const vendor of new Set(config.sources.vendor_feeds ?? [])) {

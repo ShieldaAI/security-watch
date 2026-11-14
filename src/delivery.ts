@@ -187,16 +187,17 @@ function safeText(input: string, length: number, mentions = true): string {
     // A run of blanks moves what follows as far as a line break would.
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim();
-  // Only a word Slack treats as a group mention ("@channel", "@here", "@everyone") gets an
-  // invisible break; "express@4.21.2" and "@angular/core" stay exactly as written, so they can be
-  // copied and searched for.
-  const text = mentions
-    ? cleaned.replace(/@(?=(?:channel|here|everyone|group)(?![\p{L}\p{N}_]))/giu, '@\u200b')
-    : cleaned;
   // A value that does not fit ends with "…", so a reader never takes a cut value for a whole one
   // ("8.0.3" for "8.0.39"). An emoji is never cut in half.
-  return text.length <= length ? text : `${cut(text, length - 1).trimEnd()}…`;
+  const fitted = cleaned.length <= length ? cleaned : `${cut(cleaned, length - 1).trimEnd()}…`;
+  // Only a word Slack treats as a group mention ("@channel", "@here", "@everyone", "@group") gets
+  // an invisible break; "express@4.21.2" and "@angular/core" stay exactly as written, so they can
+  // be copied and searched for. It is added after the cut: cutting "@channels" to "@channel…"
+  // makes a mention of what was none.
+  return mentions ? fitted.replace(GROUP_MENTION, '@\u200b') : fitted;
 }
+/** "@" before a word Slack treats as a group mention, in any letter case. */
+const GROUP_MENTION = /@(?=(?:channel|here|everyone|group)(?![\p{L}\p{N}_]))/giu;
 /**
  * One value for one line of a message. Advisory text, model output and inventory names are placed
  * after fixed labels such as `Rule:` and `Where to look:`; a line break inside a value would let it
@@ -215,7 +216,13 @@ function link(value: string): string | undefined {
   const cleaned = safeText(singleLine(written), 2000, false);
   // Shown only exactly as written: a link from which a character had to be removed (an invisible
   // mark, a line break) is another address, and so is a shortened one.
-  return cleaned === written && cleaned.length <= 320 && !/\s/.test(cleaned) ? cleaned : undefined;
+  // A link is never altered, so one with a group mention in it ("…/@channel") is left out too.
+  return cleaned === written &&
+    cleaned.length <= 320 &&
+    !/\s/.test(cleaned) &&
+    !new RegExp(GROUP_MENTION.source, 'iu').test(cleaned)
+    ? cleaned
+    : undefined;
 }
 /** A list from a model, each entry whole: as many as fit, then how many more there are. */
 function listLine(label: string, items: string[], length: number): string {
@@ -325,26 +332,38 @@ export function notificationText(job: Notification): { subject: string; text: st
   if (size(full) <= MESSAGE_LIMIT) return { subject, text: full.join('\n') };
   // Otherwise the analysis and reasons give way first, whole lines from the end. Only when the
   // lines every message keeps still do not fit do the source links go, the last first, and then the
-  // inventory notes. The length limits of those lines keep them, without notes and links, well
-  // inside one section (at most about 2,800 characters; pinned by a test).
-  for (const notes of [true, false])
-    for (let count = links.length; count >= 0; count--) {
-      const fixed = [...head(notes), SHORTENED, ...tail, ...links.slice(0, count)];
-      let left = MESSAGE_LIMIT - size(fixed);
-      if (left < 0 && (notes || count)) continue;
-      const kept: string[] = [];
-      for (const line of extra) {
-        if (line.length + 1 > left) break;
-        kept.push(line);
-        left -= line.length + 1;
-      }
-      return {
-        subject,
-        text: [...head(notes), ...kept, SHORTENED, ...tail, ...links.slice(0, count)].join('\n'),
-      };
+  // inventory notes.
+  const rounds: Array<[boolean, number]> = [
+    ...Array.from({ length: links.length + 1 }, (_, index): [boolean, number] => [
+      true,
+      links.length - index,
+    ]),
+    [false, 0],
+  ];
+  for (const [notes, count] of rounds) {
+    const fixed = [...head(notes), SHORTENED, ...tail, ...links.slice(0, count)];
+    let left = MESSAGE_LIMIT - size(fixed);
+    if (left < 0) continue;
+    const kept: string[] = [];
+    for (const line of extra) {
+      if (line.length + 1 > left) break;
+      kept.push(line);
+      left -= line.length + 1;
     }
-  /* The loop above always returns on its last round. */
-  throw new Error('unreachable');
+    return {
+      subject,
+      text: [...head(notes), ...kept, SHORTENED, ...tail, ...links.slice(0, count)].join('\n'),
+    };
+  }
+  // Only identifiers at their longest get here: the summary is cut to what is left.
+  const lines = head(false).slice(0, -1);
+  // Each group-mention break added after the cut takes one more character.
+  const breaks = a.summary.split('@').length - 1;
+  const room = MESSAGE_LIMIT - size([...lines, SHORTENED, ...tail]) - 1 - 'Summary: '.length - breaks;
+  return {
+    subject,
+    text: [...lines, `Summary: ${single(a.summary, Math.max(1, room))}`, SHORTENED, ...tail].join('\n'),
+  };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;

@@ -52,6 +52,14 @@ test('the version is defined once and the documents agree with it', () => {
   assert.ok(read('../CHANGELOG.md').includes(`## ${version}`));
   assert.equal(engines.node, '>=24.10.0');
   // A prerelease never publishes to the default tag, and a stable release always does.
-  assert.equal(publishConfig.tag === 'latest', !version.includes('-'));
+  assert.equal(publishConfig.tag === 'latest', !version.split('+')[0].includes('-'));
+  // Every place that names the package with a version names this one.
+  for (const file of ['../README.md', '../docs/offline-advisory-preview.md', '../scripts/check-docker.mjs']) {
+    const named = [
+      ...read(file).matchAll(/security-watch`?[@:\- ](\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.\d+)*)?)/g),
+    ];
+    assert.ok(named.length, `${file} names the version`);
+    for (const [, found] of named) assert.equal(found, version, file);
+  }
   assert.ok(!/console\.log\('\d+\.\d+\.\d+/.test(read('../src/cli.ts')), 'no hard-coded version in the CLI');
 });

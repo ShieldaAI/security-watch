@@ -8,7 +8,8 @@
 
 /** Stable versions go to `latest`; a prerelease must never replace it. */
 export function releaseTag(version) {
-  return version.includes('-') ? 'next' : 'latest';
+  // A hyphen in build metadata ("1.0.0+build-5") does not make a prerelease.
+  return version.split('+')[0].includes('-') ? 'next' : 'latest';
 }
 
 /** Returns nothing when the publish may go ahead, and the reason when it may not. */

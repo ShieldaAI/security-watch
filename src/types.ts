@@ -240,6 +240,12 @@ export interface Assessment {
   location?: FindingLocation;
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
+  /**
+   * The supported version ranges exclude the installed version, but the advisory evidence has not
+   * been refreshed for two poll intervals, so applicability is `unknown`. The source's own health
+   * finding reports the outage; this result goes to the review digest instead of an urgent alert.
+   */
+  stale_exclusion?: boolean;
   active?: boolean;
   id: string;
   event_id: string;
