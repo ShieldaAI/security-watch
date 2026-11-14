@@ -349,7 +349,9 @@ test('a failed listing request does not discard what the package lookup found', 
   assert.equal(result.coverage[0].status, 'partial');
   assert.match(result.errors[0].message, /HTTP 500/);
   assert.equal(result.checkpoints.cve_now, checkpoint.cve_now, 'the checkpoint stays');
-  assert.equal(result.coverage[0].package_results, undefined);
+  // The listing only finds new records. The package lookup and what it named were read, so version
+  // exclusions drawn from this source still hold: a failed listing must not withdraw them.
+  assert.equal(result.coverage[0].package_results, 'complete');
 });
 
 test('a stored record whose new revision is stamped ahead of the clock is still updated', async () => {

@@ -5,14 +5,20 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { releaseEnvironment, releaseOptions, releaseProblem, releaseTag } from './release-tag.mjs';
+import {
+  releaseEnvironment,
+  releaseEnvironmentProblem,
+  releaseOptions,
+  releaseProblem,
+  releaseTag,
+} from './release-tag.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const tag = releaseTag(manifest.version);
 const options = releaseOptions(process.argv.slice(2));
 const env = releaseEnvironment(process.env, tag);
-const problem = releaseProblem(manifest, env);
+const problem = releaseEnvironmentProblem(process.env) ?? releaseProblem(manifest, env);
 if (problem) throw new Error(problem);
 if (!process.env.npm_execpath) throw new Error('Run through npm run release.');
 // `prepublishOnly` runs the release checks (clean checkout, tracked files only, `npm run check`).

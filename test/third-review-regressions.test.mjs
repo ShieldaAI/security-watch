@@ -99,57 +99,87 @@ test('a listing entry that cannot be read holds the checkpoint for a day, not fo
   assert.equal(after.coverage[0].status, 'complete');
 });
 
-test('a listed record whose detail is refused for good is passed over after a day', async () => {
+/** Polls in sequence, each starting from the state the one before left. */
+async function sequence(listing, detail, times) {
+  let checkpoints = checkpoint;
+  const results = [];
+  for (const hours of times) {
+    const state = {};
+    const result = await poll(listing, detail, NOW + hours * HOUR, state, checkpoints);
+    checkpoints = result.checkpoints;
+    results.push({ hours, result, asked: state.details ?? [] });
+  }
+  return results;
+}
+
+test('a listed record whose detail is refused for good is given up on a day after its first failure', async () => {
   const listing = [listedAt('CVE-2026-81002', 5 * 60_000), listedAt('CVE-2026-81003', 600_000)];
   const gone = (id) => (id === 'CVE-2026-81003' ? { status: 404, headers: {}, body: '' } : undefined);
-  const young = await poll(listing, gone, NOW);
-  assert.match(young.errors[0].message, /1 advisory detail request\(s\) failed.*HTTP 404/);
-  assert.equal(young.checkpoints.cve_now, checkpoint.cve_now);
-  const later = NOW + 25 * HOUR;
-  const aged = await poll(listing, gone, later);
-  assert.match(aged.errors[0].message, /1 advisory record\(s\) could not be used and were skipped.*HTTP 404/);
-  assert.equal(aged.checkpoints.cve_now, iso(later));
+  const [first, soon, carried, day, after] = await sequence(listing, gone, [0, 0.5, 2, 25, 26]);
+  // A failure that just happened holds the checkpoint, as any incomplete collection does.
+  assert.match(first.result.errors[0].message, /1 advisory detail request\(s\) failed.*HTTP 404/);
+  assert.equal(first.result.checkpoints.cve_now, checkpoint.cve_now);
+  assert.equal(soon.result.checkpoints.cve_now, checkpoint.cve_now);
+  // Once it has lasted, the record is asked for by name and the checkpoint moves.
+  assert.ok(carried.asked.includes('CVE-2026-81003'));
+  assert.match(carried.result.errors[0].message, /1 new record\(s\) are still to be read/);
+  assert.equal(carried.result.checkpoints.cve_now, iso(NOW + 2 * HOUR));
+  assert.match(
+    day.result.errors[0].message,
+    /1 advisory record\(s\) could not be used and were skipped.*HTTP 404/,
+  );
+  assert.equal(day.result.checkpoints.cve_now, iso(NOW + 25 * HOUR));
+  assert.deepEqual(after.result.errors, []);
+  assert.deepEqual(after.asked, []);
 });
 
-test('a listed record that keeps failing with HTTP 503 is held for three days, then passed over', async () => {
+test('a listed record that keeps failing with HTTP 503 is asked for again for three days', async () => {
   const listing = [listedAt('CVE-2026-81004', 5 * 60_000), listedAt('CVE-2026-81005', 600_000)];
   const failing = (id) => (id === 'CVE-2026-81005' ? { status: 503, headers: {}, body: '' } : undefined);
-  for (const hours of [0, 25, 71]) {
-    const result = await poll(listing, failing, NOW + hours * HOUR);
+  const polls = await sequence(listing, failing, [0, 2, 25, 71, 73, 74]);
+  assert.equal(polls[0].result.checkpoints.cve_now, checkpoint.cve_now);
+  for (const { hours, result, asked } of polls.slice(1, 4)) {
+    assert.ok(asked.includes('CVE-2026-81005'), `${hours} h`);
     assert.match(result.errors[0].message, /1 advisory detail request\(s\) failed/, `${hours} h`);
-    assert.equal(result.checkpoints.cve_now, checkpoint.cve_now, `${hours} h`);
+    assert.equal(result.checkpoints.cve_now, iso(NOW + hours * HOUR), `${hours} h: the checkpoint moves`);
   }
-  const later = NOW + 73 * HOUR;
-  const aged = await poll(listing, failing, later);
-  assert.match(aged.errors[0].message, /could not be used and were skipped.*HTTP 503/);
-  assert.equal(aged.checkpoints.cve_now, iso(later));
+  // Once the checkpoint has moved on, only the unread record is asked for.
+  assert.deepEqual(polls[3].asked, ['CVE-2026-81005']);
+  assert.match(polls[4].result.errors[0].message, /could not be used and were skipped.*HTTP 503/);
+  assert.deepEqual(polls[5].result.errors, []);
+  assert.deepEqual(polls[5].asked, []);
 });
 
 test('nothing is given up on while the service is failing every request', async () => {
-  // Five old listed records, all answering 503: an outage, not five bad records.
+  // Five listed records, all answering 503 for days: an outage, not five bad records.
   const listing = Array.from({ length: 5 }, (_, index) => listedAt(`CVE-2026-8200${index}`, 600_000 + index));
   const down = () => ({ status: 503, headers: {}, body: '' });
-  const state = {};
-  const result = await poll(listing, down, NOW + 80 * HOUR, state);
-  assert.equal(state.details.length, 4, 'the first failed batch stops the requests');
-  assert.match(result.errors[0].message, /advisory detail request\(s\) failed/);
-  assert.doesNotMatch(result.errors[0].message, /were skipped/);
-  assert.equal(result.checkpoints.cve_now, checkpoint.cve_now);
+  const polls = await sequence(listing, down, [0, 2, 80, 120]);
+  for (const { hours, result, asked } of polls) {
+    assert.equal(asked.length, 4, `${hours} h: the first failed batch stops the requests`);
+    assert.match(result.errors[0].message, /advisory detail request\(s\) failed/, `${hours} h`);
+    assert.doesNotMatch(result.errors[0].message, /were skipped/, `${hours} h`);
+  }
+  assert.equal(
+    JSON.parse(polls.at(-1).result.checkpoints['cve_now:owed']).length,
+    5,
+    'all five are still owed',
+  );
 });
 
-test('a record stamped ahead of the clock with an unusable detail does not hold the checkpoint for ever', async () => {
+test('a record stamped ahead of the clock with an unusable detail is given up on after a day', async () => {
   const listing = [
     { id: 'CVE-2026-81006', publishedAt: iso(NOW + 30 * DAY), firstSeenAt: iso(NOW - 600_000) },
     listedAt('CVE-2026-81007', 5 * 60_000),
   ];
   const reserved = (id) =>
     id === 'CVE-2026-81006' ? json({ id, status: 'reserved', title: id }) : undefined;
-  const young = await poll(listing, reserved, NOW);
-  assert.equal(young.checkpoints.cve_now, checkpoint.cve_now);
-  const later = NOW + 25 * HOUR;
-  const aged = await poll(listing, reserved, later);
-  assert.match(aged.errors[0].message, /could not be used and were skipped/);
-  assert.equal(aged.checkpoints.cve_now, iso(later));
+  const [first, , day, after] = await sequence(listing, reserved, [0, 2, 25, 26]);
+  assert.equal(first.result.checkpoints.cve_now, checkpoint.cve_now);
+  assert.match(day.result.errors[0].message, /could not be used and were skipped/);
+  assert.equal(day.result.checkpoints.cve_now, iso(NOW + 25 * HOUR));
+  // Still stamped ahead of the clock, so still listed as new: it is asked for again, and that is all.
+  assert.deepEqual(after.asked, ['CVE-2026-81006']);
 });
 
 test('four adjacent unusable new records do not stop the records after them from being read', async () => {

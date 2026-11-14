@@ -46,21 +46,39 @@ const LANGUAGE_CONTEXT: Record<Ecosystem, string> = {
   Hackage: 'haskell',
   SwiftURL: 'swift',
 };
-const contextPatterns = new Map<string, RegExp>();
-/** `language`: whether naming the ecosystem's language is enough, without a registry or "package". */
-function packageContext(text: string, ecosystem: Ecosystem, language: boolean): boolean {
-  const key = `${ecosystem}:${language}`;
-  let pattern = contextPatterns.get(key);
-  if (!pattern) {
-    // "module" is left out: kernel modules, PAM modules and web-server modules are not packages.
-    pattern = bounded(
-      `packages?|librar(?:y|ies)|dependenc(?:y|ies)|${REGISTRY_CONTEXT[ecosystem]}${
-        language ? `|${LANGUAGE_CONTEXT[ecosystem]}` : ''
-      }`,
+/**
+ * A test for names that the text connects with packages: the name and a word of package context
+ * stand in one sentence, at most 60 characters apart ("the entities package on npm", "a flaw in the
+ * requests library"). Context somewhere else in a long article says nothing about this word:
+ * "malicious npm packages were found. … which they send to a server" is not about `send`.
+ * `language`: whether naming the ecosystem's language is enough, without a registry or "package".
+ * "module" is left out: kernel modules, PAM modules and web-server modules are not packages.
+ */
+function nearContext(
+  names: Iterable<string>,
+  ecosystem: Ecosystem,
+  language: boolean,
+): (text: string) => boolean {
+  const unique = [...new Set([...names].map((name) => name.trim()).filter((name) => name.length >= 3))];
+  const context = `(?:packages?|librar(?:y|ies)|dependenc(?:y|ies)|${REGISTRY_CONTEXT[ecosystem]}${
+    language ? `|${LANGUAGE_CONTEXT[ecosystem]}` : ''
+  })`;
+  const gap = '[^.!?\\n]{0,60}';
+  const { before, after } = boundary;
+  const patterns: RegExp[] = [];
+  for (let offset = 0; offset < unique.length; offset += 400) {
+    const alternatives = `(?:${unique
+      .slice(offset, offset + 400)
+      .map(escape)
+      .join('|')})`;
+    patterns.push(
+      new RegExp(
+        `${before}${alternatives}${after}${gap}${before}${context}${after}|${before}${context}${after}${gap}${before}${alternatives}${after}`,
+        'iu',
+      ),
     );
-    contextPatterns.set(key, pattern);
   }
-  return pattern.test(text);
+  return (text) => patterns.some((pattern) => pattern.test(text));
 }
 
 /**
@@ -103,12 +121,39 @@ const capitalised = (name: string) =>
  * "server.js" are file names.
  */
 function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: string) => boolean {
-  const unique = [...new Set([...names].map((name) => name.trim()).filter((name) => name.length >= 3))];
+  const all = [...new Set([...names].map((name) => name.trim()))];
+  const unique = all.filter((name) => name.length >= 3);
   const patterns: RegExp[] = [];
-  // "Rails 7.2", "Flask 3.1": a two-part version after the name written with a capital, unless a
-  // unit or a rating follows ("the Next 2.5 years", "Address 9.8 CVSS bug"). The commonest words
-  // are left out even so.
-  const named = unique.filter((name) => /^\p{L}+$/u.test(name) && nameKind(name) === 'dictionary');
+  // A name of two characters ("ws", "qs", "ip") is too short to be told from anything else in
+  // prose. It counts only as `name@version`.
+  const short = all.filter((name) => name.length === 2);
+  for (let offset = 0; offset < short.length; offset += 400)
+    patterns.push(
+      bounded(
+        `(?:${short
+          .slice(offset, offset + 400)
+          .map(escape)
+          .join('|')})@v?\\d+\\.\\d+`,
+      ),
+    );
+  // Or, in exactly its own spelling, right next to the word "package", "library" or "module":
+  // "the ws library", "the npm package qs". "IP address" is not the package `ip`.
+  for (let offset = 0; offset < short.length; offset += 400) {
+    const alternatives = `(?:${short
+      .slice(offset, offset + 400)
+      .map(escape)
+      .join('|')})`;
+    const word = '(?:packages?|librar(?:y|ies)|modules?)';
+    patterns.push(
+      new RegExp(
+        `${boundary.before}${alternatives} (?:[\\p{L}\\p{N}]+ )?${word}${boundary.after}|${boundary.before}${word} ${alternatives}${boundary.after}`,
+        'u',
+      ),
+    );
+  }
+  // "Rails 7.2", "Salt 3007.1": a two-part version after an English word written with a capital,
+  // unless a unit or a rating follows ("the Next 2.5 years", "Address 9.8 CVSS bug").
+  const named = unique.filter((name) => /^\p{L}+$/u.test(name) && nameKind(name) !== 'distinctive');
   for (let offset = 0; offset < named.length; offset += 400)
     patterns.push(
       new RegExp(
@@ -122,13 +167,18 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
   for (let offset = 0; offset < unique.length; offset += 400) {
     const chunk = unique.slice(offset, offset + 400);
     patterns.push(bounded(`(?:${chunk.map(escape).join('|')})${RELEASE_SUFFIX}`));
-    if (ecosystem === 'npm')
+    if (ecosystem === 'npm') {
+      // In lower case too, unless the word is one of the commonest: "validator.js" is the library,
+      // "config.js" and "server.js" are files.
+      const uncommon = chunk.filter((name) => nameKind(name) !== 'common');
+      if (uncommon.length) patterns.push(bounded(`(?:${uncommon.map(escape).join('|')})\\.js`));
       patterns.push(
         new RegExp(
           `${boundary.before}(?:${chunk.map(capitalised).join('|')})(?:\\.js|JS)${boundary.after}`,
           'u',
         ),
       );
+    }
   }
   return (text) => patterns.some((pattern) => pattern.test(text));
 }
@@ -143,24 +193,29 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
  */
 export function packageMentioned(text: string, component: { ecosystem: Ecosystem; name: string }): boolean {
   const name = component.name.trim();
-  if (name.length < 3) return false;
+  if (name.length < 2) return false;
   // One story is compared with every component, and a story that cites many advisories is
   // compared again for each of them: remember the answers for the texts seen last.
-  let answers = recent.get(text);
-  if (!answers) {
-    if (recent.size >= 32) recent.clear();
-    answers = new Map();
-    recent.set(text, answers);
+  let seen = recent.get(text);
+  if (!seen) {
+    if (recent.size >= RECENT_TEXTS) recent.clear();
+    seen = { lower: text.toLowerCase(), answers: new Map() };
+    recent.set(text, seen);
   }
   const key = `${component.ecosystem}\n${name}`;
-  let answer = answers.get(key);
+  let answer = seen.answers.get(key);
   if (answer === undefined) {
-    answer = nameTests(component.ecosystem, name)(text);
-    answers.set(key, answer);
+    // Most components are not in most texts: a plain search settles that before any expression
+    // is built for the name.
+    answer = seen.lower.includes(name.toLowerCase()) && nameTests(component.ecosystem, name)(text);
+    seen.answers.set(key, answer);
   }
   return answer;
 }
-const recent = new Map<string, Map<string, boolean>>();
+/** How many texts, and how many compiled names, are remembered before starting over. */
+const RECENT_TEXTS = 32;
+const COMPILED_NAMES = 50_000;
+const recent = new Map<string, { lower: string; answers: Map<string, boolean> }>();
 const compiled = new Map<string, (text: string) => boolean>();
 /** The compiled test for one name; building its expressions once matters for large inventories. */
 function nameTests(ecosystem: Ecosystem, name: string): (text: string) => boolean {
@@ -171,16 +226,14 @@ function nameTests(ecosystem: Ecosystem, name: string): (text: string) => boolea
     const mention = bounded(escape(name));
     const kind = nameKind(name);
     const named = kind === 'dictionary' ? writtenAsName([name]) : () => false;
-    const lower = name.toLowerCase();
+    const near = kind === 'distinctive' ? undefined : nearContext([name], ecosystem, kind === 'dictionary');
     test = (text) => {
-      // Most components are not in most texts: a plain search settles that before any expression.
-      if (!text.toLowerCase().includes(lower)) return false;
       if (release(text)) return true;
-      if (!mention.test(text)) return false;
-      if (kind === 'distinctive' || packageContext(text, ecosystem, kind === 'dictionary')) return true;
+      if (name.length < 3 || !mention.test(text)) return false;
+      if (!near || near(text)) return true;
       return named(text);
     };
-    if (compiled.size >= 50_000) compiled.clear();
+    if (compiled.size >= COMPILED_NAMES) compiled.clear();
     compiled.set(key, test);
   }
   return test;
@@ -198,7 +251,8 @@ function titleCase(line: string): boolean {
  * after a word that has none and is not followed by another capitalised word ("a flaw in Express
  * lets", "the Scheduler package"); "group Salt Typhoon" and "Windows Task Scheduler" are other
  * names. A well-known library name also counts with a following capital ("in React Server
- * Components") and when it opens a sentence that goes on in lower case ("Rails releases patches").
+ * Components"), when it opens a sentence that goes on in lower case ("Rails releases patches"),
+ * and as the second word of a sentence ("Critical Rails flaw", "The React team").
  * Lines in title case are not considered.
  */
 function writtenAsName(names: string[]): (text: string) => boolean {
@@ -228,7 +282,12 @@ function writtenAsName(names: string[]): (text: string) => boolean {
   add(
     single.filter((name) => properName(name)),
     (alternatives) =>
-      `${after}${alternatives}${end}|(?<=^|[.!?]\\s+)${alternatives}(?:['’]s)?${end}(?= \\p{Ll})`,
+      `${after}${alternatives}${end}` +
+      // Opening a sentence that goes on in lower case: "Rails releases patches".
+      `|(?<=^|[.!?]\\s+)${alternatives}(?:['’]s)?${end}(?= \\p{Ll})` +
+      // Second word of a sentence that goes on in lower case: "Critical Rails flaw", "The React
+      // team", "New Express vulnerability".
+      `|(?<=(?:^|[.!?]\\s+)\\p{Lu}[\\p{L}'’-]* )${alternatives}(?:['’]s)?${end}(?= \\p{Ll})`,
   );
   if (!patterns.length) return () => false;
   return (text) =>
@@ -314,8 +373,9 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
   const namedTest = writtenAsName([...new Set(named)]);
   const ecosystemTests = [...byEcosystem].map(([ecosystem, names]) => ({
     ecosystem,
-    common: anyOf(names.common),
-    dictionary: anyOf(names.dictionary),
+    // The same rules as `packageMentioned`, for every name of the ecosystem at once.
+    common: nearContext(names.common, ecosystem, false),
+    dictionary: nearContext(names.dictionary, ecosystem, true),
     release: releaseTest(names.all, ecosystem),
   }));
   const matcher: InventoryMatcher = {
@@ -325,10 +385,7 @@ export function inventoryMatcher(inventory: Inventory): InventoryMatcher {
       distinctiveTest(text) ||
       namedTest(text) ||
       ecosystemTests.some(
-        ({ ecosystem, common, dictionary, release }) =>
-          release(text) ||
-          (packageContext(text, ecosystem, true) &&
-            (dictionary(text) || (packageContext(text, ecosystem, false) && common(text)))),
+        ({ common, dictionary, release }) => release(text) || dictionary(text) || common(text),
       ),
   };
   matchers.set(inventory, { shape: current, matcher });

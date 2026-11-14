@@ -73,10 +73,10 @@ const MAX_STORY_IDENTIFIERS = 100;
  * each one becomes a lookup and a candidate finding, so only the first ones are followed.
  */
 function citedIdentifiers(text: string): string[] {
-  return aliases(text.match(/\b(?:CVE-\d{4}-\d{4,}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi) ?? []).slice(
-    0,
-    MAX_STORY_IDENTIFIERS,
-  );
+  // The number has a bounded length: a longer run of digits is not an identifier.
+  return aliases(
+    text.match(/\b(?:CVE-\d{4}-\d{4,19}|GHSA-[a-z\d]{4}-[a-z\d]{4}-[a-z\d]{4})\b/gi) ?? [],
+  ).slice(0, MAX_STORY_IDENTIFIERS);
 }
 function aliases(values: unknown[]): string[] {
   return [
@@ -1210,6 +1210,8 @@ export async function collectSources(
   const cveNowState: CveNowState = {
     missing: checkpoints['cve_now:missing'],
     troubled: checkpoints['cve_now:troubled'],
+    owed: checkpoints['cve_now:owed'],
+    refusedSince: Number(checkpoints['cve_now:refused_since']) || undefined,
   };
   if (config.sources.cve_now)
     jobs.push({
@@ -1254,6 +1256,11 @@ export async function collectSources(
     // Identifiers whose requests failed, so that the next poll asks for them last.
     if (job.source === 'cve_now' && cveNowState.nextTroubled !== undefined)
       result.checkpoints['cve_now:troubled'] = cveNowState.nextTroubled;
+    // New records still to be read, so that the checkpoint can move on without them.
+    if (job.source === 'cve_now' && cveNowState.nextOwed !== undefined)
+      result.checkpoints['cve_now:owed'] = cveNowState.nextOwed;
+    if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
+      result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {
       const modified = Date.parse(item.modified_at);
       if (Number.isFinite(modified) && modified <= now + 5 * 60_000) return true;

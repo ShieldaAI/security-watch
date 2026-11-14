@@ -6,9 +6,9 @@ import { WORD_FILTER_BITS, WORD_FILTER_DATA, WORD_FILTER_HASHES } from './word-f
  * with one of these names is matched in a news story only when the story is about packages or
  * names a release of it; see `packageMentioned` in matching.ts.
  *
- * A name that is not listed here ("axios", "django", "rails", "webpack") is treated as the name of
- * the software wherever it appears. Add a word when it produces unrelated matches; the list trades
- * a little recall for names that are also common words, and nothing for any other name.
+ * These are the commonest words. Any other English word is recognised by the dictionary filter
+ * below and treated a little more leniently; a name that is not English ("axios", "django",
+ * "webpack") is the software wherever it appears. Add a word here when it produces unrelated matches.
  */
 const WORDS = `
 able about above accept accepts access account accounts across action actions active activity actor
@@ -132,6 +132,17 @@ unix uri url usb utf utf8 uuid vpn waf webhook websocket wifi xdr xml xss xxe ya
 changelog cron daemon distro dotfile firmware hostname hyperlink kernel localhost middleware namespace
 passphrase plaintext runtime screenshot sudo sysadmin timestamp username whitelist blacklist wildcard
 akira clop cobalt conti ghost hive lazarus lockbit medusa royal salt sandworm tesla tornado typhoon
+adware analytics authentication authenticator authorization backend baseline benchmark biometric
+biometrics bitcoin blockchain blog bootloader broadband captcha chatbot checkbox chipset codebase
+compliance cryptocurrency cryptojacking cryptominer cyberattack cybercrime cybercriminal cybersecurity
+darknet darkweb dashboard datacenter dataset deepfake devops downtime dropdown dropper ecommerce
+ethereum ethernet failover fingerprinting fintech freeware frontend geolocation hacker hackers hacking
+hacktivist healthcare homepage hypervisor infosec infostealer keylogger laptop lifecycle livestream
+logon logout mainframe metadata microchip microservice microservices modem navbar offline onboarding
+opensource outage passcode passkey pentest podcast popup roadmap robotics rollback rollout scareware
+screencast semiconductor serverless shareware sidebar signin signup skimmer smartphone smartwatch
+smishing spoofing stakeholder startup stealer takedown telco telecom telehealth timeline toolchain
+toolkit tooltip touchscreen tracker trojan typosquatting uptime vishing webpage website wearable wiper
 `;
 
 /**

@@ -41,6 +41,27 @@ export function releaseOptions(extra) {
   return [...extra];
 }
 
+/**
+ * Why this environment must not start a publish, or nothing. An npm option typed before the `--`
+ * (`npm run release --ignore-scripts`), or set in `.npmrc` or the environment, never reaches
+ * `releaseOptions`: npm keeps it and hands it to the publish it starts. With scripts ignored the
+ * publish would skip every release check and the build; with another registry it would go elsewhere.
+ */
+export function releaseEnvironmentProblem(env) {
+  const setting = (name) =>
+    Object.entries(env).find(([key]) => key.toLowerCase() === `npm_config_${name}`)?.[1];
+  if (!['', 'false', undefined].includes(setting('ignore_scripts')))
+    return 'npm is set to ignore scripts (--ignore-scripts or ignore-scripts=true), which would skip the release checks and the build. Remove that setting.';
+  const registry = setting('registry');
+  if (
+    registry !== undefined &&
+    registry !== '' &&
+    registry.replace(/\/$/, '') !== 'https://registry.npmjs.org'
+  )
+    return `npm is set to publish to ${registry}; releases go to https://registry.npmjs.org/. Remove that setting.`;
+  return undefined;
+}
+
 /** The environment for the publish: the tag is stated, and no tag setting is inherited. */
 export function releaseEnvironment(env, tag) {
   const next = { ...env, SECURITY_WATCH_RELEASE_TAG: tag };
