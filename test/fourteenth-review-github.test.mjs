@@ -995,46 +995,134 @@ test('beyond the cap of given-up records, one with a stored copy is kept althoug
   assert.ok(!kept.includes(others[0]), 'the oldest without a copy is dropped');
 });
 
-test('a row without a usable identifier holds the checkpoint for a day, then breaks the chain of confirmations', async () => {
+test('a row whose ghsa_id is missing or reshaped is read by the identifier its links end with', async () => {
   const store = new Store(':memory:');
   const copy = { ...storedCopy('GHSA-aaaa-bbbb-0200'), fetched_at: iso(NOW) };
   store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
-  // GitHub widens the range and serves the row without its identifier.
-  let served = 'none';
-  const row = () => {
-    const record = advisory('GHSA-aaaa-bbbb-0200', 'alpha', NOW + 10 * MINUTE);
-    if (served === 'none') delete record.ghsa_id;
-    if (served === 'null') record.ghsa_id = null;
-    return record;
-  };
-  const { http } = github((now) => (now >= NOW + 10 * MINUTE ? [row()] : []));
-  for (let run = 1; run <= 4; run++) {
+  for (const [run, change] of [
+    [1, (row) => delete row.ghsa_id],
+    [2, (row) => (row.ghsa_id = null)],
+    [3, (row) => (row.ghsa_id = 'GHSA-aaaa-bbbb-0200-extra')],
+  ]) {
+    const { http } = github(() => {
+      const row = advisory('GHSA-aaaa-bbbb-0200', 'alpha', NOW + run * 10 * MINUTE);
+      row.html_url = 'https://github.com/advisories/GHSA-aaaa-bbbb-0200';
+      row.url = 'https://api.github.com/advisories/GHSA-aaaa-bbbb-0200';
+      change(row);
+      return [row];
+    });
     const result = await poll(store, http, NOW + run * 30 * MINUTE);
-    assert.ok(Date.parse(result.checkpoints['github:reviewed']) <= NOW + 10 * MINUTE + HOUR, `run ${run}`);
-    assert.ok(!result.evidence.some((item) => item.id === copy.id), 'the stored copy is not confirmed');
-    served = run % 2 ? 'null' : 'none';
+    assert.deepEqual(result.errors, [], `run ${run}`);
+    assert.ok(
+      result.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + run * 30 * MINUTE)),
+    );
   }
-  // Served with its identifier again: read, and the checkpoint moves on.
-  served = 'id';
-  const read = await poll(store, http, NOW + 3 * HOUR);
-  assert.ok(read.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 3 * HOUR)));
-  assert.equal(read.checkpoints['github:reviewed'], iso(NOW + 3 * HOUR));
-  assert.equal(read.checkpoints['github:reviewed:unidentified'], '');
+});
 
-  // Without an identifier for more than a day: the checkpoint moves, and no stored copy read before
-  // is confirmed again.
-  const later = new Store(':memory:');
-  later.saveEvidence([copy], {
+test('a row without any identifier keeps stored records for the packages it names unconfirmed until each is read again', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...storedCopy('GHSA-aaaa-bbbb-0201'), fetched_at: iso(NOW) };
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  let listing = (now) => {
+    if (now < NOW + 10 * MINUTE) return [];
+    const row = advisory('GHSA-aaaa-bbbb-0201', 'alpha', NOW + 10 * MINUTE);
+    delete row.ghsa_id;
+    return [row, advisory('GHSA-aaaa-bbbb-0202', 'zeta', NOW + 10 * MINUTE)];
+  };
+  // By identifier GitHub serves the widened record readably.
+  let byIdReadable = false;
+  const { http, log } = github((now) => listing(now), {
+    byId: (record) =>
+      json(
+        byIdReadable
+          ? advisory('GHSA-aaaa-bbbb-0201', 'alpha', NOW + 10 * MINUTE)
+          : { ghsa_id: 'GHSA-aaaa-bbbb-0201', updated_at: iso(NOW + 10 * MINUTE), affected: [] },
+      ),
+  });
+  const originalHttp = http;
+  const first = await poll(store, originalHttp, NOW + 30 * MINUTE);
+  // The checkpoint moves on; the readable row is read; alpha's stored copy is not confirmed.
+  assert.equal(first.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE));
+  assert.match(first.errors[0].message, /give no identifier/);
+  assert.ok(first.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0202'));
+  assert.ok(!first.evidence.some((item) => item.id === copy.id));
+  assert.deepEqual(Object.keys(JSON.parse(first.checkpoints['github:reviewed:unconfirmed'])), ['alpha']);
+  // Later runs read it again by identifier (it is no longer in the listing's window); until it can
+  // be read it is not confirmed.
+  listing = () => [advisory('GHSA-aaaa-bbbb-0201', 'alpha', NOW - DAY)];
+  log.byId.length = 0;
+  const second = await poll(store, originalHttp, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0201']);
+  assert.ok(!second.evidence.some((item) => item.id === copy.id));
+  byIdReadable = true;
+  const third = await poll(store, originalHttp, NOW + 90 * MINUTE);
+  assert.ok(third.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 90 * MINUTE)));
+  assert.deepEqual(JSON.parse(third.checkpoints['github:reviewed:unconfirmed']), {});
+  // And confirmed again from then on.
+  const fourth = await poll(store, originalHttp, NOW + 120 * MINUTE);
+  assert.ok(
+    fourth.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 120 * MINUTE)),
+  );
+});
+
+test('a row without any identifier for another package leaves stored records confirmed', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...storedCopy('GHSA-aaaa-bbbb-0203'), fetched_at: iso(NOW) };
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const { http, log } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0204', 'zeta', NOW + 10 * MINUTE);
+    delete row.ghsa_id;
+    return [row];
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.ok(
+    result.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 30 * MINUTE)),
+  );
+  assert.deepEqual(log.byId, []);
+  // A row naming no package at all may replace any stored record.
+  const none = new Store(':memory:');
+  none.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const bare = github(() => [
+    { updated_at: iso(NOW + 10 * MINUTE) },
+    advisory('GHSA-aaaa-bbbb-0205', 'zeta', NOW + 10 * MINUTE),
+  ]);
+  const blocked = await poll(none, bare.http, NOW + 30 * MINUTE);
+  assert.ok(!blocked.evidence.some((item) => item.id === copy.id));
+  assert.deepEqual(Object.keys(JSON.parse(blocked.checkpoints['github:reviewed:unconfirmed'])), ['*']);
+});
+
+test('an answer by identifier without an identifier is a failed read of the record asked for', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
     'github:reviewed': iso(NOW),
     'github:malware': iso(NOW),
-    'github:reviewed:unidentified': String(NOW - DAY - HOUR),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0206', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+    ]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0207']),
   });
-  served = 'none';
-  const moved = await poll(later, http, NOW + 30 * MINUTE);
-  assert.equal(moved.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE));
-  assert.equal(moved.checkpoints['github:reviewed:unconfirmed_before'], iso(NOW + 30 * MINUTE));
-  const next = await poll(later, github(() => []).http, NOW + HOUR);
-  assert.ok(!next.evidence.some((item) => item.id === copy.id), 'the old copy is not confirmed again');
+  const { http, log } = github(
+    () => [
+      advisory('GHSA-aaaa-bbbb-0206', 'alpha', NOW - 20 * DAY),
+      advisory('GHSA-aaaa-bbbb-0207', 'alpha', NOW - 20 * DAY),
+    ],
+    {
+      byId: (record) => {
+        const answer = { ...record };
+        delete answer.ghsa_id;
+        return json(answer);
+      },
+    },
+  );
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0206', 'GHSA-aaaa-bbbb-0207']);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'no rewind to an old update');
+  assert.deepEqual(
+    remembered(result).map(([id, , attempts]) => [id, attempts]),
+    [['GHSA-aaaa-bbbb-0206', 2]],
+  );
+  assert.doesNotMatch(JSON.stringify(result.errors), /give no identifier/);
+  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:unconfirmed']), {});
 });
 
 test('a listing whose rows all lack an identifier is an outage: no failed read is counted', async () => {
@@ -1057,18 +1145,75 @@ test('a listing whose rows all lack an identifier is an outage: no failed read i
   );
 });
 
-test('a first-met time for rows without an identifier that lies ahead of the clock counts from now', async () => {
+test('without budget to read it again, a stored record a row without an identifier may replace is still not confirmed', async () => {
   const store = new Store(':memory:');
-  store.saveEvidence([], {
+  const copy = { ...storedCopy('GHSA-aaaa-bbbb-0208'), fetched_at: iso(NOW) };
+  store.saveEvidence([copy], {
     'github:reviewed': iso(NOW),
     'github:malware': iso(NOW),
-    'github:reviewed:unidentified': String(NOW + 2 * DAY),
+    // Two remembered records, first met long ago with old updates, take the whole budget.
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0209', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+      ['GHSA-aaaa-bbbb-0210', NOW - HOUR, 1, NOW - 20 * DAY],
+    ]),
   });
-  const { http } = github(() => {
-    const row = advisory('GHSA-aaaa-bbbb-0220', 'zeta', NOW + 10 * MINUTE);
+  const { http, log } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0211', 'alpha', NOW + 10 * MINUTE);
     delete row.ghsa_id;
-    return [row];
+    return [
+      row,
+      advisory('GHSA-aaaa-bbbb-0212', 'zeta', NOW + 10 * MINUTE),
+      advisory('GHSA-aaaa-bbbb-0209', 'zeta', NOW - 20 * DAY, false),
+      advisory('GHSA-aaaa-bbbb-0210', 'zeta', NOW - 20 * DAY, false),
+    ];
   });
   const result = await poll(store, http, NOW + 30 * MINUTE);
-  assert.equal(result.checkpoints['github:reviewed:unidentified'], String(NOW + 30 * MINUTE));
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0209', 'GHSA-aaaa-bbbb-0210']);
+  assert.ok(!result.evidence.some((item) => item.id === copy.id));
+  // Next run: a remembered record is read, which rewinds the listing; reading the stored record again
+  // by identifier does not.
+  const later = new Store(':memory:');
+  later.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0213', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+    ]),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW + 10 * MINUTE }),
+  });
+  const refreshed = github(() => [
+    advisory('GHSA-aaaa-bbbb-0213', 'zeta', NOW - 20 * DAY, false),
+    advisory('GHSA-aaaa-bbbb-0208', 'alpha', NOW - DAY),
+  ]);
+  const after = await poll(later, refreshed.http, NOW + 30 * MINUTE);
+  assert.deepEqual(refreshed.log.byId, ['GHSA-aaaa-bbbb-0213', 'GHSA-aaaa-bbbb-0208']);
+  assert.ok(after.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 30 * MINUTE)));
+  assert.equal(after.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE));
+});
+
+test('a row without any identifier holds the listing for a day after its update, so it is read once it regains one', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  let withId = false;
+  const { http } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0214', 'alpha', NOW + 10 * MINUTE);
+    if (!withId) delete row.ghsa_id;
+    // A readable row too, so that this is not a format outage.
+    return [row, advisory('GHSA-aaaa-bbbb-0215', 'zeta', NOW + 20 * MINUTE)];
+  });
+  let result;
+  for (let hour = 2; hour <= 5; hour++) {
+    result = await poll(store, http, NOW + hour * HOUR);
+    assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 70 * MINUTE), `hour ${hour}`);
+  }
+  withId = true;
+  result = await poll(store, http, NOW + 6 * HOUR);
+  assert.ok(result.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0214'));
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 6 * HOUR));
+  // A day after its update it no longer holds.
+  const late = new Store(':memory:');
+  late.saveEvidence([], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  withId = false;
+  const old = await poll(late, http, NOW + 10 * MINUTE + DAY + HOUR);
+  assert.equal(old.checkpoints['github:reviewed'], iso(NOW + 10 * MINUTE + DAY + HOUR));
 });

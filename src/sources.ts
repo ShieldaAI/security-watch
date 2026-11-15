@@ -561,11 +561,41 @@ async function osv(
   }
 }
 
+/**
+ * A GitHub advisory's identifier: its `ghsa_id`, or else the identifier its own links end with, so a
+ * renamed or reshaped `ghsa_id` field does not leave a record without one.
+ */
+function githubIdentifier(raw: unknown): string | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const data = raw as Record<string, unknown>;
+  const id = /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i;
+  if (typeof data.ghsa_id === 'string' && id.test(data.ghsa_id)) return data.ghsa_id;
+  for (const link of [data.html_url, data.url])
+    if (typeof link === 'string') {
+      const match = /\/advisories\/(GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})(?:[/?#]|$)/i.exec(link);
+      if (match) return match[1];
+    }
+  return undefined;
+}
+/** The package names a GitHub row names, in lower case, read as far as the row allows. */
+function githubPackageNames(raw: unknown): string[] {
+  const vulnerabilities =
+    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).vulnerabilities : undefined;
+  if (!Array.isArray(vulnerabilities)) return [];
+  return vulnerabilities.flatMap((vulnerability: unknown) => {
+    const pkg =
+      typeof vulnerability === 'object' && vulnerability !== null
+        ? (vulnerability as Record<string, unknown>).package
+        : undefined;
+    const name = typeof pkg === 'object' && pkg !== null ? (pkg as Record<string, unknown>).name : undefined;
+    return typeof name === 'string' && name.trim() ? [name.trim().toLowerCase()] : [];
+  });
+}
+
 function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): Evidence {
   const data = record(raw);
-  const id = string(data.ghsa_id);
-  if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i.test(id))
-    throw new SourceError('Invalid GitHub advisory identifier.');
+  const id = githubIdentifier(data);
+  if (!id) throw new SourceError('Invalid GitHub advisory identifier.');
   if (data.type !== undefined && data.type !== type)
     throw new SourceError('GitHub returned an unexpected advisory type.');
   const modified = date(data.updated_at);
@@ -689,13 +719,13 @@ async function github(
     skipped?: string;
     nextPending?: string;
     nextSkipped?: string;
-    /** When rows without a usable identifier were first met, as milliseconds; '' when none were. */
-    unidentifiedSince?: string;
-    nextUnidentifiedSince?: string;
-    /** Stored records read before this time are not confirmed as current (rows without an identifier
-     * were met for longer than a day then), and its next value. */
-    unconfirmedBefore?: string;
-    nextUnconfirmedBefore?: string;
+    /**
+     * Package names (lower case, "*" for a row that names none) of rows met without any identifier,
+     * with when they were last met: a stored record for such a package read before then may have been
+     * replaced by that row, so it is not confirmed as current until it is read again.
+     */
+    unconfirmed?: string;
+    nextUnconfirmed?: string;
   } = {},
 ): Promise<Evidence[]> {
   const { start, chainStart } = githubWindow(checkpoint, since, now);
@@ -754,16 +784,37 @@ async function github(
   }
   /** Records met in this run that could not be read: the identifier as GitHub wrote it, and when it was updated. */
   const unreadableNow = new Map<string, { id: string; updated: number }>();
-  /** Records that could not be read and give no usable identifier, and the earliest update among them. */
+  /**
+   * Records that could not be read and give no identifier at all, and whether one was updated within
+   * the last day. Such a record cannot be asked for by name: the packages it names are remembered, and
+   * stored records for them are not confirmed as current until each is read again.
+   */
   let unidentified = 0;
-  let unidentifiedFrom = Infinity;
-  // Such a record cannot be remembered by identifier: it holds the checkpoint at its update for a day
-  // from when such records were first met, so it is listed again and read once GitHub serves it with
-  // an identifier; after that the chain of confirmed stored records is broken instead.
-  const firstUnidentified = unreadable.unidentifiedSince ? Number(unreadable.unidentifiedSince) : NaN;
-  const unidentifiedSince =
-    Number.isFinite(firstUnidentified) && firstUnidentified <= now ? firstUnidentified : now;
-  const holdUnidentified = now - unidentifiedSince <= UNREADABLE_HOLD_HOURS * HOUR;
+  let unidentifiedRecent = false;
+  /**
+   * The earliest update among such rows updated within the last day: the listing is read again from
+   * it, so a row that regains its identifier is read. Each row holds for at most a day after its own
+   * update, and never once a run reaches the page limit.
+   */
+  let unidentifiedHold = Infinity;
+  const blocked = new Map<string, number>();
+  try {
+    const saved: unknown = JSON.parse(unreadable.unconfirmed || '{}');
+    if (typeof saved === 'object' && saved !== null && !Array.isArray(saved))
+      for (const [name, at] of Object.entries(saved))
+        if (typeof at === 'number' && Number.isFinite(at)) blocked.set(name, Math.min(at, now));
+  } catch {
+    // An unreadable list only means those records are confirmed as before.
+  }
+  /** When a stored record was last possibly replaced by a row without an identifier. */
+  const blockedAt = (item: Evidence) =>
+    Math.max(
+      blocked.get('*') ?? -Infinity,
+      ...item.packages.map((claim) => blocked.get(claim.name.toLowerCase()) ?? -Infinity),
+    );
+  const names = new Set(
+    inventory.systems.flatMap((system) => system.components.map((component) => component.name.toLowerCase())),
+  );
   /** Rows of the listing, readable or not, and the latest update time among them. */
   let rows = 0;
   let readableRows = 0;
@@ -776,7 +827,7 @@ async function github(
   const outage = () =>
     rows > 0 &&
     readableRows === 0 &&
-    ((unidentified > 0 && holdUnidentified) ||
+    (unidentifiedRecent ||
       [...unreadableNow.keys()].some((k) => {
         const entry = pending.get(k);
         return !entry || now - entry.firstMet <= UNREADABLE_HOLD_HOURS * HOUR;
@@ -788,11 +839,7 @@ async function github(
         : NaN;
     return Number.isFinite(updated) && updated <= now ? updated : NaN;
   };
-  const ghsaId = (item: unknown) => {
-    const id =
-      typeof item === 'object' && item !== null ? (item as Record<string, unknown>).ghsa_id : undefined;
-    return typeof id === 'string' && /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i.test(id) ? id : undefined;
-  };
+  const ghsaId = githubIdentifier;
   const read = (item: unknown) => {
     const parsed = invalid.read(() => githubRecord(item, type, now));
     const id = ghsaId(item);
@@ -808,7 +855,12 @@ async function github(
     else {
       unidentified++;
       const updated = updatedAt(item);
-      unidentifiedFrom = Math.min(unidentifiedFrom, Number.isFinite(updated) ? updated : start);
+      if (now - updated <= UNREADABLE_HOLD_HOURS * HOUR) {
+        unidentifiedRecent = true;
+        unidentifiedHold = Math.min(unidentifiedHold, updated);
+      }
+      const named = githubPackageNames(item);
+      for (const name of named.length ? named : ['*']) blocked.set(name, now);
     }
     return parsed;
   };
@@ -824,7 +876,7 @@ async function github(
    * the listing has to be read again: during a format outage, for remembered records beyond the cap,
    * and once records can be read again while some are still remembered.
    */
-  const settle = (readSomething: boolean): number | undefined => {
+  const settle = (readSomething: boolean, holdUnidentified = true): number | undefined => {
     const nextPending = new Map<string, Remembered>(pending);
     for (const [k, { id, updated }] of unreadableNow) {
       const before = pending.get(k) ?? { id, firstMet: now, attempts: 0, updated };
@@ -868,13 +920,29 @@ async function github(
       rewind = Math.min(rewind ?? Infinity, earliest(kept.map(([, entry]) => entry)));
     // Nothing in the listing could be read: the window is listed again on the next run.
     if (!readSomething) rewind = start;
-    if (unidentified) {
-      unreadable.nextUnidentifiedSince = String(unidentifiedSince);
-      if (holdUnidentified) rewind = Math.min(rewind ?? Infinity, unidentifiedFrom);
-      // After a day the checkpoint moves on; one of them may be a newer version of any stored record,
-      // so none read before now is confirmed again until GitHub serves it anew.
-      else unreadable.nextUnconfirmedBefore = timestamp(now);
-    } else unreadable.nextUnidentifiedSince = '';
+    if (holdUnidentified && Number.isFinite(unidentifiedHold))
+      rewind = Math.min(rewind ?? Infinity, unidentifiedHold);
+    // A package stays remembered while a stored record for it, read before its row was met, waits to
+    // be read again.
+    const waitingFor = (name: string, at: number) =>
+      stored.some(
+        (item) =>
+          item.source === `github:${type}` &&
+          !evidence.has(item.id) &&
+          Date.parse(item.fetched_at) < at &&
+          item.packages.some(
+            (claim) =>
+              names.has(claim.name.toLowerCase()) && (name === '*' || claim.name.toLowerCase() === name),
+          ),
+      );
+    unreadable.nextUnconfirmed = JSON.stringify(
+      Object.fromEntries(
+        [...blocked]
+          .filter(([name, at]) => waitingFor(name, at))
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, MAX_UNREADABLE),
+      ),
+    );
     unreadable.nextPending = JSON.stringify(
       kept.map(([, { id, firstMet, attempts, updated }]) => [
         id,
@@ -904,7 +972,7 @@ async function github(
       );
     if (unidentified)
       parts.push(
-        `GitHub: ${unidentified} record(s) could not be read and give no identifier; no stored record was confirmed as current in this run${holdUnidentified ? ', and the listing is read again from the earliest of them' : ''}.`,
+        `GitHub: ${unidentified} record(s) could not be read and give no identifier; stored records for the packages they name are not confirmed as current until each is read again${Number.isFinite(unidentifiedHold) ? ', and the listing is read again from the earliest updated within the last day' : ''}.`,
       );
     if (refused)
       parts.push('GitHub refused requests for single records (rate limit); they are asked for again later.');
@@ -924,7 +992,7 @@ async function github(
         // that could not be read count as progress: they are remembered by identifier.
         if (rows < MAX_PAGES * 90 || !Number.isFinite(reachedRow) || reachedRow <= start)
           throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
-        const rewind = settle(!outage());
+        const rewind = settle(!outage(), false);
         const note = problems(rewind);
         throw new PartialSourceError(
           `GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.${note ? ` ${note}` : ''}`,
@@ -981,7 +1049,26 @@ async function github(
       skipped.delete(k);
       skipped.set(k, id);
     }
-    for (const entry of [...asked, ...again]) {
+    // With room still left, stored records for the inventory that a row without an identifier may
+    // have replaced are read again by identifier, the longest unread first, so that they can be
+    // confirmed again. One that cannot be read is remembered like any other.
+    const refresh: Remembered[] = stored
+      .filter((item) => {
+        const k = key(item.id.slice(7));
+        return (
+          item.source === `github:${type}` &&
+          !evidence.has(item.id) &&
+          !unreadableNow.has(k) &&
+          !pending.has(k) &&
+          !skipped.has(k) &&
+          Date.parse(item.fetched_at) < blockedAt(item) &&
+          item.packages.some((claim) => names.has(claim.name.toLowerCase()))
+        );
+      })
+      .sort((a, b) => Date.parse(a.fetched_at) - Date.parse(b.fetched_at))
+      .slice(0, Math.max(0, room - picks.length))
+      .map((item) => ({ id: item.id.slice(7), firstMet: now, attempts: 0, updated: NaN }));
+    for (const entry of [...asked, ...again, ...refresh]) {
       const givenUp = again.includes(entry);
       try {
         const response = await http(`${GITHUB}/${encodeURIComponent(entry.id)}`, {
@@ -999,9 +1086,15 @@ async function github(
           refused = true;
           break;
         } else if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
-        else if (read(JSON.parse(response.body) as unknown)) recovered++;
-        else if (givenUp) unreadableNow.delete(key(entry.id));
-        else unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
+        else {
+          const body = JSON.parse(response.body) as unknown;
+          // An answer without an identifier is a failed read of the record asked for, not a row of
+          // the listing without one.
+          if (ghsaId(body) && read(body)) {
+            if (!refresh.includes(entry)) recovered++;
+          } else if (givenUp) unreadableNow.delete(key(entry.id));
+          else unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
+        }
       } catch (error) {
         if (sourceCanceled(error)) throw error;
         // A failed request says nothing about the record: it is reported and asked for again.
@@ -1014,25 +1107,20 @@ async function github(
     // exclusion drawn from it would turn into an "unknown" two poll intervals after it was first
     // read, while GitHub answers normally. Only records for the inventory's packages matter, and
     // never one whose newer version could not be read.
-    const names = new Set(
-      inventory.systems.flatMap((system) =>
-        system.components.map((component) => component.name.toLowerCase()),
-      ),
-    );
     const unconfirmed = new Set([...unreadableNow.keys(), ...pending.keys(), ...skipped.keys()]);
-    // A record that could not be read and has no identifier may be the new version of any stored one.
-    if (!unidentified)
-      for (const item of stored)
-        if (
-          item.source === `github:${type}` &&
-          !evidence.has(item.id) &&
-          !unconfirmed.has(key(item.id.slice(7))) &&
-          Date.parse(item.fetched_at) >= chainStart &&
-          !(Date.parse(item.fetched_at) < Date.parse(unreadable.unconfirmedBefore ?? '')) &&
-          Date.parse(item.fetched_at) <= now &&
-          item.packages.some((claim) => names.has(claim.name.toLowerCase()))
-        )
-          evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
+    // A record that could not be read and has no identifier may be the new version of a stored one
+    // for a package it names.
+    for (const item of stored)
+      if (
+        item.source === `github:${type}` &&
+        !evidence.has(item.id) &&
+        !unconfirmed.has(key(item.id.slice(7))) &&
+        Date.parse(item.fetched_at) >= chainStart &&
+        !(Date.parse(item.fetched_at) < blockedAt(item)) &&
+        Date.parse(item.fetched_at) <= now &&
+        item.packages.some((claim) => names.has(claim.name.toLowerCase()))
+      )
+        evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
     const note = problems(rewind);
     // The checkpoint moves on, unless the listing must be read again from an earlier point.
     if (note)
@@ -1528,10 +1616,8 @@ export async function collectSources(
       skipped?: string;
       nextPending?: string;
       nextSkipped?: string;
-      unidentifiedSince?: string;
-      nextUnidentifiedSince?: string;
-      unconfirmedBefore?: string;
-      nextUnconfirmedBefore?: string;
+      unconfirmed?: string;
+      nextUnconfirmed?: string;
     }
   > = {
     reviewed: {},
@@ -1555,8 +1641,7 @@ export async function collectSources(
     for (const type of ['reviewed', 'malware'] as const) {
       githubUnreadable[type].pending = checkpoints[`github:${type}:unreadable`];
       githubUnreadable[type].skipped = checkpoints[`github:${type}:skipped`];
-      githubUnreadable[type].unidentifiedSince = checkpoints[`github:${type}:unidentified`];
-      githubUnreadable[type].unconfirmedBefore = checkpoints[`github:${type}:unconfirmed_before`];
+      githubUnreadable[type].unconfirmed = checkpoints[`github:${type}:unconfirmed`];
       jobs.push({
         source: `github:${type}`,
         run: () =>
@@ -1656,10 +1741,8 @@ export async function collectSources(
       const state = githubUnreadable[job.source === 'github:reviewed' ? 'reviewed' : 'malware'];
       if (state.nextPending !== undefined) result.checkpoints[`${job.source}:unreadable`] = state.nextPending;
       if (state.nextSkipped !== undefined) result.checkpoints[`${job.source}:skipped`] = state.nextSkipped;
-      if (state.nextUnidentifiedSince !== undefined)
-        result.checkpoints[`${job.source}:unidentified`] = state.nextUnidentifiedSince;
-      if (state.nextUnconfirmedBefore !== undefined)
-        result.checkpoints[`${job.source}:unconfirmed_before`] = state.nextUnconfirmedBefore;
+      if (state.nextUnconfirmed !== undefined)
+        result.checkpoints[`${job.source}:unconfirmed`] = state.nextUnconfirmed;
     }
     if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
       result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');

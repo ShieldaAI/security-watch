@@ -131,4 +131,18 @@ test('a library named second in a sentence counts only after an article or a wor
     'The Express maintainers released a fix.',
   ])
     assert.equal(packageMentioned(text, component('express')), true, text);
+  const flask = { id: 'c', ecosystem: 'PyPI', name: 'flask', version: '1.0.0' };
+  assert.equal(packageMentioned('A Flask extension leaks session cookies to other sites.', flask), true);
+});
+
+test('a library named second in a sentence before a word that is not about software is not taken for it', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const [name, text] of [
+    ['puma', 'The Puma sportswear brand reported a breach of customer data.'],
+    ['express', 'The Express reported that attackers stole the data.'],
+    ['mongoose', 'The Mongoose ransomware group claimed the attack.'],
+    ['meteor', 'The Meteor wiper destroyed the railway systems.'],
+    ['cypress', 'The Cypress semiconductor unit was hit by attackers.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), false, text);
 });

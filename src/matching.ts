@@ -381,6 +381,13 @@ function technologyInLowerCase(line: string): string {
 const SECOND_WORD_AFTER =
   '(?:The|A|An|This|That|These|Those|Its|New|Critical|Severe|Serious|Major|High|Latest|Recent|Another|' +
   'Popular|Malicious|Vulnerable|Unpatched|Patched|Outdated|Older|Several|Multiple|Many|Two|Three)';
+/** The words after which a library named second in a sentence is taken for the library. */
+const SOFTWARE_WORD =
+  '(?:team|maintainers?|project|developers?|communit(?:y|ies)|ecosystem|core|codebase|repository|' +
+  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|components?|' +
+  'dependenc(?:y|ies)|gems?|crates?|servers?|clients?|apps?|applications?|runtime|runner|installer|' +
+  'cli|api|sdk|versions?|releases?|updates?|patch(?:es)?|fix(?:es)?|flaws?|bugs?|vulnerabilit(?:y|ies)|' +
+  'issues?|exploits?|security|advisor(?:y|ies)|users|devs|code|source)';
 function writtenAsName(names: string[]): (text: string) => boolean {
   const single = names.map((name) => name.trim()).filter((name) => /^\p{L}{3,}$/u.test(name));
   const form = capitalised;
@@ -411,10 +418,11 @@ function writtenAsName(names: string[]): (text: string) => boolean {
       `${after}${alternatives}${end}` +
       // Opening a sentence that goes on in lower case: "Rails releases patches".
       `|(?<=^|[.!?]\\s+)${alternatives}(?:['’]s)?${end}(?= \\p{Ll})` +
-      // Second word of a sentence that goes on in lower case, after an article or a word of
-      // severity or novelty: "Critical Rails flaw", "The React team", "New Express vulnerability".
-      // Not after any capitalised word: "American Express customers", "Federal Express drivers".
-      `|(?<=(?:^|[.!?]\\s+)${SECOND_WORD_AFTER} )${alternatives}(?:['’]s)?${end}(?= \\p{Ll})`,
+      // Second word of a sentence, after an article or a word of severity or novelty and before a
+      // word about software: "Critical Rails flaw", "The React team", "New Express vulnerability".
+      // Not after any capitalised word ("American Express customers") nor before any word ("The
+      // Puma sportswear brand", "The Thor ransomware", "The Express reported").
+      `|(?<=(?:^|[.!?]\\s+)${SECOND_WORD_AFTER} )${alternatives}(?:['’]s)?${end}(?= ${SOFTWARE_WORD}(?![\\p{L}\\p{N}]))`,
   );
   if (!patterns.length) return () => false;
   return (text) =>
