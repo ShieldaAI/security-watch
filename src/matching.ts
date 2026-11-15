@@ -386,26 +386,52 @@ const SOFTWARE_KIND =
   '(?:web|Web|test|testing|http|HTTP|template|templating|build|javascript|JavaScript|js|JS|typescript|' +
   'TypeScript|python|Python|ruby|Ruby|rust|Rust|node(?:\\.js)?|Node(?:\\.js)?|css|CSS|orm|ORM|logging|' +
   'validation|parsing|parser|image|ui|UI|frontend|backend|server-side|open-source|npm|PyPI|pypi)';
-/** Words that name software or its people. */
-const SOFTWARE_NOUN =
-  '(?:team|core(?: team)?|maintainers?|project|developers?|ecosystem|codebase|repository|' +
-  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|' +
-  'dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|cli|CLI|api|API|sdk|SDK|versions?|' +
-  'releases?|patch(?:es)?|fix(?:es)?|advisor(?:y|ies))';
 /**
- * Words that also follow a company or a malware name ("The Nest security team", "The Mongoose
- * components"): they count only when the text also speaks of a library (LIBRARY_CUE).
+ * Words that name a software library or its parts and count after a library named second in a
+ * sentence on their own: no company or malware is described with them.
+ */
+const SOFTWARE_NOUN =
+  '(?:team|core team|maintainers?|codebase|repository|ecosystem|librar(?:y|ies)|framework|packages?|modules?|plugins?|' +
+  'extensions?|middleware|router|dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|' +
+  'cli|CLI|sdk|SDK|api|API|versions?|releases?|patch(?:es)?|fix(?:es)?|advisor(?:y|ies))';
+/**
+ * Words that also follow a company, product or malware name ("The Puma team", "The Nest patch",
+ * "The Cypress advisory", "The Mongoose components"): they count only in a sentence that itself
+ * speaks of a library (LIBRARY_CUE).
  */
 const SHARED_NOUN =
-  '(?:community|components?|devs|issues?|' +
+  '(?:devs|community|components?|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
 /**
- * A sign that a sentence is about a software library: a registry or an install command, the kind of
- * package, or a version written as one ("v1.2", "version 1.2", "@1.2", "1.2.3"). A bare decimal is
- * not one ("a CVSS score of 9.8", "1.5 million").
+ * A sign that a sentence is about a software library: a registry or an install command, a kind of
+ * package, or a version written as one ("v1.2", "version 1.2", "@1.2", "1.2.3"). Not a bare decimal
+ * ("a CVSS score of 9.8", "1.5 million"), a CVSS version ("CVSS v3.1"), an IP address or a date
+ * ("15.11.2026").
  */
-const LIBRARY_CUE =
-  /(?:^|[^\p{L}])(?:npm|pypi|rubygems|gems?|crates?|crates\.io|maven|nuget|(?:pip|gem|cargo|npm) install|packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\p{L}])|(?:^|[^\p{L}\p{N}.])(?:v\d+\.\d+|version \d+\.\d+|@\d+\.\d+|\d+\.\d+\.\d+)/iu;
+const LIBRARY_CUE = new RegExp(
+  '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|gems?|crates?|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install|' +
+    'packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\\p{L}])' +
+    '|(?:^|[^\\p{L}\\p{N}.])(?<!cvss[: ]?)v\\d+\\.\\d+(?!\\.?\\d)' +
+    '|(?:^|[^\\p{L}\\p{N}.])version \\d+\\.\\d+' +
+    '|@\\d+\\.\\d+' +
+    '|(?:^|[^\\p{L}\\p{N}.])(?!\\d{1,2}\\.\\d{1,2}\\.(?:19|20)\\d\\d(?!\\.?\\d))\\d+\\.\\d+\\.\\d+(?!\\.?\\d)',
+  'iu',
+);
+/**
+ * A strong sign, which also counts from the next sentence: a registry, an install command or a
+ * version written as one. Not "package", which a courier story uses too.
+ */
+const STRONG_LIBRARY_CUE = new RegExp(
+  '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install)(?![\\p{L}])' +
+    LIBRARY_CUE.source.slice(LIBRARY_CUE.source.indexOf('|(?:^|[^\\p{L}\\p{N}.])(?<!cvss')),
+  'iu',
+);
+/**
+ * Where a sentence ends: after ".", "!" or "?" and before a capital letter or a digit, but not after
+ * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.", "etc.") or a single letter.
+ */
+const SENTENCE_END =
+  /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|etc|approx|cf|al|ca|no|nr|ver|v|[\p{L}])\.)\s+(?=[\p{Lu}\p{N}])/u;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
@@ -478,12 +504,15 @@ function writtenAsName(names: string[]): (text: string) => boolean {
       if (titleCase(line)) return false;
       const read = technologyInLowerCase(line);
       if (patterns.some((pattern) => pattern.test(read))) return true;
-      // The shared words count only in a sentence that itself speaks of a library.
-      return (
-        cued.length > 0 &&
-        read
-          .split(/(?<=[.!?])\s+/u)
-          .some((sentence) => LIBRARY_CUE.test(sentence) && cued.some((pattern) => pattern.test(sentence)))
+      // The shared words count only in a sentence that itself speaks of a library, or whose next
+      // sentence names a registry, an install command or a written version ("… disclosed a flaw.
+      // Upgrade to 5.4.1 now.").
+      if (!cued.length) return false;
+      const sentences = read.split(SENTENCE_END);
+      return sentences.some(
+        (sentence, index) =>
+          cued.some((pattern) => pattern.test(sentence)) &&
+          (LIBRARY_CUE.test(sentence) || STRONG_LIBRARY_CUE.test(sentences[index + 1] ?? '')),
       );
     });
 }

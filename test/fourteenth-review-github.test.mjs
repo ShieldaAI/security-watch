@@ -1804,3 +1804,57 @@ test('a second row without an identifier, newer than every row seen before, hold
   await poll(store, http, NOW + 30 * MINUTE);
   assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0351']);
 });
+
+test('rows without an identifier: a late row between two seen ones is new, a legacy hold is renewed, re-listed rows are not', async () => {
+  const copy = { ...waitingCopy('GHSA-aaaa-bbbb-0360', HOUR), modified_at: iso(NOW - DAY) };
+  const bare = (id, at) => {
+    const row = advisory(id, 'alpha', at);
+    delete row.ghsa_id;
+    return row;
+  };
+  const listing = (rows) => github(() => [...rows, advisory('GHSA-aaaa-bbbb-0360', 'alpha', NOW - DAY)]);
+  const run = async (saved, rows) => {
+    const store = new Store(':memory:');
+    store.saveEvidence([{ ...copy, fetched_at: iso(NOW + 25 * MINUTE) }], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      'github:reviewed:unconfirmed': JSON.stringify({ alpha: saved }),
+    });
+    const { http, log } = listing(rows);
+    await poll(store, http, NOW + 30 * MINUTE);
+    return log.byId;
+  };
+  const five = bare('GHSA-aaaa-bbbb-0361', NOW + 5 * MINUTE);
+  const twelve = bare('GHSA-aaaa-bbbb-0362', NOW + 12 * MINUTE);
+  const thirteen = bare('GHSA-aaaa-bbbb-0363', NOW + 13 * MINUTE);
+  // Rows at +5 and +13 seen at +20; a row at +12 listed late is new.
+  assert.deepEqual(
+    await run([NOW + 20 * MINUTE, NOW + 5 * MINUTE, NOW + 13 * MINUTE], [five, twelve, thirteen]),
+    ['GHSA-aaaa-bbbb-0360'],
+  );
+  // The same two rows listed again: nothing new.
+  assert.deepEqual(await run([NOW + 20 * MINUTE, NOW + 5 * MINUTE, NOW + 13 * MINUTE], [five, thirteen]), []);
+  // A hold saved without versions (a row without an update time): a timed row is new.
+  assert.deepEqual(await run(NOW + 20 * MINUTE, [five]), ['GHSA-aaaa-bbbb-0360']);
+});
+
+test('a hold is renewed by an older row not seen before, and a copy older than every row is read again', async () => {
+  const store = new Store(':memory:');
+  const copy = {
+    ...waitingCopy('GHSA-aaaa-bbbb-0370', 0),
+    modified_at: iso(NOW + 8 * MINUTE),
+    fetched_at: iso(NOW + 10 * MINUTE),
+  };
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW + 10 * MINUTE),
+    'github:malware': iso(NOW),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: [NOW + 20 * MINUTE, NOW + 12 * MINUTE] }),
+  });
+  const { http, log } = github(() => {
+    const older = advisory('GHSA-aaaa-bbbb-0371', 'alpha', NOW + 5 * MINUTE);
+    delete older.ghsa_id;
+    return [older, advisory('GHSA-aaaa-bbbb-0370', 'alpha', NOW - DAY)];
+  });
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0370']);
+});

@@ -51,6 +51,8 @@ const REFETCH_PER_RUN = 10;
 const REFETCH_WITHOUT_TOKEN = 2;
 /** Without a token, rows listed beyond which a row without an identifier no longer holds the listing. */
 const HOLD_ROWS_WITHOUT_TOKEN = 300;
+/** Update times of rows without an identifier remembered per package, the latest kept. */
+const ROW_VERSIONS = 50;
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue {
@@ -806,18 +808,21 @@ async function github(
    * By package: when a row without an identifier naming it was first seen (`at`), and the latest
    * update among such rows (`updated`; unknown is Infinity). Saved as `at`, or `[at, updated]`.
    */
-  const blocked = new Map<string, { at: number; updated: number }>();
+  const blocked = new Map<string, { at: number; updated: number; versions: number[] }>();
   /** Packages named by such rows in this run: kept while their rows are still listed. */
   const seenNow = new Set<string>();
   try {
     const saved: unknown = JSON.parse(unreadable.unconfirmed || '{}');
     if (typeof saved === 'object' && saved !== null && !Array.isArray(saved))
       for (const [name, value] of Object.entries(saved)) {
-        const [at, updated] = Array.isArray(value) ? value : [value, Infinity];
+        // `at` alone (a row without an update time), or `[at, ...the updates of its rows]`.
+        const [at, ...rest] = Array.isArray(value) ? value : [value];
+        const versions = rest.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
         if (typeof at === 'number' && Number.isFinite(at))
           blocked.set(name, {
             at: Math.min(at, now),
-            updated: typeof updated === 'number' && Number.isFinite(updated) ? updated : Infinity,
+            updated: versions.length && versions.length === rest.length ? Math.max(...versions) : Infinity,
+            versions,
           });
       }
   } catch {
@@ -894,10 +899,15 @@ async function github(
       for (const name of named.length ? named : ['*']) {
         seenNow.add(name);
         const entry = blocked.get(name);
+        // Seen before only if a row with exactly this update was seen for the package.
+        const seen = entry?.versions.includes(version) ?? false;
         blocked.set(name, {
-          // Seen before only if not newer than every row seen so far for the package.
-          at: entry && entry.at >= version && version <= entry.updated ? entry.at : now,
+          at: entry && seen ? entry.at : now,
           updated: Math.max(entry?.updated ?? -Infinity, version),
+          versions:
+            Number.isFinite(version) && !seen
+              ? [...(entry?.versions ?? []), version].slice(-ROW_VERSIONS)
+              : (entry?.versions ?? []),
         });
       }
     }
@@ -978,7 +988,10 @@ async function github(
           .filter(([name]) => seenNow.has(name) || waitingFor(name))
           .sort((a, b) => b[1].at - a[1].at)
           .slice(0, MAX_UNREADABLE)
-          .map(([name, { at, updated }]) => [name, Number.isFinite(updated) ? [at, updated] : at]),
+          .map(([name, { at, updated, versions }]) => [
+            name,
+            Number.isFinite(updated) ? [at, ...versions] : at,
+          ]),
       ),
     );
     unreadable.nextPending = JSON.stringify(

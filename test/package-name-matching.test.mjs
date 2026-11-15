@@ -287,3 +287,117 @@ test('the library cue is read in the same sentence, from registries, kinds of pa
   );
   assert.equal(packageMentioned('The Nest of bugs in the thermostat firmware.', component('nest')), false);
 });
+
+test('word lists of the second-word rule, entry by entry', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text, name = 'express') => assert.equal(packageMentioned(text, component(name)), true, text);
+  const no = (text, name = 'express') => assert.equal(packageMentioned(text, component(name)), false, text);
+  // Words about software that count on their own.
+  for (const word of [
+    'team',
+    'core team',
+    'maintainers',
+    'codebase',
+    'repository',
+    'ecosystem',
+    'library',
+    'framework',
+    'package',
+    'modules',
+    'plugins',
+    'extensions',
+    'middleware',
+    'router',
+    'dependency',
+    'gems',
+    'crates',
+    'runtime',
+    'runner',
+    'installer',
+    'CLI',
+    'SDK',
+    'API',
+    'versions',
+    'releases',
+    'patch',
+    'fix',
+    'advisory',
+  ])
+    yes(`The Express ${word} came under scrutiny this week.`);
+  // Words shared with companies: only with a library cue in the sentence or a strong one in the next.
+  for (const word of [
+    'community',
+    'components',
+    'devs',
+    'issues',
+    'security team',
+    'security update',
+    'security fix',
+    'security patch',
+    'security release',
+    'security advisory',
+  ]) {
+    no(`The Express ${word} came under scrutiny this week.`);
+    yes(`The Express ${word} came under scrutiny in the npm package.`);
+    yes(`The Express ${word} came under scrutiny this week. Upgrade to 4.21.2 now.`);
+    no(`The Express ${word} came under scrutiny this week. A courier package was lost.`);
+  }
+  // Cue words and forms in the same sentence.
+  for (const cue of [
+    'on npm',
+    'on PyPI',
+    'on RubyGems',
+    'on crates.io',
+    'on Maven',
+    'on NuGet',
+    'after gem install',
+    'after cargo install',
+    'in the package',
+    'as open source',
+    'by its maintainers',
+    'in v4.2',
+    'in version 4.2',
+    'in core@4.2',
+    'in 4.21.2',
+  ])
+    yes(`The Express community fixed it ${cue}.`);
+  for (const notCue of [
+    'on GitHub',
+    'in the packaging',
+    'for v3',
+    'rated CVSS v3.1',
+    'from 192.168.1.10',
+    'on 15.11.2026',
+    'for 4.2',
+    'for 1.5 million users',
+  ])
+    no(`The Express community fixed it ${notCue}.`);
+  // A sentence does not end at an abbreviation.
+  yes('The Express devs fixed it, e.g. in the npm package.');
+  yes('The Express devs fixed it, i.e. version 4.2 of it.');
+  // Kinds of a flaw, including acronyms as written.
+  for (const kind of [
+    'SQL injection',
+    'XSS',
+    'SSRF',
+    'CSRF',
+    'XXE',
+    'RCE',
+    'DoS',
+    'ReDoS',
+    'TLS',
+    'SSL',
+    'denial of service',
+    'path traversal',
+    'deserialization',
+  ])
+    yes(`The Express ${kind} flaw lets attackers in.`);
+  // Kinds before a server, app or client.
+  for (const kind of ['web', 'HTTP', 'JavaScript', 'open-source'])
+    yes(`The Express ${kind} server leaks data.`);
+  yes('The Express web clients leak data.');
+  no('The Express clients leak data.');
+  // Words before the name.
+  for (const before of ['The', 'A', 'New', 'Critical', 'Severe', 'Latest', 'Its'])
+    yes(`${before} Express flaw lets attackers in.`);
+});
