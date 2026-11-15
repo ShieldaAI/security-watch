@@ -1024,3 +1024,25 @@ test('excerpts are not cut before Hangul vowels or finals of the extended block'
     }
   }
 });
+
+test(
+  'a version qualifier is read one way only: no exponential backtracking (CodeQL js/redos)',
+  { timeout: 5000 },
+  () => {
+    const tail = '-0-0+0' + '.ga-0+0'.repeat(40) + '@';
+    const text = `The vendor says Example Server${tail} lets remote users run code without signing in.`;
+    const started = Date.now();
+    accepts(text, [text], { products: ['Example Server'] });
+    assert.ok(Date.now() - started < 1000, `${Date.now() - started} ms`);
+    // Qualifiers after "+" or "~" still read: Debian revisions, backports and a git snapshot hash.
+    for (const version of [
+      '2.4.1-1+deb12u5',
+      '2.4.1-1~jammy',
+      '2.4.1-1+really2.4.2',
+      '2.4.1-1+git20240101.abc1234',
+    ]) {
+      const sentence = `The vendor says Example Server-${version} lets remote users run code without signing in.`;
+      assert.equal(accepts(sentence, [sentence], { products: ['Example Server'] }), true, version);
+    }
+  },
+);

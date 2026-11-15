@@ -345,9 +345,10 @@ function quotesPhrase(
     // A package revision or a release qualifier may follow ("openssl-3.0.7-r0", "glibc-2.35-0ubuntu3",
     // "Tomcat-9.0.80-beta", "spring-core-5.3.20.RELEASE"), and so may a file extension
     // ("log4j-core-2.14.1.jar"); anything else joined to the number makes another name
-    // ("vue-3d-model", "vue-3.model", "vue-3:d").
+    // ("vue-3d-model", "vue-3.model", "vue-3:d"). After "+" or "~", a dot is followed only by digits or a
+    // commit hash, so a qualifier can be read one way only (no exponential backtracking).
     const ownVersion =
-      /^[-@/:](?:v?(?:\d+(?:\.\d+)+(?:[a-z]|p\d+)?|\d+)(?:\.x)?)(?:-r\d+|-\d+(?:\.\d+)*(?:(?:ubuntu|deb|build)\d[0-9.]*)?(?:\.(?:el|fc)\d+(?:_\d+)*)?(?:[~+][a-z]*\d[a-z0-9.]*|~(?:jammy|focal|noble|bionic|xenial|bookworm|bullseye|buster|trixie))?|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm)|-alpine|-slim)*(?![\p{L}\p{N}\p{M}_@/#:+~-]|\.[\p{L}\p{N}])/iu.test(
+      /^[-@/:](?:v?(?:\d+(?:\.\d+)+(?:[a-z]|p\d+)?|\d+)(?:\.x)?)(?:-r\d+|-\d+(?:\.\d+)*(?:(?:ubuntu|deb|build)\d[0-9.]*)?(?:\.(?:el|fc)\d+(?:_\d+)*)?(?:[~+][a-z]*\d[a-z0-9]*(?:\.\d+|\.(?=\d*[a-f])[0-9a-f]{7,40})*|~(?:jammy|focal|noble|bionic|xenial|bookworm|bullseye|buster|trixie))?|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm)|-alpine|-slim)*(?![\p{L}\p{N}\p{M}_@/#:+~-]|\.[\p{L}\p{N}])/iu.test(
         rest,
       );
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
