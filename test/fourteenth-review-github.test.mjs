@@ -403,7 +403,9 @@ const claim = (quote, product, version = '8.6', freeQuote = quote) => {
 
 test('a quote the model writes itself is read with the words it cuts from the evidence', () => {
   const text = 'Example Server 12.4.1 lets unauthenticated users of expressive-forms upload files.';
-  assert.equal(claim(text, 'Example Server', '2.4.1', '2.4.1 lets unauthenticated users'), false);
+  // The product claim is supported either way; only the version decides.
+  assert.equal(claim(text, 'unauthenticated users', '2.4.1', '2.4.1 lets unauthenticated users'), false);
+  assert.equal(claim(text, 'unauthenticated users', '12.4.1', '12.4.1 lets unauthenticated users'), true);
   assert.equal(claim(text, 'express', '12.4.1', '12.4.1 lets unauthenticated users of express'), false);
   assert.equal(claim(text, 'Example Server', '12.4.1', 'Example Server 12.4.1 lets'), true);
 });

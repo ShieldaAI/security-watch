@@ -149,7 +149,7 @@ export function validateDestination(value: string, allowPrivate = false): URL {
   )
     throw new NetworkError('DESTINATION_DENIED');
   // A trailing dot names the same host ("localhost.").
-  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   if (
     !allowPrivate &&
     (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && !isPublicAddress(host)))

@@ -307,7 +307,7 @@ function quotesPhrase(original: string, value: string): boolean {
     // ("log4j-core-2.14.1.jar"); anything else joined to the number makes another name
     // ("vue-3d-model", "vue-3.model", "vue-3:d").
     const ownVersion =
-      /^[-@/]v?\d+(?:\.\d+)*(?:-r\d+|-\d+[a-z0-9.~+]*|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm))*(?![\p{L}\p{N}\p{M}_@/#:+-]|\.[\p{L}\p{N}])/iu.test(
+      /^[-@/](?:v?(?:\d+(?:\.\d+)+[a-z]?|\d+)(?:\.x)?)(?:-r\d+|-\d+(?:\.\d+)*(?:(?:ubuntu|deb|el|fc|build)[0-9.]*)?(?:[~+][a-z0-9.]+)?|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm))*(?![\p{L}\p{N}\p{M}_@/#:+-]|\.[\p{L}\p{N}])/iu.test(
         rest,
       );
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
@@ -330,21 +330,35 @@ function quotesPhrase(original: string, value: string): boolean {
   }
   return false;
 }
-/** Every occurrence of a quote in its evidence, extended to the whole words it begins and ends in. */
-function widened(text: string, quote: string): string[] {
-  const part = /[\p{L}\p{N}\p{M}_.\-@/#+:~]/u;
+/**
+ * Every occurrence of a quote in its evidence, extended to the whole words it begins and ends in. Both
+ * are read as quoteText reads them first, so a look-alike or invisible joiner ("Confluence‑Cloud",
+ * "2.4\u200b.1") joins as its plain form does, and characters are whole code points.
+ */
+function widened(evidence: string, quote: string): string[] {
+  const text = quoteText(evidence);
+  const wanted = quoteText(quote);
+  const part = /^[\p{L}\p{N}\p{M}_.\-@/#+:~]$/u;
+  const before = (at: number) => {
+    const low = text.charCodeAt(at - 1);
+    const size = (low & 0xfc00) === 0xdc00 && at >= 2 ? 2 : 1;
+    return text.slice(at - size, at);
+  };
+  const after = (at: number) => String.fromCodePoint(text.codePointAt(at) ?? 0x20);
   const out: string[] = [];
-  for (let at = text.indexOf(quote); at !== -1 && out.length < 20; at = text.indexOf(quote, at + 1)) {
+  if (!wanted) return out;
+  for (let at = text.indexOf(wanted); at !== -1 && out.length < 20; at = text.indexOf(wanted, at + 1)) {
     let start = at;
-    let end = at + quote.length;
+    let end = at + wanted.length;
     // At most 64 characters on either side, which is longer than any name or version.
-    while (start > Math.max(0, at - 64) && part.test(text[start - 1]!) && part.test(text[start]!)) start--;
+    while (start > Math.max(0, at - 64) && part.test(before(start)) && part.test(after(start)))
+      start -= before(start).length;
     while (
-      end < Math.min(text.length, at + quote.length + 64) &&
-      part.test(text[end]!) &&
-      part.test(text[end - 1]!)
+      end < Math.min(text.length, at + wanted.length + 64) &&
+      part.test(after(end)) &&
+      part.test(before(end))
     )
-      end++;
+      end += after(end).length;
     out.push(text.slice(start, end).toLowerCase());
   }
   return out;
