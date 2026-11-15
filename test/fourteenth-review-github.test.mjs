@@ -4,6 +4,9 @@
 // whole window is listed again.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { validateDestination } from '../dist/http.js';
+import { deliverPending } from '../dist/delivery.js';
+import { validateAnalysis } from '../dist/models.js';
 import { collectSources } from '../dist/sources.js';
 import { Store } from '../dist/store.js';
 
@@ -352,4 +355,171 @@ test('a listed row dated in the future does not move the listing past records no
   };
   const result = await poll(store, http, NOW + HOUR);
   assert.ok(Date.parse(result.checkpoints['github:reviewed']) <= NOW + HOUR, 'not past the clock');
+});
+
+// ---- Delivery and claim checks from the fourteenth delivery review ------------------------------
+
+const claim = (quote, product, version = '8.6', freeQuote = quote) => {
+  const story = {
+    id: 'feed:x:entry:14',
+    source: 'feed:x',
+    kind: 'news',
+    title: 'Example remote code execution',
+    url: 'https://example.com/s',
+    description: quote,
+    aliases: [],
+    severity: 'unknown',
+    modified_at: iso(NOW),
+    fetched_at: iso(NOW),
+    packages: [],
+    content_status: 'full',
+  };
+  try {
+    validateAnalysis(
+      {
+        relevance: 'relevant',
+        priority: 'high',
+        summary: 'Checked.',
+        evidence_ids: [story.id],
+        quotes: [{ evidence_id: story.id, quote: freeQuote }],
+        news_analysis: {
+          classification: 'new_vulnerability',
+          impact: 'affected',
+          affected_products: [product],
+          affected_versions: [version],
+          prerequisites: [],
+          rationale: 'Checked.',
+          quotes: [{ evidence_id: story.id, quote: freeQuote }],
+        },
+      },
+      [story],
+    );
+    return true;
+  } catch (error) {
+    if (!/MODEL_UNSUPPORTED_NEWS_CLAIM/.test(String(error.message ?? error))) throw error;
+    return false;
+  }
+};
+
+test('a quote the model writes itself is read with the words it cuts from the evidence', () => {
+  const text = 'Example Server 12.4.1 lets unauthenticated users of expressive-forms upload files.';
+  assert.equal(claim(text, 'Example Server', '2.4.1', '2.4.1 lets unauthenticated users'), false);
+  assert.equal(claim(text, 'express', '12.4.1', '12.4.1 lets unauthenticated users of express'), false);
+  assert.equal(claim(text, 'Example Server', '12.4.1', 'Example Server 12.4.1 lets'), true);
+});
+
+test('a version may carry a package revision, a qualifier or a file extension after the name', () => {
+  for (const [quote, product, version] of [
+    ['Upgrade openssl-3.0.7-r0 now; 8.6 is affected.', 'openssl'],
+    ['The glibc-2.35-0ubuntu3 package, 8.6, is affected.', 'glibc'],
+    ['Tomcat-9.0.80-beta and 8.6 are affected.', 'Tomcat'],
+    ['spring-core-5.3.20.RELEASE and 8.6 are affected.', 'spring-core'],
+    ['log4j-core-2.14.1.jar and 8.6 are affected.', 'log4j-core'],
+    ['node-v18 builds and 8.6 are affected.', 'node'],
+  ])
+    assert.equal(claim(quote, product), true, `${product} in ${quote}`);
+  for (const [quote, product] of [
+    ['vue-3.model 8.6 is affected.', 'vue'],
+    ['vue-3:d 8.6 is affected.', 'vue'],
+    ['express:session 8.6 is affected.', 'express'],
+    ['express·forms 8.6 is affected.', 'express'],
+    ['The @angular⧸core 8.6 compiler is affected.', 'core'],
+  ])
+    assert.equal(claim(quote, product), false, `${product} in ${quote}`);
+});
+
+test('claim and version edges: astral characters, a bare "#" or "-", a CJK name next to Latin, "№"', () => {
+  assert.equal(claim('𐐀express 8.6 is affected.', 'express'), false);
+  assert.equal(claim('express𐐀 8.6 is affected.', 'express'), false);
+  assert.equal(claim('#PHP 8.6 is affected.', 'PHP'), true);
+  assert.equal(claim('- Git 8.6 is affected.', 'Git'), true);
+  assert.equal(claim('微信app 8.6 is affected.', '微信'), true);
+  assert.equal(claim('Example Server №5 is affected.', 'Example Server', '5'), false);
+  assert.equal(claim('Example Server 𐐀2.4.1 is affected.', 'Example Server', '2.4.1'), false);
+  assert.equal(claim('Example Server 2.4.1 is affected.', 'Example Server', '2.4.'), false);
+});
+
+test('"localhost." is refused like "localhost"', () => {
+  assert.throws(() => validateDestination('https://localhost./ping'), /./);
+});
+
+const rule = { levels: ['critical'], basis: 'source_severity', channels: ['slack', 'email'] };
+const deliveryConfig = {
+  digest_interval_hours: 24,
+  policy: {
+    library: rule,
+    product: rule,
+    news: rule,
+    health_channels: ['slack'],
+    urgent_unknown: true,
+    exploited_override: true,
+    malware_override: true,
+  },
+  notifications: {
+    max_attempts: 3,
+    slack: { webhook_url_env: 'FOURTEENTH_SLACK' },
+    email: { smtp_url_env: 'FOURTEENTH_SMTP', from: 'watch@example.com', to: ['security@example.com'] },
+  },
+};
+function deliveryStore(t, channels) {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  process.env.FOURTEENTH_SLACK = 'https://hooks.slack.com/services/T/B/secret';
+  process.env.FOURTEENTH_SMTP = 'smtps://user:password@mail.example.com';
+  t.after(() => {
+    delete process.env.FOURTEENTH_SLACK;
+    delete process.env.FOURTEENTH_SMTP;
+  });
+  store.saveAssessment(
+    {
+      id: 'finding-1',
+      event_id: 'CVE-2026-94001',
+      system_id: 'prod',
+      category: 'library',
+      applicability: 'affected',
+      source_severity: 'critical',
+      priority: 'critical',
+      title: 'flaw',
+      summary: 'A flaw.',
+      reasons: [],
+      evidence_ids: [],
+      urls: [],
+      exploited: false,
+      updated_at: iso(NOW),
+    },
+    { action: 'notify', channels, reason: 'critical' },
+    1000,
+  );
+  return store;
+}
+
+test('a recipient the mail server rejected leaves the receipt uncertain', async (t) => {
+  const store = deliveryStore(t, ['email']);
+  await deliverPending(
+    store,
+    deliveryConfig,
+    async () => assert.fail('no Slack'),
+    1000,
+    async () => ({
+      accepted: ['security@example.com'],
+      rejected: ['security@example.com'],
+    }),
+  );
+  assert.equal(store.jobs()[0].status, 'unknown');
+});
+
+test('a job taken back while Slack answered with an unexpected success is marked uncertain', async (t) => {
+  const store = deliveryStore(t, ['slack']);
+  await deliverPending(
+    store,
+    deliveryConfig,
+    async () => {
+      const [job] = store.jobs();
+      store.recoverSending(1000);
+      store.retryJob(job.id, 1000);
+      return { status: 202, body: 'queued', headers: {} };
+    },
+    1000,
+  );
+  assert.equal(store.jobs()[0].status, 'unknown', 'not left pending, where it would be sent again');
 });

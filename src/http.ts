@@ -148,7 +148,8 @@ export function validateDestination(value: string, allowPrivate = false): URL {
     !['https:', ...(allowPrivate ? ['http:'] : [])].includes(url.protocol)
   )
     throw new NetworkError('DESTINATION_DENIED');
-  const host = url.hostname.replace(/^\[|\]$/g, '');
+  // A trailing dot names the same host ("localhost.").
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (
     !allowPrivate &&
     (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && !isPublicAddress(host)))

@@ -248,7 +248,10 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
       )
     )
       throw new Error('MODEL_UNSUPPORTED_NEWS_QUOTE');
-    const quoted = news.quotes.map((q) => q.quote.toLowerCase());
+    // A quote the model writes itself may begin or end inside a word ("2.4.1" out of "12.4.1",
+    // "express" out of "expressive"): each is read with the rest of the words it cuts from the
+    // evidence, wherever it occurs there.
+    const quoted = news.quotes.flatMap((q) => widened(known.get(q.evidence_id) ?? '', q.quote));
     if (
       [...news.affected_products, ...news.prerequisites].some(
         (value) => !quoted.some((quote) => quotesPhrase(quote, value)),
@@ -299,7 +302,14 @@ function quotesPhrase(original: string, value: string): boolean {
     const mark = (character: string) => !/[\p{L}\p{N}\p{M}_]/u.test(character);
     // A version straight after a hyphen, "@" or "/" is the name's own version ("node-18",
     // "lodash@4.17.20", "Apache/2.4.58"); "vue-3d-model" and "express@4evil" are other names.
-    const ownVersion = /^[-@/]v?\d+(?:\.\d+)*(?![\p{L}\p{N}_@/-])/u.test(rest);
+    // A package revision or a release qualifier may follow ("openssl-3.0.7-r0", "glibc-2.35-0ubuntu3",
+    // "Tomcat-9.0.80-beta", "spring-core-5.3.20.RELEASE"), and so may a file extension
+    // ("log4j-core-2.14.1.jar"); anything else joined to the number makes another name
+    // ("vue-3d-model", "vue-3.model", "vue-3:d").
+    const ownVersion =
+      /^[-@/]v?\d+(?:\.\d+)*(?:-r\d+|-\d+[a-z0-9.~+]*|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm))*(?![\p{L}\p{N}\p{M}_@/#:+-]|\.[\p{L}\p{N}])/iu.test(
+        rest,
+      );
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
     // (".NET" in "ASP.NET").
     const joinedBefore = mark(first)
@@ -313,11 +323,31 @@ function quotesPhrase(original: string, value: string): boolean {
         a1 === '+' ||
         a1 === '#' ||
         (a1 === '.' && joins(last, a2)) ||
-        (/[-@/]/u.test(a1) && !ownVersion && (joins(last, a2) || a1 === '/'));
+        (/[-@/]/u.test(a1) && !ownVersion && (joins(last, a2) || a1 === '/')) ||
+        (/[:~]/u.test(a1) && joins(last, a2));
     if (joinedBefore || joinedAfter) continue;
     return true;
   }
   return false;
+}
+/** Every occurrence of a quote in its evidence, extended to the whole words it begins and ends in. */
+function widened(text: string, quote: string): string[] {
+  const part = /[\p{L}\p{N}\p{M}_.\-@/#+:~]/u;
+  const out: string[] = [];
+  for (let at = text.indexOf(quote); at !== -1 && out.length < 20; at = text.indexOf(quote, at + 1)) {
+    let start = at;
+    let end = at + quote.length;
+    // At most 64 characters on either side, which is longer than any name or version.
+    while (start > Math.max(0, at - 64) && part.test(text[start - 1]!) && part.test(text[start]!)) start--;
+    while (
+      end < Math.min(text.length, at + quote.length + 64) &&
+      part.test(text[end]!) &&
+      part.test(text[end - 1]!)
+    )
+      end++;
+    out.push(text.slice(start, end).toLowerCase());
+  }
+  return out;
 }
 /**
  * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
@@ -326,13 +356,18 @@ function quotesPhrase(original: string, value: string): boolean {
  * kept: a superscript, a circled digit or a fraction is not the digit it resembles ("2.4¹").
  */
 function quoteText(text: string): string {
-  return text
-    .normalize('NFC')
-    .replace(/[\uff01-\uff5e]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
-    .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
-    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\u2e17\u058a\u30a0\u1400]/g, '-')
-    .replace(/[\u2215\u2044]/g, '/')
-    .replace(/\s+/g, ' ');
+  return (
+    text
+      .normalize('NFC')
+      .replace(/[\uff01-\uff5e]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
+      .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
+      .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\u2e17\u058a\u30a0\u1400]/g, '-')
+      .replace(/[\u2215\u2044\u29f8\\]/g, '/')
+      // Look-alike dots and the small commercial at.
+      .replace(/[\u00b7\u2024\u2027\u2043]/g, '.')
+      .replace(/\ufe6b/g, '@')
+      .replace(/\s+/g, ' ')
+  );
 }
 /** Scripts written without spaces between words. Korean is written with spaces. */
 const UNSPACED =
@@ -375,7 +410,8 @@ function citesVersion(original: string, version: string): boolean {
   // space ("45 %"), and characters that show as nothing are dropped ("2.4.1<zero-width>.1").
   const normal = quoteText;
   const wanted = normal(version).trim();
-  if (!wanted) return false;
+  // A version begins and ends with a letter or digit: "2.4." is not cited by "2.4.1".
+  if (!/^[\p{L}\p{N}](?:.*[\p{L}\p{N}])?$/u.test(wanted)) return false;
   const quote = normal(original);
   // A dotted version, possibly with a letter release ("1.1.1w").
   const dotted = (token: string) => /^v?\d+(?:\.\d+)+[a-z]?$/u.test(token);
