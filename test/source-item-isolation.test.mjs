@@ -129,7 +129,7 @@ test('a feed HTML-limit failure is isolated to its item', async () => {
   assert.equal(result.errors.length, 1);
 });
 
-test('GitHub keeps valid later items and another advisory category while a bad row remains incomplete', async () => {
+test('GitHub keeps valid later items and another advisory category, and reports a bad row without stopping', async () => {
   let broken = true;
   const http = async (url) => {
     if (new URL(url).searchParams.get('type') === 'malware') return response([]);
@@ -141,7 +141,10 @@ test('GitHub keeps valid later items and another advisory category while a bad r
   const cfg = config({ github: true });
   const first = await collectSources(inventory, cfg, { 'github:reviewed': OLD }, http, NOW);
   assert.equal(first.evidence.length, 1);
-  assert.equal(first.checkpoints['github:reviewed'], OLD);
+  // A row that cannot be read and gives no identifier is reported; holding the checkpoint for it
+  // would stop GitHub for good, so it moves on.
+  assert.equal(first.checkpoints['github:reviewed'], DATE);
+  assert.match(first.errors[0].message, /give no identifier/);
   assert.equal(first.checkpoints['github:malware'], DATE);
   assert.doesNotMatch(JSON.stringify(first.errors), /not-for-diagnostics/);
   broken = false;
@@ -151,7 +154,7 @@ test('GitHub keeps valid later items and another advisory category while a bad r
   assert.equal(second.checkpoints['github:reviewed'], new Date(NOW + 60_000).toISOString());
 });
 
-test('future records cannot poison valid partial records or advance a checkpoint', async () => {
+test('future records cannot poison valid partial records and are asked for again by identifier', async () => {
   const result = await collectSources(
     inventory,
     config({ github: true }),
@@ -172,7 +175,12 @@ test('future records cannot poison valid partial records or advance a checkpoint
     result.evidence.map((item) => item.id),
     ['github:GHSA-aaaa-aaaa-aaaa'],
   );
-  assert.equal(result.checkpoints['github:reviewed'], OLD);
+  // The future-dated record is remembered by identifier, so the checkpoint can move on.
+  assert.equal(result.checkpoints['github:reviewed'], DATE);
+  assert.deepEqual(
+    JSON.parse(result.checkpoints['github:reviewed:unreadable']).map(([id]) => id),
+    ['GHSA-BBBB-BBBB-BBBB'],
+  );
   assert.equal(result.errors.length, 1);
 });
 
@@ -197,7 +205,8 @@ test('a future GitHub duplicate cannot replace a valid record of the same adviso
       assert.equal(result.evidence.length, 1);
       assert.equal(result.evidence[0].title, 'A valid newer revision');
       assert.equal(result.evidence[0].modified_at, DATE);
-      assert.equal(result.checkpoints['github:reviewed'], OLD);
+      // The future revision is reported; the checkpoint moves on.
+      assert.equal(result.checkpoints['github:reviewed'], DATE);
       assert.equal(result.errors.length, 1);
     });
 });

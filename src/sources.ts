@@ -41,8 +41,13 @@ const MAX_ADVISORIES = 5_000;
 const MAX_FEED_ENTRIES = 500;
 const LATE_ENTRY_DAYS = 7;
 const HOUR = 3_600_000;
-/** How long a GitHub record that cannot be read holds the checkpoint before it is passed over. */
+/** How long a GitHub record that cannot be read is asked for again before it can be given up on. */
 const UNREADABLE_HOLD_HOURS = 24;
+/** Failed reads, in runs that read other records, before such a record is given up on. */
+const OWED_GITHUB_ATTEMPTS = 3;
+/** How many such records are remembered, and how many are asked for by identifier in one run. */
+const MAX_UNREADABLE = 2_000;
+const REFETCH_PER_RUN = 10;
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue {
@@ -673,8 +678,12 @@ async function github(
   inventory: Inventory,
   stored: Evidence[],
   since: string | undefined,
-  /** When a record GitHub serves in a form that cannot be read was first met; set for the next run. */
-  unreadable: { since?: string; next?: string } = {},
+  /**
+   * Records GitHub served in a form that cannot be read, remembered by identifier
+   * (`pending`: [id, first met, failed attempts]) and those given up on (`skipped`); the next
+   * values are set for the following run.
+   */
+  unreadable: { pending?: string; skipped?: string; nextPending?: string; nextSkipped?: string } = {},
 ): Promise<Evidence[]> {
   const { start, chainStart } = githubWindow(checkpoint, since, now);
   const url = new URL(GITHUB);
@@ -695,40 +704,114 @@ async function github(
   const seen = new Set<string>();
   const evidence = new Map<string, Evidence>();
   const invalid = new SourceItemFailures();
-  /** The update time of the oldest record that could not be read, when it gives one. */
-  let unreadableAt = Infinity;
-  // A record that cannot be read holds the checkpoint so that it is read again, but only for a day:
-  // after that it is reported and passed over, or one bad record would stop GitHub for good.
-  const firstMet = unreadable.since ? Date.parse(unreadable.since) : NaN;
-  const metAt = Number.isFinite(firstMet) && firstMet <= now ? firstMet : now;
-  const holding = now - metAt <= UNREADABLE_HOLD_HOURS * HOUR;
-  /** Where the next run starts: the given point, or the record that could not be read while held. */
-  const resumeAt = (point: number) => {
-    if (invalid.summary('GitHub') === undefined) {
-      unreadable.next = '';
-      return point;
-    }
-    unreadable.next = holding ? timestamp(metAt) : '';
-    return holding ? Math.min(point, (Number.isFinite(unreadableAt) ? unreadableAt : start) + HOUR) : point;
+  // A record that cannot be read is remembered by its identifier, as cve.now remembers the records
+  // it still owes, so the checkpoint keeps moving. It is asked for by identifier on later runs and
+  // given up on only after OWED_ATTEMPTS failed reads in runs that read other records and a day
+  // after it was first met. A stored copy of a record whose newer version could not be read is
+  // never confirmed as current: it ages, and exclusions resting on it go to review.
+  const key = (id: string) => id.toUpperCase();
+  const pending = new Map<string, { firstMet: number; attempts: number }>();
+  const skipped = new Set<string>();
+  try {
+    for (const entry of JSON.parse(unreadable.pending ?? '[]') as unknown[])
+      if (
+        Array.isArray(entry) &&
+        typeof entry[0] === 'string' &&
+        typeof entry[1] === 'number' &&
+        typeof entry[2] === 'number'
+      )
+        pending.set(key(entry[0]), { firstMet: Math.min(entry[1], now), attempts: entry[2] });
+    for (const id of JSON.parse(unreadable.skipped ?? '[]') as unknown[])
+      if (typeof id === 'string') skipped.add(key(id));
+  } catch {
+    // An unreadable list only means those records are found again when GitHub next updates them.
+  }
+  /** Records met in this run that could not be read, by identifier. */
+  const unreadableNow = new Set<string>();
+  /** Records that could not be read and give no usable identifier. */
+  let unidentified = 0;
+  /** Rows of the listing, readable or not, and the latest update time among them. */
+  let rows = 0;
+  let reachedRow = -Infinity;
+  const ghsaId = (item: unknown) => {
+    const id =
+      typeof item === 'object' && item !== null ? (item as Record<string, unknown>).ghsa_id : undefined;
+    return typeof id === 'string' && /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i.test(id)
+      ? key(id)
+      : undefined;
   };
-  const unreadableNote = () =>
-    holding
-      ? 'It is read again on the next run, for up to a day after it was first met.'
-      : 'It could not be read for a day and was passed over.';
+  const read = (item: unknown) => {
+    const parsed = invalid.read(() => githubRecord(item, type, now));
+    const id = ghsaId(item);
+    if (parsed) {
+      retainNewest(evidence, parsed);
+      // Read now: what earlier runs could not read is settled. Another revision of it in this run
+      // that cannot be read is still reported.
+      if (id) {
+        pending.delete(id);
+        skipped.delete(id);
+      }
+    } else if (id) unreadableNow.add(id);
+    else unidentified++;
+    return parsed;
+  };
+  /** Records given up on in this run. */
+  let passed = 0;
+  /** Settles the remembered records for the next run. Called once the listing has been read. */
+  const settle = (readSomething: boolean) => {
+    const nextPending = new Map<string, { firstMet: number; attempts: number }>();
+    for (const [id, entry] of pending) nextPending.set(id, entry);
+    for (const id of unreadableNow) {
+      const before = pending.get(id) ?? { firstMet: now, attempts: 0 };
+      // A run in which nothing could be read is a format outage, not a bad record.
+      const attempts = before.attempts + (readSomething ? 1 : 0);
+      if (attempts >= OWED_GITHUB_ATTEMPTS && now - before.firstMet > UNREADABLE_HOLD_HOURS * HOUR) {
+        nextPending.delete(id);
+        skipped.add(id);
+        passed++;
+      } else nextPending.set(id, { firstMet: before.firstMet, attempts });
+    }
+    // Bounded: the records first met longest ago are kept; the rest are given up on at once.
+    const ordered = [...nextPending].sort((a, b) => a[1].firstMet - b[1].firstMet);
+    for (const [id] of ordered.slice(MAX_UNREADABLE)) {
+      skipped.add(id);
+      passed++;
+    }
+    unreadable.nextPending = JSON.stringify(
+      ordered.slice(0, MAX_UNREADABLE).map(([id, { firstMet, attempts }]) => [id, firstMet, attempts]),
+    );
+    unreadable.nextSkipped = JSON.stringify([...skipped].slice(-MAX_UNREADABLE));
+  };
+  const problems = () => {
+    const parts: string[] = [];
+    if (unreadableNow.size)
+      parts.push(
+        `GitHub: ${unreadableNow.size} record(s) could not be read; each is asked for again by identifier on later runs.`,
+      );
+    if (passed)
+      parts.push(
+        `GitHub: ${passed} record(s) could not be read three times over a day and were given up on; their stored copies are no longer confirmed as current.`,
+      );
+    if (unidentified)
+      parts.push(
+        `GitHub: ${unidentified} record(s) could not be read and give no identifier; no stored record was confirmed as current in this run.`,
+      );
+    return parts.join(' ');
+  };
   try {
     for (let page = 0; next; page++) {
       if (page >= MAX_PAGES) {
         // Records arrive oldest update first, so everything up to the last one read is complete.
-        // The next start is the checkpoint minus an hour: continue exactly from that record.
-        const reached = Math.max(...[...evidence.values()].map((item) => Date.parse(item.modified_at)));
-        const skipped = invalid.summary('GitHub');
-        // Only a run of full pages of distinct records shows real progress through a backlog.
-        if (evidence.size < MAX_PAGES * 90 || !Number.isFinite(reached) || reached <= start)
+        // The next start is the checkpoint minus an hour: continue exactly from that record. Rows
+        // that could not be read count as progress: they are remembered by identifier.
+        if (rows < MAX_PAGES * 90 || !Number.isFinite(reachedRow) || reachedRow <= start)
           throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
+        settle(evidence.size > 0);
+        const note = problems();
         throw new PartialSourceError(
-          `GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.${skipped ? ` ${skipped} ${unreadableNote()}` : ''}`,
+          `GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.${note ? ` ${note}` : ''}`,
           [...evidence.values()],
-          timestamp(resumeAt(Math.min(now, reached + HOUR))),
+          timestamp(Math.min(now, reachedRow + HOUR)),
         );
       }
       if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
@@ -745,47 +828,67 @@ async function github(
       if (items.length > 100)
         throw new SourceError('GitHub returned more records than the requested page limit.');
       for (const item of items) {
-        const parsed = invalid.read(() => githubRecord(item, type, now));
-        if (parsed) retainNewest(evidence, parsed);
-        else {
-          const updated =
-            typeof item === 'object' && item !== null
-              ? Date.parse(String((item as Record<string, unknown>).updated_at))
-              : NaN;
-          if (Number.isFinite(updated) && updated <= now) unreadableAt = Math.min(unreadableAt, updated);
-        }
+        rows++;
+        const updated =
+          typeof item === 'object' && item !== null
+            ? Date.parse(String((item as Record<string, unknown>).updated_at))
+            : NaN;
+        if (Number.isFinite(updated) && updated <= now) reachedRow = Math.max(reachedRow, updated);
+        read(item);
       }
       const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
       next = nextGithubLink(link);
     }
+    // Remembered records that this window did not list are asked for by identifier, the longest
+    // waiting first, a few per run.
+    const asked = [...pending]
+      .filter(([id]) => !unreadableNow.has(id) && !evidence.has(`github:${id}`))
+      .sort((a, b) => a[1].firstMet - b[1].firstMet)
+      .slice(0, REFETCH_PER_RUN);
+    for (const [id] of asked) {
+      try {
+        const response = await http(`${GITHUB}/${encodeURIComponent(id)}`, {
+          headers,
+          maxBytes: 1_000_000,
+          redirects: 0,
+        });
+        // GitHub answers that it has no such record, or serves it in a form that cannot be read: a
+        // failed read. Any other failure says nothing about the record.
+        if (response.status === 404) unreadableNow.add(id);
+        else if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
+        else if (!read(JSON.parse(response.body) as unknown)) unreadableNow.add(id);
+      } catch (error) {
+        if (sourceCanceled(error)) throw error;
+        // A failed request says nothing about the record: it is asked for again next run.
+      }
+    }
+    settle(evidence.size > 0);
     // Every record modified since the window's start has been read. A stored record fetched after
     // that start and not among them is unchanged, so it is confirmed as current: without this an
-    // exclusion drawn from it would turn into an urgent "unknown" two poll intervals after it was
-    // first read, while GitHub answers normally. Only records for the inventory's packages matter.
+    // exclusion drawn from it would turn into an "unknown" two poll intervals after it was first
+    // read, while GitHub answers normally. Only records for the inventory's packages matter, and
+    // never one whose newer version could not be read.
     const names = new Set(
       inventory.systems.flatMap((system) =>
         system.components.map((component) => component.name.toLowerCase()),
       ),
     );
-    // A record that could not be read may be the new version of a stored one: nothing is confirmed.
-    if (invalid.message('GitHub') === undefined)
+    const unconfirmed = new Set([...unreadableNow, ...pending.keys(), ...skipped]);
+    // A record that could not be read and has no identifier may be the new version of any stored one.
+    if (!unidentified)
       for (const item of stored)
         if (
           item.source === `github:${type}` &&
           !evidence.has(item.id) &&
+          !unconfirmed.has(key(item.id.slice(7))) &&
           Date.parse(item.fetched_at) >= chainStart &&
           Date.parse(item.fetched_at) <= now &&
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         )
           evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
-    const skipped = invalid.summary('GitHub');
-    const resume = resumeAt(now);
-    if (skipped)
-      throw new PartialSourceError(
-        `${skipped} ${unreadableNote()}`,
-        [...evidence.values()],
-        timestamp(resume),
-      );
+    const note = problems();
+    // The checkpoint moves on: what could not be read is remembered by identifier.
+    if (note) throw new PartialSourceError(note, [...evidence.values()], timestamp(now));
     return [...evidence.values()];
   } catch (error) {
     throwSourceFailure(error, [...evidence.values()]);
@@ -1266,7 +1369,10 @@ export async function collectSources(
 ): Promise<SourceResult> {
   const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints }, coverage: [] };
   const jobs: { source: string; run: () => Promise<Evidence[] | FeedResult> }[] = [];
-  const githubUnreadable: Record<'reviewed' | 'malware', { since?: string; next?: string }> = {
+  const githubUnreadable: Record<
+    'reviewed' | 'malware',
+    { pending?: string; skipped?: string; nextPending?: string; nextSkipped?: string }
+  > = {
     reviewed: {},
     malware: {},
   };
@@ -1286,7 +1392,8 @@ export async function collectSources(
     jobs.push({ source: 'osv', run: () => osv(inventory, previousEvidence, http, now) });
   if (config.sources.github)
     for (const type of ['reviewed', 'malware'] as const) {
-      githubUnreadable[type].since = checkpoints[`github:${type}:unreadable_since`];
+      githubUnreadable[type].pending = checkpoints[`github:${type}:unreadable`];
+      githubUnreadable[type].skipped = checkpoints[`github:${type}:skipped`];
       jobs.push({
         source: `github:${type}`,
         run: () =>
@@ -1383,8 +1490,9 @@ export async function collectSources(
     if (job.source === 'cve_now' && cveNowState.nextLookups !== undefined)
       result.checkpoints['cve_now:lookups'] = cveNowState.nextLookups;
     if (job.source === 'github:reviewed' || job.source === 'github:malware') {
-      const next = githubUnreadable[job.source === 'github:reviewed' ? 'reviewed' : 'malware'].next;
-      if (next !== undefined) result.checkpoints[`${job.source}:unreadable_since`] = next;
+      const state = githubUnreadable[job.source === 'github:reviewed' ? 'reviewed' : 'malware'];
+      if (state.nextPending !== undefined) result.checkpoints[`${job.source}:unreadable`] = state.nextPending;
+      if (state.nextSkipped !== undefined) result.checkpoints[`${job.source}:skipped`] = state.nextSkipped;
     }
     if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
       result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');

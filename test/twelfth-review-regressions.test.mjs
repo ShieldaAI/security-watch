@@ -138,42 +138,75 @@ test('after a GitHub catch-up over more updates than one scan reads, stored reco
   assert.equal(decide(last.finding, settings).action, 'record');
 });
 
-test('a GitHub record that cannot be read holds the checkpoint for a day, then is passed over', async () => {
+test('a GitHub record that cannot be read is remembered by identifier and given up on only after three failed reads and a day', async () => {
   const store = new Store(':memory:');
   const settings = config({ github: true });
+  const id = 'GHSA-bbbb-cccc-0002';
+  const good = (modified) => ghsa(id, 'alpha', '< 2.0.0', modified);
   const broken = (modified) => ({
-    ghsa_id: 'GHSA-bbbb-cccc-0002',
+    ghsa_id: id,
     updated_at: iso(modified),
     vulnerabilities: [{ package: null }],
   });
+  const other = (modified) => ghsa('GHSA-dddd-eeee-0003', 'zeta', '< 1.0.0', modified);
+  // Asked for by identifier, GitHub serves it in the same unreadable form.
+  const byId = (now) => broken(now - HOUR);
+  const asked = [];
   const run = async (now, items) => {
+    const http = async (raw) => {
+      const url = new URL(raw);
+      if (url.pathname !== '/advisories') {
+        asked.push(url.pathname);
+        return json(byId(now));
+      }
+      return url.searchParams.get('type') === 'malware' ? json([]) : json(items(now));
+    };
     const result = await collectSources(
       inventory([['alpha', '3.0.0']], now),
       settings,
       store.checkpoints(),
-      githubServer(() => items),
+      http,
       now,
       store.evidence(),
     );
     store.saveEvidence(result.evidence, result.checkpoints);
     return result;
   };
-  await run(NOW, []);
-  const first = await run(NOW + 30 * MINUTE, [broken(NOW + 10 * MINUTE)]);
-  assert.match(first.errors[0].message, /read again on the next run/);
-  // The window of the next run (from its checkpoint minus an hour) reaches back to the record.
-  assert.equal(first.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE));
-  assert.equal(first.checkpoints['github:reviewed:unreadable_since'], iso(NOW + 30 * MINUTE));
-  const held = await run(NOW + 12 * HOUR, [broken(NOW + 10 * MINUTE)]);
-  assert.equal(held.checkpoints['github:reviewed'], iso(NOW + 70 * MINUTE), 'held at the unreadable record');
-  // A day after it was first met it is reported once more and passed over.
-  const passed = await run(NOW + 25 * HOUR, [broken(NOW + 10 * MINUTE)]);
-  assert.match(passed.errors[0].message, /could not be read for a day and was passed over/);
-  assert.equal(passed.checkpoints['github:reviewed'], iso(NOW + 25 * HOUR));
-  assert.equal(passed.checkpoints['github:reviewed:unreadable_since'], '');
-  // The next run no longer meets it, and is complete.
-  const after = await run(NOW + 25 * HOUR + 30 * MINUTE, []);
-  assert.deepEqual(after.errors, []);
+  const pending = (result) => JSON.parse(result.checkpoints['github:reviewed:unreadable']);
+  await run(NOW, (now) => [good(now - HOUR)]);
+  // GitHub updates the record and serves it in a form that cannot be read.
+  const first = await run(NOW + 30 * MINUTE, (now) => [broken(now - MINUTE), other(now - MINUTE)]);
+  assert.match(first.errors[0].message, /asked for again by identifier/);
+  assert.equal(first.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'the checkpoint moves on');
+  assert.deepEqual(
+    pending(first).map(([key, , attempts]) => [key, attempts]),
+    [[id.toUpperCase(), 1]],
+  );
+  assert.ok(!first.evidence.some((item) => item.id === `github:${id}`), 'its stored copy is not confirmed');
+  // A run in which nothing at all can be read is an outage: no attempt is counted.
+  const outage = await run(NOW + 60 * MINUTE, (now) => [broken(now - MINUTE)]);
+  assert.deepEqual(
+    pending(outage).map(([, , attempts]) => attempts),
+    [1],
+  );
+  // Later runs ask for it by identifier while the window no longer lists it.
+  await run(NOW + 2 * HOUR, () => [other(NOW + 2 * HOUR - MINUTE)]);
+  assert.ok(asked.length >= 1);
+  await run(NOW + 3 * HOUR, () => [other(NOW + 3 * HOUR - MINUTE)]);
+  // Three failed reads, but not yet a day: still remembered.
+  const early = await run(NOW + 4 * HOUR, () => [other(NOW + 4 * HOUR - MINUTE)]);
+  assert.equal(pending(early).length, 1);
+  // A day later it is given up on; its stored copy is never confirmed again until it is read.
+  const passed = await run(NOW + 25 * HOUR, () => [other(NOW + 25 * HOUR - MINUTE)]);
+  assert.match(passed.errors.map((error) => error.message).join(' '), /were given up on/);
+  assert.deepEqual(pending(passed), []);
+  assert.ok(JSON.parse(passed.checkpoints['github:reviewed:skipped']).includes(id.toUpperCase()));
+  const after = await run(NOW + 26 * HOUR, () => []);
+  assert.ok(!after.evidence.some((item) => item.id === `github:${id}`));
+  // Once GitHub serves it readably again, it is read and confirmed as usual.
+  const fixed = await run(NOW + 27 * HOUR, (now) => [good(now - MINUTE)]);
+  assert.ok(fixed.evidence.some((item) => item.id === `github:${id}`));
+  assert.deepEqual(JSON.parse(fixed.checkpoints['github:reviewed:skipped']), []);
 });
 
 test('two events merged by one advisory keep both findings through a whole scan, without a new alert', async () => {
@@ -601,4 +634,39 @@ test('a network that cannot be reached before connecting is a failed connection'
       },
     );
   }
+});
+
+test('a backlog with many records that cannot be read still makes progress, remembering them by identifier', async () => {
+  const store = new Store(':memory:');
+  const settings = config({ github: true });
+  // 6,000 updates, one in eight in a form that cannot be read.
+  const backlog = Array.from({ length: 6_000 }, (_, index) => {
+    const item = ghsa(
+      `GHSA-yyyy-${String(index).padStart(4, '0')}-yyyy`,
+      `other-${index}`,
+      '< 1.0.0',
+      NOW - 3 * HOUR + index * 1_000,
+    );
+    return index % 8 === 0 ? { ghsa_id: item.ghsa_id, updated_at: item.updated_at } : item;
+  });
+  store.saveEvidence([], { 'github:reviewed': iso(NOW - 3 * HOUR), 'github:malware': iso(NOW) });
+  const run = async (now) => {
+    const result = await collectSources(
+      inventory([['alpha', '3.0.0']], now),
+      settings,
+      store.checkpoints(),
+      githubServer((from) => backlog.filter((item) => Date.parse(item.updated_at) >= from)),
+      now,
+      store.evidence(),
+    );
+    store.saveEvidence(result.evidence, result.checkpoints);
+    return result;
+  };
+  const first = await run(NOW);
+  assert.match(first.errors[0].message, /the next run continues from there/);
+  assert.ok(Date.parse(first.checkpoints['github:reviewed']) > NOW - 3 * HOUR, 'the checkpoint moved');
+  assert.equal(JSON.parse(first.checkpoints['github:reviewed:unreadable']).length, 625);
+  const second = await run(NOW + 30 * MINUTE);
+  assert.doesNotMatch(second.errors[0]?.message ?? '', /pagination limit/);
+  assert.equal(JSON.parse(second.checkpoints['github:reviewed:unreadable']).length, 750);
 });

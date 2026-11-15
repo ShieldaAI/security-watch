@@ -125,13 +125,24 @@ test('a GitHub record read again with a wider range is not replaced by the store
   assert.equal(rounds[1].decision.action, 'notify');
 });
 
-test('nothing is confirmed from a GitHub scan with a record that could not be read', async () => {
+test('a stored GitHub record whose new version could not be read is not confirmed; others are', async () => {
   const rounds = await githubPolls([
-    () => [ghsa('GHSA-aaaa-bbbb-0004', 'alpha', '< 2.0.0', NOW - HOUR)],
-    (now) => [{ ghsa_id: 'GHSA-aaaa-bbbb-0005', updated_at: iso(now - MINUTE) }],
+    () => [
+      ghsa('GHSA-aaaa-bbbb-0004', 'alpha', '< 2.0.0', NOW - HOUR),
+      ghsa('GHSA-aaaa-bbbb-0005', 'alpha', '< 1.0.0', NOW - HOUR),
+    ],
+    (now) => [{ ghsa_id: 'GHSA-aaaa-bbbb-0004', updated_at: iso(now - MINUTE) }],
   ]);
   assert.ok(rounds[1].result.errors.length > 0);
-  assert.ok(!rounds[1].result.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0004'));
+  const ids = rounds[1].result.evidence.map((item) => item.id);
+  assert.ok(!ids.includes('github:GHSA-aaaa-bbbb-0004'), 'the record whose update could not be read');
+  assert.ok(ids.includes('github:GHSA-aaaa-bbbb-0005'), 'an unrelated record is still confirmed');
+  // A row with no identifier could be any record: nothing is confirmed.
+  const anonymous = await githubPolls([
+    () => [ghsa('GHSA-aaaa-bbbb-0004', 'alpha', '< 2.0.0', NOW - HOUR)],
+    (now) => [{ updated_at: iso(now - MINUTE) }],
+  ]);
+  assert.ok(!anonymous[1].result.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0004'));
 });
 
 test('a GitHub record is confirmed only when the scans since it was read cover every change', async () => {
