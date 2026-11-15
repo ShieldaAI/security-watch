@@ -2,9 +2,17 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## 1.0.1
+
+Package metadata and documentation only; no change to behaviour or to the public API. To be published under the default `latest` tag.
+
+- The npm description now says what the tool does: "Self-hosted monitor that checks new security advisories and news against the libraries and products you run, and alerts you on Slack or by email." The keywords no longer suggest an npm-only, OSV-based tool (`npm`, `osv` and `typescript` replaced by `security`, `sbom`, `email-alerts` and `nodejs`).
+- The 1.0.0 notes below record its publication.
+- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 284ab8b (tag `latest`, 110 files, 577 kB packed, nothing uploaded); the commit that records it changes only this changelog.
+
 ## 1.0.0
 
-First stable release, published under the default `latest` tag. Not yet published at the time of writing.
+First stable release, published to npm on 2026-11-15 under the default `latest` tag from commit 43db188.
 
 ### Upgrading from 0.1.0-alpha.0
 
@@ -163,7 +171,7 @@ Behaviour that changes for an existing installation:
 - Hosted CI passed on 4e4e063 (pull request #13: Ubuntu with Node 24 and 26, macOS with Node 26, the packed consumer on Node 24.10.0, dependency review and CodeQL). Windows is untested.
 - Only OpenAI and Anthropic were ever checked against live APIs, on 2026-10-24; the other provider profiles are covered by simulated responses.
 - The cve.now listing order (publication date, newest first) and its `limit` parameter were checked against the live service on 2026-11-14 with a handful of requests. How often the service ingests a record more than a week after its publication date is not known.
-- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 3128e66 (tag `latest`, 110 files, 576 kB packed, nothing uploaded); the commit that records it changes only this changelog. A real publish has not been run.
+- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 3128e66 (tag `latest`, 110 files, 576 kB packed, nothing uploaded); the commit that records it changes only this changelog. 1.0.0 was then published from 43db188 (the merge of that work into `main`), 110 files.
 
 ## 0.1.0-alpha.0
 
