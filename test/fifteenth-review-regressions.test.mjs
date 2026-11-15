@@ -755,3 +755,10 @@ test('a heartbeat more than five seconds ahead of the clock is not a live worker
   beat(6_000);
   assert.equal(checkHealth(store, config, NOW).ok, false);
 });
+
+test('a claim whose own letters compose only after lowering the case is read like the quote', () => {
+  for (const name of ['T̈ool', 'Ϊ́on Server', 'Άͅlpha']) {
+    const text = `The vendor reports that ${name} 2.4.1 lets remote users run code without signing in.`;
+    assert.equal(accepts(text, [text], { products: [name], versions: ['2.4.1'] }), true, name);
+  }
+});

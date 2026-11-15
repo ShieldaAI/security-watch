@@ -928,9 +928,8 @@ async function github(
       .filter((entry) => !unreadableNow.has(key(entry.id)) && !evidence.has(`github:${entry.id}`))
       .sort((a, b) => a.firstMet - b.firstMet)
       .slice(0, token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN);
-    // With room left, one record given up on is asked for again per run, the one asked longest ago
-    // first: a record lost to a long partial format change is found again once GitHub serves it
-    // readably.
+    // With room left, up to two records given up on are asked for again per run, so a record lost
+    // to a long partial format change is found again once GitHub serves it readably.
     const budget = token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN;
     // Records given up on are asked for in turn. With two requests to spare, one goes to the next
     // record with a stored copy (its copy is never confirmed until it is read) and one to the next

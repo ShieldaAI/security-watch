@@ -355,7 +355,7 @@ function quotesPhrase(
 }
 /**
  * The evidence as quotes and claims are read, and a test of whether a stretch of it lies inside an
- * occurrence of the quote. quoteText is applied once more inside the checks; it changes nothing it
+ * occurrence of the quote. readText is applied once more inside the checks; it changes nothing it
  * has already read, so the positions stay valid.
  */
 function inQuote(
@@ -382,12 +382,6 @@ function inQuote(
   return { text, within: (start, end) => merged.some(([from, to]) => start >= from && end <= to) };
 }
 /**
- * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
- * kind of hyphen and minus sign as a hyphen, the look-alike slashes as a slash, characters that show
- * as nothing removed, and every kind and run of space as one space. Other compatibility forms are
- * kept: a superscript, a circled digit or a fraction is not the digit it resembles ("2.4¹").
- */
-/**
  * Text as every claim check reads it: quoteText, lower case, and composed again, since lowering
  * the case can produce a pair that composes ("T" and a diaeresis become "ẗ"). Reading it again
  * changes nothing, so positions found in one reading hold in the next.
@@ -395,6 +389,12 @@ function inQuote(
 function readText(text: string): string {
   return quoteText(text).toLowerCase().normalize('NFC');
 }
+/**
+ * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
+ * kind of hyphen and minus sign as a hyphen, the look-alike slashes as a slash, characters that show
+ * as nothing removed, and every kind and run of space as one space. Other compatibility forms are
+ * kept: a superscript, a circled digit or a fraction is not the digit it resembles ("2.4¹").
+ */
 function quoteText(text: string): string {
   return (
     text
