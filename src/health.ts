@@ -27,19 +27,30 @@ function object(value: string | undefined): Record<string, unknown> | undefined 
 function time(value: unknown): number {
   return typeof value === 'string' ? Date.parse(value) : NaN;
 }
-/** Read-only monitoring health check; does not assess system security or make network requests. */
 /**
  * Since when a worker starting at `startedAt` has been catching up without recording a scan. It is
  * kept across restarts until a scan is recorded, so a worker killed during every scan cannot renew
- * its startup grace by restarting; a restart after a recorded scan starts afresh.
+ * its startup grace by restarting; a restart after a recorded scan starts afresh, and so does one
+ * after the previous worker was last seen more than the grace ago (a stop, not a crash loop).
  */
 export function catchingUpFrom(store: Store, startedAt: string): string {
   try {
-    const previous = JSON.parse(store.getMeta('worker') ?? 'null') as { catching_up_since?: string } | null;
+    const previous = JSON.parse(store.getMeta('worker') ?? 'null') as {
+      catching_up_since?: string;
+      started_at?: string;
+      heartbeat_at?: string;
+    } | null;
     const scan = JSON.parse(store.getMeta('last_scan') ?? 'null') as { at?: string } | null;
     const since = Date.parse(previous?.catching_up_since ?? '');
     const scanned = Date.parse(scan?.at ?? '');
-    return Number.isFinite(since) && since <= Date.parse(startedAt) && !(scanned >= since)
+    const seen = Math.max(
+      ...[time(previous?.heartbeat_at), time(previous?.started_at)].filter(Number.isFinite),
+    );
+    const start = Date.parse(startedAt);
+    return Number.isFinite(since) &&
+      since <= start &&
+      !(scanned >= since) &&
+      !(Number.isFinite(seen) && start - seen > FIRST_SCAN_GRACE)
       ? previous!.catching_up_since!
       : startedAt;
   } catch {
@@ -47,6 +58,7 @@ export function catchingUpFrom(store: Store, startedAt: string): string {
   }
 }
 
+/** Read-only monitoring health check; does not assess system security or make network requests. */
 export function checkHealth(
   store: Store,
   config: Config,

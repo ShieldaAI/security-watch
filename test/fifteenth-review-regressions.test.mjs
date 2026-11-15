@@ -707,3 +707,26 @@ test('a catch-up start ahead of the clock (a clock set back) is not kept', (t) =
   store.setMeta('last_scan', 'null');
   assert.equal(checkHealth(store, config, NOW).ok, false, 'two hours since the start, not ten minutes');
 });
+
+test('a restart after the previous worker was last seen more than an hour ago starts the grace afresh', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const since = iso(NOW - 3 * 3_600_000);
+  const seenAgo = (ago, field = 'heartbeat_at') =>
+    store.setMeta(
+      'worker',
+      JSON.stringify({ status: 'stopped', catching_up_since: since, [field]: iso(NOW - ago) }),
+    );
+  seenAgo(59 * 60_000);
+  assert.equal(catchingUpFrom(store, iso(NOW)), since, 'a crash loop keeps it');
+  seenAgo(61 * 60_000);
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW), 'a stop renews it');
+  seenAgo(61 * 60_000, 'started_at');
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW), 'the start counts when no heartbeat is recorded');
+  // The later of the two counts.
+  store.setMeta(
+    'worker',
+    JSON.stringify({ catching_up_since: since, started_at: since, heartbeat_at: iso(NOW - 5 * 60_000) }),
+  );
+  assert.equal(catchingUpFrom(store, iso(NOW)), since);
+});

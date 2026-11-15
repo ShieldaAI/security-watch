@@ -851,3 +851,66 @@ test('a stored copy counts only for its own GitHub type', async () => {
   // For the malware type there is no stored copy: the records simply take their turns.
   assert.deepEqual(asked, ['GHSA-mmmm-0001-mmmm', 'GHSA-mmmm-0002-mmmm']);
 });
+
+const storedCopy = (id) => ({
+  id: `github:${id}`,
+  source: 'github:reviewed',
+  kind: 'advisory',
+  title: 'alpha flaw',
+  url: 'https://github.com/advisories/x',
+  description: '',
+  aliases: [],
+  severity: 'critical',
+  modified_at: iso(NOW - 2 * DAY),
+  fetched_at: iso(NOW - DAY),
+  packages: [{ ecosystem: 'npm', name: 'alpha', range: '<2.0.0' }],
+});
+
+test('with one request to spare, given-up records simply take turns', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([storedCopy('GHSA-aaaa-bbbb-0131')], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([['GHSA-aaaa-bbbb-0129', NOW - 2 * HOUR, 1]]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0130', 'GHSA-aaaa-bbbb-0131']),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0129', 'zeta', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0130', 'zeta', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0131', 'alpha', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  // One remembered record, then the next given up on in turn, not the one with a stored copy.
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0129', 'GHSA-aaaa-bbbb-0130']);
+});
+
+test('a given-up record with a stored copy that is also next in turn is asked for once', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([storedCopy('GHSA-aaaa-bbbb-0140')], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0140', 'GHSA-aaaa-bbbb-0141']),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0140', 'alpha', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0141', 'zeta', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0140', 'GHSA-aaaa-bbbb-0141']);
+});
+
+test('a given-up record that this scan could not read in the listing is not asked for again by identifier', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW - HOUR),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0150', 'GHSA-aaaa-bbbb-0151']),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0150', 'zeta', NOW - 10 * MINUTE, false),
+    advisory('GHSA-aaaa-bbbb-0152', 'zeta', NOW - 10 * MINUTE),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.ok(!log.byId.includes('GHSA-aaaa-bbbb-0150'), JSON.stringify(log.byId));
+  assert.ok(log.byId.includes('GHSA-aaaa-bbbb-0151'), JSON.stringify(log.byId));
+});

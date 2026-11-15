@@ -523,3 +523,50 @@ test('foreground worker continues with missing model credentials and disabled so
   release();
   assert.equal(run(['unlock'], f.dir).code, 0);
 });
+
+test('start keeps the catch-up start of a worker stopped before a scan, and starts afresh after a long stop', async (t) => {
+  const f = fixture(t, { notifications: {}, policy: { health_channels: [] } });
+  mkdirSync(join(f.dir, 'state'), { recursive: true });
+  const workerMeta = () => {
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    try {
+      return JSON.parse(db.prepare("SELECT value FROM metadata WHERE key = 'worker'").get().value);
+    } finally {
+      db.close();
+    }
+  };
+  const restart = async (lastSeenAgo) => {
+    // The previous worker started catching up half an hour before it was last seen.
+    const since = new Date(Date.now() - lastSeenAgo - 30 * 60_000).toISOString();
+    const seen = new Date(Date.now() - lastSeenAgo).toISOString();
+    const store = new Store(f.db);
+    store.setMeta(
+      'worker',
+      JSON.stringify({
+        pid: 1,
+        status: 'stopped',
+        started_at: since,
+        catching_up_since: since,
+        heartbeat_at: seen,
+      }),
+    );
+    store.setMeta('last_scan', 'null');
+    store.close();
+    const { child, logs } = worker(t, f);
+    await waitFor(() => logs.stdout.includes('running in the foreground')).catch((error) => {
+      t.diagnostic(JSON.stringify(logs));
+      throw error;
+    });
+    const meta = workerMeta();
+    child.kill('SIGTERM');
+    await waitFor(() => child.exitCode !== null || child.signalCode !== null);
+    return { since, meta };
+  };
+  // Last seen ten minutes ago, catching up for forty: a crash loop does not renew the grace.
+  const kept = await restart(10 * 60_000);
+  assert.equal(kept.meta.catching_up_since, kept.since);
+  assert.notEqual(kept.meta.started_at, kept.since);
+  // Last seen two hours ago: a stop, not a crash loop, so the hour starts again.
+  const fresh = await restart(2 * 3_600_000);
+  assert.equal(fresh.meta.catching_up_since, fresh.meta.started_at);
+});
