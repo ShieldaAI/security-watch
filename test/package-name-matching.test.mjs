@@ -504,3 +504,31 @@ test('library cue edges: CVSS forms, separators, named hyphen suffixes, "etc." a
   // After initials a sentence ends: an ambiguous case, kept that way ("led by J. Doe").
   no('The Express security team, led by J. Doe, released 5.0.1.', 'express');
 });
+
+test('sentence ends, next-sentence registries and remaining list entries', () => {
+  const component = (name, ecosystem = 'npm') => ({ id: 'c', ecosystem, name, version: '1.0.0' });
+  const yes = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), true, text);
+  const no = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), false, text);
+  const n = 'The Nest security team fixed it';
+  // "!" and "?" end a sentence; a lower-case start does not; a single lower-case letter does not.
+  no(`${n}! The library of stolen files grew.`.replace('library of stolen files', 'archive'));
+  no(`${n}? It is on 4.2 now.`);
+  yes(`${n}. it is in the npm package.`);
+  yes(`${n} with plan b. Version 4.2 of it.`);
+  // Registries that count from the next sentence; the one after does not.
+  for (const strong of ['It is on PyPI.', 'It is on crates.io.', 'It is on npm.', 'Run npm install nest.'])
+    yes(`${n}. ${strong}`);
+  no(`${n}. Npm-themed lures spread.`);
+  no(`${n}. Nothing more. It is on PyPI.`);
+  no(`${n}. It has gems.`);
+  // The cue words in full: "open-source".
+  yes(`${n} in the open-source library.`.replace('library', 'project'));
+  // A separator before "v": "TLSv1.3" is not a version.
+  no(`${n} for TLSv1.3.`);
+  // Flaw kinds and words before the name not tested elsewhere.
+  yes('The Express use-after-free bug lets attackers in.', 'express');
+  yes('The Express zero-day flaw lets attackers in.', 'express');
+  yes('Three Express flaws let attackers in.', 'express');
+  yes('The Express PyPI package was cloned.', 'express');
+  yes('The Express libraries leak data.', 'express');
+});

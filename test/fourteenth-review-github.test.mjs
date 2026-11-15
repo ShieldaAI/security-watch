@@ -1923,3 +1923,49 @@ test('saved row times: all listed again keep the hold; trimmed to 50 when saved,
   for (const t of times.slice(0, 3)) assert.ok(saved3.includes(t));
   assert.equal(new Set(saved3).size, 50);
 });
+
+test('a hold over more than 50 rows keeps its time when the same rows, or one more listed late, come again', async () => {
+  const bare = (prefix) => (list) => () =>
+    list.map((at, index) => {
+      const row = advisory(`GHSA-${prefix}-${String(index).padStart(4, '0')}-${prefix}`, 'alpha', at);
+      delete row.ghsa_id;
+      return row;
+    });
+  const again = (store, checkpoints, listing, now) =>
+    collectSources(
+      inventory(now),
+      config,
+      { ...store.checkpoints(), ...checkpoints },
+      github(listing).http(now),
+      now,
+      store.evidence(),
+    );
+  // The same 53 rows, in GitHub's ascending order.
+  {
+    const store = new Store(':memory:');
+    store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0400', 2 * HOUR)], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+    });
+    const rows = bare('xxxx')(Array.from({ length: 53 }, (_, index) => NOW + (index + 1) * 1000));
+    const first = await poll(store, github(rows).http, NOW + 30 * MINUTE);
+    const second = await again(store, first.checkpoints, rows, NOW + 45 * MINUTE);
+    assert.equal(JSON.parse(second.checkpoints['github:reviewed:unconfirmed']).alpha[0], NOW + 30 * MINUTE);
+  }
+  // 50 rows, then the same 50 and one older row listed late: renewed once, then kept.
+  {
+    const store = new Store(':memory:');
+    store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0401', 2 * HOUR)], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+    });
+    const times = Array.from({ length: 50 }, (_, index) => NOW + (index + 2) * 1000);
+    const first = await poll(store, github(bare('yyyy')(times)).http, NOW + 30 * MINUTE);
+    const late = bare('yyyy')([NOW + 1000, ...times]);
+    const second = await again(store, first.checkpoints, late, NOW + 45 * MINUTE);
+    const at = JSON.parse(second.checkpoints['github:reviewed:unconfirmed']).alpha[0];
+    assert.equal(at, NOW + 45 * MINUTE);
+    const third = await again(store, second.checkpoints, late, NOW + 75 * MINUTE);
+    assert.equal(JSON.parse(third.checkpoints['github:reviewed:unconfirmed']).alpha[0], at);
+  }
+});

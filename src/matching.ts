@@ -524,8 +524,8 @@ function writtenAsName(names: string[]): (text: string) => boolean {
       const read = technologyInLowerCase(line);
       if (patterns.some((pattern) => pattern.test(read))) return true;
       // The shared words count only in a sentence that itself speaks of a library, or whose next
-      // sentence names a registry, an install command or a written version ("… disclosed a flaw.
-      // Upgrade to 5.4.1 now.").
+      // sentence names a registry or an install command ("… disclosed a flaw. Run pip install -U
+      // celery."); a version there does not count.
       if (!cued.length) return false;
       const sentences = read.split(SENTENCE_END);
       return sentences.some(
