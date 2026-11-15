@@ -408,7 +408,7 @@ const SHARED_NOUN =
  * else.
  */
 const NOT_LIBRARY_SUFFIX =
-  '-(?!(?:based|hosted|published|level|lock|managed|installed|pinned|wide|scoped|only)(?![\\p{L}]))';
+  '[-‑–](?!(?:based|hosted|published|level|lock|managed|installed|pinned|wide|scoped|only|registry|manager|audit|signing|specific|agnostic|federation|account|check|compatible|licensed|maintained)(?![\\p{L}]))';
 /**
  * Not a software version: one that follows "CVSS" ("CVSS v3.1", "CVSS: v3.1", "CVSS (v3.1)",
  * "CVSS version 3.1", "CVSS-version 3.1", the second of "CVSS v3.1/v4.0"), or one that "CVSS" follows
@@ -416,7 +416,7 @@ const NOT_LIBRARY_SUFFIX =
  * the CVSS scale"), so a library version with its rating ("fixed in v5.0.1 (CVSS 9.8)") still counts.
  */
 const NOT_CVSS = '(?<!cvss[:\\s(-]*(?:version[\\s-]*)?(?:v?\\d+(?:\\.\\d+)*\\s*/\\s*)?)';
-const NOT_BEFORE_CVSS = '(?![^.]{0,24}cvss)';
+const NOT_BEFORE_CVSS = '(?!(?:[^.]|\\.\\d){0,24}cvss)';
 /** A CVSS version number closely after "CVSS" in the same sentence ("a CVSS score of 8.1 (version 3.1)"). */
 const NOT_AFTER_CVSS = '(?<!cvss[^!?]{0,40})';
 /** A version written as one, not followed by another digit group. */

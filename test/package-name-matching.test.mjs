@@ -603,3 +603,32 @@ test('sentence ends at "!" and "?" so a registry two sentences on does not count
   // An allowed suffix only as a whole word: "plugin-basedx" is not "plugin-based".
   no(`${n} in the plugin-basedx loader.`);
 });
+
+test('software compounds after a cue word, other dashes, and two scores before "CVSS"', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text) => assert.equal(packageMentioned(text, component('nest')), true, text);
+  const no = (text) => assert.equal(packageMentioned(text, component('nest')), false, text);
+  const n = 'The Nest security team fixed it';
+  for (const word of [
+    'npm-registry',
+    'package-manager',
+    'npm-audit',
+    'package-signing',
+    'framework-agnostic',
+    'module-federation',
+    'npm-check',
+    'library-specific',
+    'plugin-compatible',
+    'open-source-licensed',
+    'package-maintained',
+    'npm-account',
+  ])
+    yes(`${n} in the ${word} setup.`);
+  no(`${n} in the npm‑themed lure.`);
+  no(`${n} in the npm–themed lure.`);
+  no(`${n}, rated 8.1 (v3.1) and 8.7 (v4.0) on the CVSS scale.`);
+  no(`${n}, 9.8 under v3.1 and 9.3 under v4.0 of CVSS.`);
+  no(`${n}, gave it 9.3 (v2.0) on the CVSS scale.`);
+  // A version more than 40 characters after "CVSS" counts.
+  yes(`${n}; CVSS 7.5; the fix for the header bug shipped weeks later in v4.0.`);
+});
