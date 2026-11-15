@@ -895,7 +895,8 @@ async function github(
         seenNow.add(name);
         const entry = blocked.get(name);
         blocked.set(name, {
-          at: entry && entry.at >= version ? entry.at : now,
+          // Seen before only if not newer than every row seen so far for the package.
+          at: entry && entry.at >= version && version <= entry.updated ? entry.at : now,
           updated: Math.max(entry?.updated ?? -Infinity, version),
         });
       }

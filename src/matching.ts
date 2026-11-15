@@ -399,15 +399,19 @@ const SOFTWARE_NOUN =
 const SHARED_NOUN =
   '(?:community|components?|devs|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
-/** A sign that a text is about a software library: a registry, the kind of package, or a version. */
+/**
+ * A sign that a sentence is about a software library: a registry or an install command, the kind of
+ * package, or a version written as one ("v1.2", "version 1.2", "@1.2", "1.2.3"). A bare decimal is
+ * not one ("a CVSS score of 9.8", "1.5 million").
+ */
 const LIBRARY_CUE =
-  /(?:^|[^\p{L}])(?:npm|pypi|pip|gems?|crates?|packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|github|maintainers?)(?![\p{L}])|(?:^|[^\p{L}\p{N}.])v?\d+\.\d+/iu;
+  /(?:^|[^\p{L}])(?:npm|pypi|rubygems|gems?|crates?|crates\.io|maven|nuget|(?:pip|gem|cargo|npm) install|packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\p{L}])|(?:^|[^\p{L}\p{N}.])(?:v\d+\.\d+|version \d+\.\d+|@\d+\.\d+|\d+\.\d+\.\d+)/iu;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
 const FLAW_KIND =
   '(?:remote|code|command|execution|sandbox|deserialization|sql|path|traversal|prototype|pollution|' +
-  'denial-of-service|denial|of|service|request|smuggling|cross-site|scripting|xss|XSS|ssrf|SSRF|csrf|CSRF|' +
+  'denial-of-service|denial of service|request|smuggling|cross-site|scripting|xss|XSS|ssrf|SSRF|csrf|CSRF|' +
   'xxe|XXE|SQL|RCE|rce|DoS|dos|ReDoS|TLS|SSL|authentication|auth|' +
   'authorization|privilege|escalation|buffer|overflow|memory|corruption|use-after-free|arbitrary|file|' +
   'upload|read|write|information|disclosure|open|redirect|header|cache|poisoning|type|confusion|' +
@@ -469,12 +473,19 @@ function writtenAsName(names: string[]): (text: string) => boolean {
     cued,
   );
   if (!patterns.length) return () => false;
-  return (text) => {
-    const all = cued.length && LIBRARY_CUE.test(text) ? [...patterns, ...cued] : patterns;
-    return text
-      .split('\n')
-      .some((line) => !titleCase(line) && all.some((pattern) => pattern.test(technologyInLowerCase(line))));
-  };
+  return (text) =>
+    text.split('\n').some((line) => {
+      if (titleCase(line)) return false;
+      const read = technologyInLowerCase(line);
+      if (patterns.some((pattern) => pattern.test(read))) return true;
+      // The shared words count only in a sentence that itself speaks of a library.
+      return (
+        cued.length > 0 &&
+        read
+          .split(/(?<=[.!?])\s+/u)
+          .some((sentence) => LIBRARY_CUE.test(sentence) && cued.some((pattern) => pattern.test(sentence)))
+      );
+    });
 }
 
 export interface InventoryMatcher {

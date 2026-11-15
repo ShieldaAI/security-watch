@@ -208,7 +208,7 @@ test('second-word rule: acronyms of flaw kinds as written, and each group of sof
     ['jackson', 'The Jackson deserialization flaw lets attackers run code.'],
     ['express', 'The Express path traversal vulnerability exposes files.'],
     ['react', 'The React components leak state across requests in the npm package.'],
-    ['rails', 'Critical Rails security update released for 7.1.'],
+    ['rails', 'Critical Rails security update released for version 7.1.'],
     ['rails', 'The Rails security advisory lists two flaws in the framework.'],
     ['express', 'The Express web applications were exposed.'],
     ['express', 'The Express web app leaks sessions.'],
@@ -238,4 +238,52 @@ test('shared words after a library named second in a sentence count only when th
     ['express', 'The Express authentication bypass flaw lets anyone in.'],
   ])
     assert.equal(packageMentioned(text, component(name)), true, text);
+});
+
+test('the library cue is read in the same sentence, from registries, kinds of package and written versions', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const nest = 'The Nest security team confirmed the issue.';
+  for (const second of [
+    'The flaw has a CVSS score of 9.8.',
+    'Stolen data later appeared on GitHub.',
+    'About 1.5 million customers were affected.',
+    'Devices on iOS 17.4 are safe.',
+    'The library of stolen files grew.',
+  ])
+    assert.equal(packageMentioned(`${nest} ${second}`, component('nest')), false, second);
+  for (const cue of [
+    'in the npm package',
+    'in the library',
+    'for the framework',
+    'in its modules',
+    'in its plugins',
+    'in its gems',
+    'in its crates',
+    'on PyPI',
+    'after pip install nest',
+    'for v4.2',
+    'for version 4.2',
+    'in nest@4.2',
+    'for 4.21.2',
+    'the open-source maintainers said',
+  ])
+    assert.equal(
+      packageMentioned(`The Nest security team fixed the issue ${cue}.`, component('nest')),
+      true,
+      cue,
+    );
+  assert.equal(
+    packageMentioned('The Nest security team fixed the pipeline issue.', component('nest')),
+    false,
+  );
+  assert.equal(packageMentioned('The Nest security team fixed it for 4.2.', component('nest')), false);
+  assert.equal(
+    packageMentioned('The Nest security team fixed the subframework issue.', component('nest')),
+    false,
+  );
+  assert.equal(
+    packageMentioned('The Svelte UI components leak state in the library.', component('svelte')),
+    true,
+  );
+  assert.equal(packageMentioned('The Nest of bugs in the thermostat firmware.', component('nest')), false);
 });

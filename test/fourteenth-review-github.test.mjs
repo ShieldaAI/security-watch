@@ -1765,3 +1765,42 @@ test('a stored record already at the version of a row without an identifier is n
     version,
   ]);
 });
+
+test('a saved hold keeps the version of its rows across a restart', async () => {
+  const store = new Store(':memory:');
+  const version = NOW - 10 * MINUTE;
+  const current = { ...waitingCopy('GHSA-aaaa-bbbb-0350', 30 * MINUTE), modified_at: iso(version) };
+  store.saveEvidence([current], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: [NOW - 5 * MINUTE, version] }),
+  });
+  const { http, log } = github(() => [advisory('GHSA-aaaa-bbbb-0350', 'alpha', NOW - DAY)]);
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, []);
+  assert.ok(
+    result.evidence.some((item) => item.id === current.id && item.fetched_at === iso(NOW + 30 * MINUTE)),
+  );
+});
+
+test('a second row without an identifier, newer than every row seen before, holds its package again', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...waitingCopy('GHSA-aaaa-bbbb-0351', HOUR), modified_at: iso(NOW - DAY) };
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    // First seen at NOW + 20 min for a row updated at NOW + 5 min.
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: [NOW + 20 * MINUTE, NOW + 5 * MINUTE] }),
+  });
+  const { http, log } = github(() => {
+    const first = advisory('GHSA-aaaa-bbbb-0352', 'alpha', NOW + 5 * MINUTE);
+    delete first.ghsa_id;
+    const second = advisory('GHSA-aaaa-bbbb-0353', 'alpha', NOW + 12 * MINUTE);
+    delete second.ghsa_id;
+    return [first, second, advisory('GHSA-aaaa-bbbb-0351', 'alpha', NOW - DAY)];
+  });
+  // The copy was read after the first sighting, but before the second row was listed.
+  store.saveEvidence([{ ...copy, fetched_at: iso(NOW + 25 * MINUTE) }], {});
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0351']);
+});
