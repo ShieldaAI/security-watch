@@ -841,7 +841,8 @@ async function github(
     const listed = listedNow.get(name) ?? new Set<number>();
     const others = unique.filter((v) => !listed.has(v));
     const room = Math.max(0, ROW_VERSIONS - unique.filter((v) => listed.has(v)).length);
-    const keep = new Set([...unique.filter((v) => listed.has(v)), ...others.slice(-room)]);
+    // slice(-0) would keep them all.
+    const keep = new Set([...unique.filter((v) => listed.has(v)), ...(room ? others.slice(-room) : [])]);
     return unique.filter((v) => keep.has(v));
   };
   /**

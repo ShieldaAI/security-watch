@@ -2006,3 +2006,39 @@ test('rows listed out of order: a hold keeps every time listed in the run', asyn
     JSON.parse(first.checkpoints['github:reviewed:unconfirmed']).alpha[0],
   );
 });
+
+test('saved holds: a malformed saved time holds everything; more listed than 50 drops the older saved ones', async () => {
+  const copy = { ...waitingCopy('GHSA-aaaa-bbbb-0420', 30 * MINUTE), modified_at: iso(NOW + 5 * MINUTE) };
+  {
+    const store = new Store(':memory:');
+    store.saveEvidence([copy], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      // One saved time is not a number: the latest update is unknown, so the copy still waits.
+      'github:reviewed:unconfirmed': JSON.stringify({ alpha: [NOW - 5 * MINUTE, 'bad', NOW + MINUTE] }),
+    });
+    const { http, log } = github(() => [advisory('GHSA-aaaa-bbbb-0420', 'alpha', NOW - DAY)]);
+    await poll(store, http, NOW + 30 * MINUTE);
+    assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0420']);
+  }
+  {
+    const store = new Store(':memory:');
+    const older = [NOW - 3000, NOW - 2000, NOW - 1000];
+    store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0421', 2 * HOUR)], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      'github:reviewed:unconfirmed': JSON.stringify({ alpha: [NOW - 500, ...older] }),
+    });
+    const times = Array.from({ length: 55 }, (_, index) => NOW + (index + 1) * 1000);
+    const { http } = github(() =>
+      times.map((at, index) => {
+        const row = advisory(`GHSA-qqqq-${String(index).padStart(4, '0')}-qqqq`, 'alpha', at);
+        delete row.ghsa_id;
+        return row;
+      }),
+    );
+    const result = await poll(store, http, NOW + 30 * MINUTE);
+    const [, ...saved] = JSON.parse(result.checkpoints['github:reviewed:unconfirmed']).alpha;
+    assert.deepEqual(saved, times);
+  }
+});

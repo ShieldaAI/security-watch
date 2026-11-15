@@ -578,3 +578,28 @@ test('hyphens after a cue word and versions near CVSS', () => {
   for (const form of ['CVSS v3.1/v4.0', 'CVSS v3/v4.0', 'CVSS 3.1 / v4.0', 'CVSS v3.1 / v4.0'])
     no(`${n} rated ${form} 8.1.`);
 });
+
+test('sentence ends at "!" and "?" so a registry two sentences on does not count; window bounds near CVSS', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text) => assert.equal(packageMentioned(text, component('nest')), true, text);
+  const no = (text) => assert.equal(packageMentioned(text, component('nest')), false, text);
+  const n = 'The Nest security team fixed it';
+  no(`${n}! Nothing more. It is on PyPI.`);
+  no(`${n}? Nothing more. It is on PyPI.`);
+  yes(`${n}! It is on PyPI.`);
+  // A sentence does not end at a space alone, nor after "e.g." or "i.e." before a capital.
+  yes(`${n} in Version 4.2 of it.`.replace(' in Version', ' in the npm package, Version'));
+  yes(`${n}, e.g. Version 4.2 of it.`);
+  yes(`${n}, i.e. Version 4.2 of it.`);
+  // "version 2.0" and "4.0" near CVSS; a version beyond the 40 characters after "CVSS" counts.
+  no(`${n} in version 2.0 under CVSS.`);
+  no(`${n} in v4.0, its CVSS rating.`);
+  yes(
+    `${n}; the CVSS score is high, and it was fixed in the release v3.1.`.replace(
+      'v3.1',
+      'version 3.1 of the npm package',
+    ),
+  );
+  // An allowed suffix only as a whole word: "plugin-basedx" is not "plugin-based".
+  no(`${n} in the plugin-basedx loader.`);
+});

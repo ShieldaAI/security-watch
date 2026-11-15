@@ -454,7 +454,7 @@ const STRONG_LIBRARY_CUE = new RegExp(
 );
 /**
  * Where a sentence ends: after ".", "!" or "?" and before a capital letter or a digit, but not after
- * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.", "etc.") or a single lower-case letter. After
+ * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.") or a single lower-case letter. After "etc." and
  * initials ("the U.S. Package scams") it does end.
  */
 const SENTENCE_END =
