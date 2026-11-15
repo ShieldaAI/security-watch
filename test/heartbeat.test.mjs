@@ -88,3 +88,33 @@ test('cancellation and durable state failures remain visible to the worker', asy
   };
   await assert.rejects(new HeartbeatMonitor().tick(store, config(), http, now), /storage failed/);
 });
+
+test('no success ping while a worker is still catching up (health "starting")', async (t) => {
+  const store = setup(t);
+  // Restarted ten minutes ago after a short outage; the last scan is older than two intervals.
+  store.setMeta(
+    'worker',
+    JSON.stringify({
+      status: 'running',
+      started_at: new Date(now - 600_000).toISOString(),
+      catching_up_since: new Date(now - 600_000).toISOString(),
+      heartbeat_at: new Date(now).toISOString(),
+    }),
+  );
+  store.setMeta(
+    'last_scan',
+    JSON.stringify({ at: new Date(now - 50 * 60_000).toISOString(), degraded: false }),
+  );
+  let calls = 0;
+  const report = await new HeartbeatMonitor().tick(
+    store,
+    config(),
+    async () => {
+      calls++;
+      return { status: 200, body: 'ok', headers: {} };
+    },
+    now,
+  );
+  assert.equal(report.status, 'withheld');
+  assert.equal(calls, 0);
+});

@@ -454,6 +454,13 @@ function citesVersion(
       /(?:(?:^|[^\p{L}\p{N}\-])(?:versions?|releases?|affected|fixed(?: in)?|patched|vulnerable|ver|versión)|版本|バージョン|버전) ?:$/iu.test(
         before,
       );
+    // An image and its tag ("nginx:1.25.3"): a name with a letter, then a version of three parts or
+    // more; a port ("example.com:443") or a vector ("CVSS:3.1") is not one.
+    const dockerTag =
+      /(?:^|[\s(\[])[a-z0-9][a-z0-9._\/-]*[a-z][a-z0-9._\/-]*:$/u.test(before) &&
+      /^\d+\.\d+\.\d+/u.test(wanted) &&
+      // A label joined to another word ("x-affected:") is neither a label nor an image.
+      !/(?:versions?|releases?|affected|fixed|patched|vulnerable|ver):$/iu.test(before);
     const rangeEnd = /\d~$/u.test(before) && dotted(wanted) && dotted(/([\d.]+)~$/u.exec(before)![1]!);
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
@@ -463,7 +470,7 @@ function citesVersion(
       /\d['’]$/u.test(before) ||
       // After a colon joined to a word or number: a port ("example.com:443"), a vector
       // ("CVSS:3.1"), an address ("::1"), a time.
-      (!labelled && /[\p{L}\p{N}:]:$/u.test(before)) ||
+      (!labelled && !dockerTag && /[\p{L}\p{N}:]:$/u.test(before)) ||
       // A protocol version ("HTTP/2", "TLS/1.3"); a product and its version ("Apache/2.4.58") is a
       // citation.
       /(?:^|[^\p{L}])(?:https?|http2|tls|ssl|ssh|smb|smtp|imap|pop3|spdy|quic|rtsp|sip|snmp|ftp|ldap)\/$/iu.test(

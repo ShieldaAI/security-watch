@@ -5,6 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catchingUpFrom, checkHealth } from '../dist/health.js';
 import { validateDestination } from '../dist/http.js';
@@ -484,4 +487,70 @@ test('a news quote is checked against the evidence on its own, and every occurre
 test('a CJK label straight after other CJK text still labels the version', () => {
   const text = '受影响版本:2.5.32 存在远程代码执行漏洞。';
   assert.equal(accepts(text, [text], { versions: ['2.5.32'] }), true);
+});
+
+test('any other mark written between a name and more of a word joins it; sentence punctuation does not', () => {
+  const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
+  for (const body of ['Notepad§x', 'Notepad★x', 'Notepad%x', 'Notepad©x'])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: ['Notepad'] }), false, body);
+  for (const body of ['Notepad, x', 'Notepad; x', 'Notepad (x)', 'Notepad™', 'Notepad®'])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: ['Notepad'] }), true, body);
+});
+
+test('a claim that runs past the end of its quote is not supported by it', () => {
+  const text = 'The advisory says Example Server 2.4.1 is affected in this release cycle.';
+  assert.equal(accepts(text, ['The advisory says Example Ser'], { products: ['Example Server'] }), false);
+  assert.equal(accepts(text, ['The advisory says Example Server 2.4'], { versions: ['2.4.1'] }), false);
+  assert.equal(accepts(text, ['The advisory says Example Server 2.4.1'], { versions: ['2.4.1'] }), true);
+});
+
+test('an image tag cites its version; a port and a vector do not', () => {
+  const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
+  assert.equal(accepts(sentence('nginx:1.25.3'), [sentence('nginx:1.25.3')], { versions: ['1.25.3'] }), true);
+  assert.equal(
+    accepts(sentence('library/nginx:1.25.3'), [sentence('library/nginx:1.25.3')], { versions: ['1.25.3'] }),
+    true,
+  );
+  assert.equal(
+    accepts(sentence('example.com:443'), [sentence('example.com:443')], { versions: ['443'] }),
+    false,
+  );
+  assert.equal(accepts(sentence('CVSS:3.1'), [sentence('CVSS:3.1')], { versions: ['3.1'] }), false);
+  assert.equal(
+    accepts(sentence('Version : 2.5.32'), [sentence('Version : 2.5.32')], { versions: ['2.5.32'] }),
+    true,
+  );
+});
+
+test('a fixture scan that saves its results does not mark the inventory as current', (t) => {
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+  const examples = fileURLToPath(new URL('../examples/', import.meta.url));
+  const directory = mkdtempSync(join(tmpdir(), 'sw-fixture-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(
+    join(directory, 'security-watch.yaml'),
+    [
+      `version: 1`,
+      `inventory: ${examples}systems.example.yaml`,
+      `database: ${join(directory, 'watch.db')}`,
+    ].join('\n'),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [
+      cli,
+      'scan',
+      '--config',
+      join(directory, 'security-watch.yaml'),
+      '--fixture',
+      `${examples}advisories.json`,
+    ],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  const report = JSON.parse(result.stdout);
+  // The example inventory is dated 2026-10-23: without --dry-run it counts as stale when it is.
+  if (Date.now() - Date.parse('2026-10-23T00:00:00Z') > 7 * 86_400_000)
+    assert.ok(
+      report.findings.some((finding) => finding.reasons.some((reason) => /Inventory is stale/.test(reason))),
+    );
 });
