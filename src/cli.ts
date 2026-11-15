@@ -36,7 +36,7 @@ function heartbeatProblem(address: string, allowPrivate: boolean | undefined): b
 }
 import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
-import { checkHealth } from './health.js';
+import { catchingUpFrom, checkHealth } from './health.js';
 import type { Assessment, Config } from './types.js';
 import { PROVIDERS, providerDefinition } from './providers.js';
 import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
@@ -1015,6 +1015,7 @@ async function main(): Promise<void> {
     store.recoverSending();
     const controller = new AbortController();
     const startedAt = new Date().toISOString();
+    const catchingUpSince = catchingUpFrom(store, startedAt);
     let lastHeartbeat = 0;
     const heartbeat = (status: 'running' | 'stopping' | 'stopped') => {
       const now = Date.now();
@@ -1024,6 +1025,7 @@ async function main(): Promise<void> {
           pid: process.pid,
           status,
           started_at: startedAt,
+          catching_up_since: catchingUpSince,
           heartbeat_at: new Date(now).toISOString(),
         }),
       );

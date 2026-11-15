@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { checkHealth } from '../dist/health.js';
+import { catchingUpFrom, checkHealth } from '../dist/health.js';
 import { validateDestination } from '../dist/http.js';
 import { validateAnalysis } from '../dist/models.js';
 import { parseConfig } from '../dist/config.js';
@@ -297,29 +297,56 @@ test('a product cut from the end of a longer word is refused', () => {
   );
 });
 
-test('a restarted worker catching up has a bounded grace, reported as starting, and a crash loop is not healthy', (t) => {
+test('the catch-up grace survives restarts until a scan is recorded, and is reported as starting', (t) => {
   const store = new Store(':memory:');
   t.after(() => store.close());
   const config = parseConfig({ version: 1 });
-  const worker = (startedAgo) =>
+  const worker = (startedAgo, since) =>
     store.setMeta(
       'worker',
-      JSON.stringify({ status: 'running', started_at: iso(NOW - startedAgo), heartbeat_at: iso(NOW) }),
+      JSON.stringify({
+        status: 'running',
+        started_at: iso(NOW - startedAgo),
+        catching_up_since: iso(NOW - since),
+        heartbeat_at: iso(NOW),
+      }),
     );
   const scan = (ago) =>
     store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - ago), degraded: false, errors: [] }));
-  // Restarted ten minutes ago after a short outage: catching up, not reported as healthy.
-  scan(50 * 60_000);
-  worker(10 * 60_000);
+  // A restart after eight hours of downtime: the full hour to catch up, reported as starting.
+  scan(8 * 3_600_000);
+  worker(10 * 60_000, 10 * 60_000);
   const catching = checkHealth(store, config, NOW);
   assert.equal(catching.ok, true);
   assert.equal(catching.status, 'starting', 'no success ping while catching up');
-  // The last scan is three days old and the worker restarted ten minutes ago: a crash loop.
-  scan(3 * 24 * 3_600_000);
+  // Restarted ten minutes ago, but catching up for three hours across restarts: a crash loop.
+  worker(10 * 60_000, 3 * 3_600_000);
   assert.equal(checkHealth(store, config, NOW).ok, false);
+  // The same on a new installation that never recorded a scan.
+  store.setMeta('last_scan', 'null');
+  assert.equal(checkHealth(store, config, NOW).ok, false);
+  worker(10 * 60_000, 30 * 60_000);
+  assert.equal(checkHealth(store, config, NOW).ok, true);
   // Without a worker check (--scan-only), no grace applies.
   scan(50 * 60_000);
   assert.equal(checkHealth(store, config, NOW, false).ok, false);
+});
+
+test('a restarted worker keeps the catch-up start until a scan is recorded', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - 3 * 3_600_000), degraded: false, errors: [] }));
+  // First start after the scan: a fresh start.
+  assert.equal(catchingUpFrom(store, iso(NOW - 2 * 3_600_000)), iso(NOW - 2 * 3_600_000));
+  store.setMeta('worker', JSON.stringify({ status: 'running', catching_up_since: iso(NOW - 2 * 3_600_000) }));
+  // Restarted without a scan since: the earlier start stands.
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 2 * 3_600_000));
+  // A scan was recorded since: the next start is fresh.
+  store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - 60_000), degraded: false, errors: [] }));
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW));
+  // An unreadable record starts afresh.
+  store.setMeta('worker', 'not JSON');
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW));
 });
 test('the demo shows one affected and one excluded system whatever date its files carry', () => {
   const demo = fileURLToPath(new URL('../scripts/demo.mjs', import.meta.url));

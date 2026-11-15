@@ -929,16 +929,23 @@ async function github(
     // first: a record lost to a long partial format change is found again once GitHub serves it
     // readably.
     const budget = token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN;
-    // Records with a stored copy come first: their copies are never confirmed until they are read.
-    const retry =
-      [...skipped].find(([k]) => withCopy.has(k) && !unreadableNow.has(k)) ??
-      [...skipped].find(([k]) => !unreadableNow.has(k));
-    const again: Remembered[] =
-      asked.length < budget && retry ? [{ id: retry[1], firstMet: now, attempts: 0, updated: NaN }] : [];
-    if (retry && again.length) {
-      // To the back of the queue, so the next run asks another.
-      skipped.delete(retry[0]);
-      skipped.set(retry[0], retry[1]);
+    // Records given up on are asked for in turn. With two requests to spare, one goes to the next
+    // record with a stored copy (its copy is never confirmed until it is read) and one to the next
+    // record in turn, so neither kind can take every turn; with one, they simply take turns.
+    const room = budget - asked.length;
+    const waiting = [...skipped].filter(([k]) => !unreadableNow.has(k));
+    const picks: [string, string][] = [];
+    const copyFirst = room >= 2 ? waiting.find(([k]) => withCopy.has(k)) : undefined;
+    if (copyFirst) picks.push(copyFirst);
+    for (const entry of waiting) {
+      if (picks.length >= Math.min(room, 2)) break;
+      if (!picks.includes(entry)) picks.push(entry);
+    }
+    const again: Remembered[] = picks.map(([, id]) => ({ id, firstMet: now, attempts: 0, updated: NaN }));
+    // To the back of the queue, so the next run asks others.
+    for (const [k, id] of picks) {
+      skipped.delete(k);
+      skipped.set(k, id);
     }
     for (const entry of [...asked, ...again]) {
       const givenUp = again.includes(entry);

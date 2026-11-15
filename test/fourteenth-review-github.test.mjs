@@ -614,27 +614,27 @@ test('a record read again by identifier keeps the update time it was listed with
   assert.equal(entries['GHSA-aaaa-bbbb-0071'].length, 3);
 });
 
-test('a record given up on is asked for again with room to spare, and found once GitHub serves it readably', async () => {
+test('records given up on are asked for again in turn with the room left, and found once GitHub serves them readably', async () => {
   const store = new Store(':memory:');
+  const ids = ['GHSA-aaaa-bbbb-0080', 'GHSA-aaaa-bbbb-0081', 'GHSA-aaaa-bbbb-0082'];
   store.saveEvidence([], {
     'github:reviewed': iso(NOW),
     'github:malware': iso(NOW),
-    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0080', 'GHSA-aaaa-bbbb-0081']),
+    'github:reviewed:skipped': JSON.stringify(ids),
   });
   let readable = false;
-  const { http, log } = github(() => [
-    advisory('GHSA-aaaa-bbbb-0080', 'alpha', NOW - DAY, readable),
-    advisory('GHSA-aaaa-bbbb-0081', 'alpha', NOW - DAY, readable),
-  ]);
+  const { http, log } = github(() => ids.map((id) => advisory(id, 'alpha', NOW - DAY, readable)));
   const first = await poll(store, http, NOW + 30 * MINUTE);
-  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0080'], 'one per run');
-  assert.deepEqual(first.errors, [], 'no new report while it still cannot be read');
+  // Without a token two requests per run, both spare: two records, in turn.
+  assert.deepEqual(log.byId, [ids[0], ids[1]]);
+  assert.deepEqual(first.errors, [], 'no new report while they still cannot be read');
   await poll(store, http, NOW + 60 * MINUTE);
-  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0080', 'GHSA-aaaa-bbbb-0081'], 'the next one in turn');
+  assert.deepEqual(log.byId.slice(2), [ids[2], ids[0]], 'the next in turn');
   readable = true;
   const found = await poll(store, http, NOW + 90 * MINUTE);
-  assert.ok(found.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0080'));
-  assert.deepEqual(JSON.parse(found.checkpoints['github:reviewed:skipped']), ['GHSA-aaaa-bbbb-0081']);
+  assert.ok(found.evidence.some((item) => item.id === `github:${ids[1]}`));
+  assert.ok(found.evidence.some((item) => item.id === `github:${ids[2]}`));
+  assert.deepEqual(JSON.parse(found.checkpoints['github:reviewed:skipped']), [ids[0]]);
 });
 
 test("GitHub's primary rate limit (403) also ends the requests by identifier", async () => {
@@ -655,7 +655,7 @@ test("GitHub's primary rate limit (403) also ends the requests by identifier", a
   assert.match(result.errors[0].message, /rate limit/);
 });
 
-test('given-up records with a stored copy are asked for again first, and the others take turns', async () => {
+test('a given-up record with a stored copy gets a turn every run, and cannot keep the others from theirs', async () => {
   const store = new Store(':memory:');
   const copy = {
     id: 'github:GHSA-aaaa-bbbb-0100',
@@ -679,29 +679,21 @@ test('given-up records with a stored copy are asked for again first, and the oth
       'GHSA-aaaa-bbbb-0100',
     ]),
   });
-  const { http, log } = github(() => []);
-  for (let run = 1; run <= 3; run++) await poll(store, http, NOW + run * 30 * MINUTE);
-  // The one with a stored copy is asked every time it can be (here, every run).
-  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0100']);
-  // Without stored copies, they take turns and the order is kept from run to run.
-  const plain = new Store(':memory:');
-  plain.saveEvidence([], {
-    'github:reviewed': iso(NOW),
-    'github:malware': iso(NOW),
-    'github:reviewed:skipped': JSON.stringify([
-      'GHSA-aaaa-bbbb-0101',
-      'GHSA-aaaa-bbbb-0102',
-      'GHSA-aaaa-bbbb-0103',
-    ]),
-  });
-  const turns = github(() => []);
-  for (let run = 1; run <= 4; run++) await poll(plain, turns.http, NOW + run * 30 * MINUTE);
-  assert.deepEqual(turns.log.byId, [
-    'GHSA-aaaa-bbbb-0101',
-    'GHSA-aaaa-bbbb-0102',
-    'GHSA-aaaa-bbbb-0103',
-    'GHSA-aaaa-bbbb-0101',
+  // The one with a stored copy never becomes readable; 0102 does.
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0100', 'alpha', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0101', 'zeta', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0102', 'alpha', NOW - DAY),
   ]);
+  const first = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0101']);
+  const second = await poll(store, http, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId.slice(2), ['GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0102']);
+  assert.ok(
+    second.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0102'),
+    'the other record is found',
+  );
+  assert.ok(!first.evidence.some((item) => item.id === copy.id), 'the stored copy is not confirmed');
 });
 
 test('a given-up record asked for again that answers 404 is not reported or remembered again', async () => {
@@ -778,4 +770,84 @@ test('a window of unreadable records first met just under a day ago is an outage
     const result = await poll(store, http, NOW + 30 * MINUTE);
     assert.equal(result.checkpoints['github:reviewed'] === iso(NOW), held, `${age / HOUR} h`);
   }
+});
+
+test('beyond 10,000 given-up records the oldest without a stored copy are dropped, in place', async () => {
+  const store = new Store(':memory:');
+  const withCopy = 'GHSA-kkkk-0000-kkkk';
+  const others = Array.from(
+    { length: 10_001 },
+    (_, index) => `GHSA-jjjj-${String(index).padStart(4, '0')}-jjjj`,
+  );
+  store.saveEvidence(
+    [
+      {
+        id: `github:${withCopy}`,
+        source: 'github:reviewed',
+        kind: 'advisory',
+        title: 'alpha flaw',
+        url: 'https://github.com/advisories/x',
+        description: '',
+        aliases: [],
+        severity: 'critical',
+        modified_at: iso(NOW - 2 * DAY),
+        fetched_at: iso(NOW - DAY),
+        packages: [{ ecosystem: 'npm', name: 'alpha', range: '<2.0.0' }],
+      },
+    ],
+    {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      'github:reviewed:skipped': JSON.stringify([withCopy, ...others]),
+    },
+  );
+  // No request to spare for re-asking: GitHub refuses requests by identifier.
+  const { http } = github(() => [], { byId: () => ({ status: 429, headers: {}, body: '' }) });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  const kept = JSON.parse(result.checkpoints['github:reviewed:skipped']);
+  assert.ok(kept.includes(withCopy));
+  assert.ok(!kept.includes(others[0]) || !kept.includes(others[1]), 'the oldest without a copy go');
+  assert.equal(kept.filter((id) => id !== withCopy).length, 10_000);
+});
+
+test('a stored copy counts only for its own GitHub type', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence(
+    [
+      {
+        id: 'github:GHSA-llll-0000-llll',
+        source: 'github:reviewed',
+        kind: 'advisory',
+        title: 'alpha flaw',
+        url: 'https://github.com/advisories/x',
+        description: '',
+        aliases: [],
+        severity: 'critical',
+        modified_at: iso(NOW - 2 * DAY),
+        fetched_at: iso(NOW - DAY),
+        packages: [{ ecosystem: 'npm', name: 'alpha', range: '<2.0.0' }],
+      },
+    ],
+    {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      'github:malware:skipped': JSON.stringify([
+        'GHSA-mmmm-0001-mmmm',
+        'GHSA-mmmm-0002-mmmm',
+        'GHSA-llll-0000-llll',
+      ]),
+    },
+  );
+  const asked = [];
+  const http = () => async (raw) => {
+    const url = new URL(raw);
+    if (url.pathname !== '/advisories') {
+      asked.push(decodeURIComponent(url.pathname.split('/').at(-1)));
+      return { status: 404, headers: {}, body: '' };
+    }
+    return json([]);
+  };
+  await poll(store, http, NOW + 30 * MINUTE);
+  // For the malware type there is no stored copy: the records simply take their turns.
+  assert.deepEqual(asked, ['GHSA-mmmm-0001-mmmm', 'GHSA-mmmm-0002-mmmm']);
 });
