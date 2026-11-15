@@ -1,7 +1,7 @@
 {
   "name": "@shieldaai/security-watch",
-  "version": "1.0.0",
-  "description": "Know quickly which new vulnerabilities and security news affect your stack. Self-hosted advisory monitoring with Slack or email alerts.",
+  "version": "1.0.1",
+  "description": "Self-hosted monitor that checks new security advisories and news against the libraries and products you run, and alerts you on Slack or by email.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -74,14 +74,15 @@
   },
   "homepage": "https://github.com/ShieldaAI/security-watch#readme",
   "keywords": [
-    "security-advisories",
-    "dependency-monitoring",
+    "security",
     "vulnerability-monitoring",
+    "security-advisories",
     "cve",
-    "osv",
-    "npm",
+    "dependency-monitoring",
+    "sbom",
     "slack",
+    "email-alerts",
     "self-hosted",
-    "typescript"
+    "nodejs"
   ]
 }

@@ -94,7 +94,7 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.0.0.** This is `@shieldaai/security-watch` 1.0.0, the first stable release, published under the default `latest` tag. It has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed since the alpha.
+**Version 1.0.1.** This is `@shieldaai/security-watch` 1.0.1, a patch release of the first stable version (1.0.0), published under the default `latest` tag. It has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed since the alpha.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
@@ -134,7 +134,7 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.0.0.tgz
+npm install --global ./shieldaai-security-watch-1.0.1.tgz
 ```
 
 Choose one setup command below. For a fictional example with AI disabled:
