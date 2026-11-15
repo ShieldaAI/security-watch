@@ -146,3 +146,26 @@ test('a library named second in a sentence before a word that is not about softw
   ])
     assert.equal(packageMentioned(text, component(name)), false, text);
 });
+
+test('a library named second in a sentence: kinds of software and flaws after it, brand and malware words not', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const [name, text] of [
+    ['mocha', 'The Mocha test runner fails on Windows.'],
+    ['struts', 'Critical Struts remote code execution flaw disclosed.'],
+    ['electron', 'New Electron sandbox escape lets pages run code.'],
+    ['puma', 'The Puma web server fixes request smuggling.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), true, text);
+  for (const [name, text] of [
+    ['puma', 'The Puma users were told to reset passwords.'],
+    ['express', 'The Express security team responded.'],
+    ['bootstrap', 'The Bootstrap code was stolen.'],
+    ['meteor', 'The Meteor exploit kit spread.'],
+    ['meteor', 'The Meteor servers went down.'],
+    ['express', 'The Express security breach exposed passengers.'],
+    ['thor', 'The Thor code was leaked online.'],
+    ['puma', 'The Puma apparel line sold out.'],
+    ['puma', 'The Puma releasers met.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), false, text);
+});

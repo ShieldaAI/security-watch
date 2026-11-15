@@ -49,6 +49,8 @@ const OWED_GITHUB_ATTEMPTS = 3;
 const MAX_UNREADABLE = 10_000;
 const REFETCH_PER_RUN = 10;
 const REFETCH_WITHOUT_TOKEN = 2;
+/** Without a token, rows listed beyond which a row without an identifier no longer holds the listing. */
+const HOLD_ROWS_WITHOUT_TOKEN = 300;
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue {
@@ -577,7 +579,7 @@ function githubIdentifier(raw: unknown): string | undefined {
     }
   return undefined;
 }
-/** The package names a GitHub row names, in lower case, read as far as the row allows. */
+/** The package names a GitHub row names, normalised as stored claims are and in lower case, read as far as the row allows. */
 function githubPackageNames(raw: unknown): string[] {
   const vulnerabilities =
     typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).vulnerabilities : undefined;
@@ -587,8 +589,11 @@ function githubPackageNames(raw: unknown): string[] {
       typeof vulnerability === 'object' && vulnerability !== null
         ? (vulnerability as Record<string, unknown>).package
         : undefined;
-    const name = typeof pkg === 'object' && pkg !== null ? (pkg as Record<string, unknown>).name : undefined;
-    return typeof name === 'string' && name.trim() ? [name.trim().toLowerCase()] : [];
+    const fields = typeof pkg === 'object' && pkg !== null ? (pkg as Record<string, unknown>) : {};
+    const name = fields.name;
+    if (typeof name !== 'string' || !name.trim()) return [];
+    const ecosystem = typeof fields.ecosystem === 'string' ? fields.ecosystem : '';
+    return [sourcePackage(ecosystem, name.trim()).name.toLowerCase()];
   });
 }
 
@@ -854,13 +859,20 @@ async function github(
     } else if (id) unreadableNow.set(key(id), { id, updated: updatedAt(item) });
     else {
       unidentified++;
+      // Without a usable update time it has no day of its own: it makes a listing that can read
+      // nothing a format outage, but beside readable rows it does not hold the listing.
       const updated = updatedAt(item);
-      if (now - updated <= UNREADABLE_HOLD_HOURS * HOUR) {
+      if (!Number.isFinite(updated)) unidentifiedRecent = true;
+      else if (now - updated <= UNREADABLE_HOLD_HOURS * HOUR) {
         unidentifiedRecent = true;
         unidentifiedHold = Math.min(unidentifiedHold, updated);
       }
+      // A stored record read after the row's update is current: listing the row again does not make
+      // it wait again.
+      const at = Number.isFinite(updated) ? updated : now;
       const named = githubPackageNames(item);
-      for (const name of named.length ? named : ['*']) blocked.set(name, now);
+      for (const name of named.length ? named : ['*'])
+        blocked.set(name, Math.max(blocked.get(name) ?? -Infinity, at));
     }
     return parsed;
   };
@@ -920,7 +932,8 @@ async function github(
       rewind = Math.min(rewind ?? Infinity, earliest(kept.map(([, entry]) => entry)));
     // Nothing in the listing could be read: the window is listed again on the next run.
     if (!readSomething) rewind = start;
-    if (holdUnidentified && Number.isFinite(unidentifiedHold))
+    // Without a token, a long window is not listed again for it: GitHub allows 60 requests an hour.
+    if (holdUnidentified && Number.isFinite(unidentifiedHold) && (token || rows <= HOLD_ROWS_WITHOUT_TOKEN))
       rewind = Math.min(rewind ?? Infinity, unidentifiedHold);
     // A package stays remembered while a stored record for it, read before its row was met, waits to
     // be read again.
@@ -1035,24 +1048,10 @@ async function github(
     // record with a stored copy (its copy is never confirmed until it is read) and one to the next
     // record in turn, so neither kind can take every turn; with one, they simply take turns.
     const room = budget - asked.length;
-    const waiting = [...skipped].filter(([k]) => !unreadableNow.has(k) && !pending.has(k));
-    const picks: [string, string][] = [];
-    const copyFirst = room >= 2 ? waiting.find(([k]) => withCopy.has(k)) : undefined;
-    if (copyFirst) picks.push(copyFirst);
-    for (const entry of waiting) {
-      if (picks.length >= Math.min(room, 2)) break;
-      if (!picks.includes(entry)) picks.push(entry);
-    }
-    const again: Remembered[] = picks.map(([, id]) => ({ id, firstMet: now, attempts: 0, updated: NaN }));
-    // To the back of the queue, so the next run asks others.
-    for (const [k, id] of picks) {
-      skipped.delete(k);
-      skipped.set(k, id);
-    }
-    // With room still left, stored records for the inventory that a row without an identifier may
-    // have replaced are read again by identifier, the longest unread first, so that they can be
-    // confirmed again. One that cannot be read is remembered like any other.
-    const refresh: Remembered[] = stored
+    // Stored records for the inventory that a row without an identifier may have replaced, the
+    // longest unread first: read again by identifier, so that they can be confirmed again. One that
+    // cannot be read is remembered like any other. They keep one request of the room left.
+    const stale = stored
       .filter((item) => {
         const k = key(item.id.slice(7));
         return (
@@ -1065,7 +1064,23 @@ async function github(
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         );
       })
-      .sort((a, b) => Date.parse(a.fetched_at) - Date.parse(b.fetched_at))
+      .sort((a, b) => Date.parse(a.fetched_at) - Date.parse(b.fetched_at));
+    const turns = room - (stale.length && room >= 1 ? 1 : 0);
+    const waiting = [...skipped].filter(([k]) => !unreadableNow.has(k) && !pending.has(k));
+    const picks: [string, string][] = [];
+    const copyFirst = turns >= 2 ? waiting.find(([k]) => withCopy.has(k)) : undefined;
+    if (copyFirst) picks.push(copyFirst);
+    for (const entry of waiting) {
+      if (picks.length >= Math.min(turns, 2)) break;
+      if (!picks.includes(entry)) picks.push(entry);
+    }
+    const again: Remembered[] = picks.map(([, id]) => ({ id, firstMet: now, attempts: 0, updated: NaN }));
+    // To the back of the queue, so the next run asks others.
+    for (const [k, id] of picks) {
+      skipped.delete(k);
+      skipped.set(k, id);
+    }
+    const refresh: Remembered[] = stale
       .slice(0, Math.max(0, room - picks.length))
       .map((item) => ({ id: item.id.slice(7), firstMet: now, attempts: 0, updated: NaN }));
     for (const entry of [...asked, ...again, ...refresh]) {

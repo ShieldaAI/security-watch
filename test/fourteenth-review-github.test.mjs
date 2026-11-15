@@ -1217,3 +1217,314 @@ test('a row without any identifier holds the listing for a day after its update,
   const old = await poll(late, http, NOW + 10 * MINUTE + DAY + HOUR);
   assert.equal(old.checkpoints['github:reviewed'], iso(NOW + 10 * MINUTE + DAY + HOUR));
 });
+
+test('a listing of only rows without any identifier or update time is a format outage', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const { http } = github(() => []);
+  const withRow = async (now) => {
+    const raw = await http(now);
+    return poll(
+      store,
+      () => async (url) => {
+        const response = await raw(url);
+        if (
+          !new URL(url).pathname.endsWith('/advisories') ||
+          new URL(url).searchParams.get('type') === 'malware'
+        )
+          return response;
+        const rows = JSON.parse(response.body);
+        rows.unshift({
+          summary: 'alpha flaw',
+          vulnerabilities: [{ package: { ecosystem: 'npm', name: 'alpha' } }],
+        });
+        return { ...response, body: JSON.stringify(rows) };
+      },
+      now,
+    );
+  };
+  const result = await withRow(NOW + 3 * HOUR);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW));
+});
+
+test('the packages a row without an identifier names are normalised as stored claims are', async () => {
+  const store = new Store(':memory:');
+  const copy = {
+    ...storedCopy('GHSA-aaaa-bbbb-0217'),
+    fetched_at: iso(NOW),
+    packages: [{ ecosystem: 'PyPI', name: 'zope-interface', range: '<1.0.0' }],
+  };
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const row = {
+    summary: 'zope flaw',
+    updated_at: iso(NOW + 10 * MINUTE),
+    vulnerabilities: [{ package: { ecosystem: 'pip', name: 'Zope.Interface' } }],
+  };
+  const http = async (url) =>
+    new URL(url).pathname.endsWith('/advisories') && new URL(url).searchParams.get('type') !== 'malware'
+      ? json([row])
+      : new URL(url).pathname.endsWith('/advisories')
+        ? json([])
+        : { status: 404, headers: {}, body: '' };
+  const pypi = {
+    systems: [
+      {
+        id: 'py',
+        name: 'py',
+        updated_at: iso(NOW),
+        products: [],
+        keywords: [],
+        components: [{ id: 'c:zope', ecosystem: 'PyPI', name: 'zope-interface', version: '0.5.0' }],
+      },
+    ],
+  };
+  const result = await collectSources(
+    pypi,
+    config,
+    store.checkpoints(),
+    http,
+    NOW + 30 * MINUTE,
+    store.evidence(),
+  );
+  assert.ok(!result.evidence.some((item) => item.id === copy.id));
+  assert.deepEqual(Object.keys(JSON.parse(result.checkpoints['github:reviewed:unconfirmed'])), [
+    'zope-interface',
+  ]);
+});
+
+test('a row without an identifier listed again does not make a record read since its update wait again', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...storedCopy('GHSA-aaaa-bbbb-0218'), fetched_at: iso(NOW - HOUR) };
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const { http, log } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0219', 'alpha', NOW + 10 * MINUTE);
+    delete row.ghsa_id;
+    return [
+      row,
+      advisory('GHSA-aaaa-bbbb-0218', 'alpha', NOW - DAY),
+      advisory('GHSA-aaaa-bbbb-0220', 'zeta', NOW + 20 * MINUTE),
+    ];
+  });
+  await poll(store, http, NOW + 3 * HOUR);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0218'], 'read again once');
+  log.byId.length = 0;
+  const second = await poll(store, http, NOW + 4 * HOUR);
+  assert.deepEqual(log.byId, []);
+  assert.ok(second.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 4 * HOUR)));
+});
+
+test('a stored record waiting to be read again keeps one turn without a token, and its answer may name itself by link', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...storedCopy('GHSA-aaaa-bbbb-0221'), fetched_at: iso(NOW - HOUR) };
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0222', 'GHSA-aaaa-bbbb-0223']),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW }),
+  });
+  const { http, log } = github(
+    () => [
+      advisory('GHSA-aaaa-bbbb-0221', 'alpha', NOW - DAY),
+      advisory('GHSA-aaaa-bbbb-0222', 'zeta', NOW - DAY, false),
+      advisory('GHSA-aaaa-bbbb-0223', 'zeta', NOW - DAY, false),
+    ],
+    {
+      byId: (record) => {
+        const answer = { ...record, html_url: `https://github.com/advisories/${record.ghsa_id}` };
+        delete answer.ghsa_id;
+        return json(answer);
+      },
+    },
+  );
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0222', 'GHSA-aaaa-bbbb-0221']);
+  assert.ok(
+    result.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 30 * MINUTE)),
+  );
+});
+
+test('without a token a row without an identifier does not hold a long window', async () => {
+  const many = Array.from({ length: 320 }, (_, index) =>
+    advisory(`GHSA-mmmm-${String(index).padStart(4, '0')}-mmmm`, 'zeta', NOW - 2 * HOUR + index * 1000),
+  );
+  const listing = () => {
+    const row = advisory('GHSA-aaaa-bbbb-0224', 'zeta', NOW - 3 * HOUR);
+    delete row.ghsa_id;
+    return [row, ...many];
+  };
+  for (const token of [false, true]) {
+    const store = new Store(':memory:');
+    store.saveEvidence([], { 'github:reviewed': iso(NOW - 4 * HOUR), 'github:malware': iso(NOW) });
+    const pages = (now) => async (raw) => {
+      const url = new URL(raw);
+      if (url.searchParams.get('type') === 'malware') return json([]);
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const rows = listing().slice((page - 1) * 100, page * 100);
+      const more = page * 100 < listing().length;
+      url.searchParams.set('page', String(page + 1));
+      return json(rows, more ? { link: `<${url.href}>; rel="next"` } : {});
+    };
+    if (token) process.env.FOURTEENTH_GITHUB_TOKEN = 'synthetic';
+    try {
+      const result = await poll(store, pages, NOW);
+      assert.equal(
+        result.checkpoints['github:reviewed'],
+        token ? iso(NOW - 2 * HOUR) : iso(NOW),
+        String(token),
+      );
+    } finally {
+      delete process.env.FOURTEENTH_GITHUB_TOKEN;
+    }
+  }
+});
+
+// ---- Bounds of reading stored records again after a row without an identifier ------------------
+
+const waitingCopy = (id, fetchedAgo, name = 'alpha') => ({
+  ...storedCopy(id),
+  fetched_at: iso(NOW - fetchedAgo),
+  packages: [{ ecosystem: 'npm', name, range: '<2.0.0' }],
+});
+
+test('stored records waiting to be read again: within the budget, the longest unread first, inventory only', async () => {
+  const store = new Store(':memory:');
+  const copies = [
+    waitingCopy('GHSA-aaaa-bbbb-0230', HOUR),
+    waitingCopy('GHSA-aaaa-bbbb-0231', 3 * HOUR),
+    waitingCopy('GHSA-aaaa-bbbb-0232', 2 * HOUR),
+    waitingCopy('GHSA-aaaa-bbbb-0233', 4 * HOUR, 'zeta'),
+  ];
+  store.saveEvidence(copies, {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0234']),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW, zeta: NOW }),
+  });
+  const { http, log } = github(() => [
+    ...copies.map((copy) => advisory(copy.id.slice(7), copy.packages[0].name, NOW - DAY, false)),
+    advisory('GHSA-aaaa-bbbb-0234', 'zeta', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  // Without a token two requests: one given-up record, one stored record (the longest unread).
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0234', 'GHSA-aaaa-bbbb-0231']);
+});
+
+test('a stored record already given up on or unreadable in this listing is not read again as waiting', async () => {
+  const store = new Store(':memory:');
+  const given = waitingCopy('GHSA-aaaa-bbbb-0235', HOUR);
+  const listed = waitingCopy('GHSA-aaaa-bbbb-0236', HOUR);
+  store.saveEvidence([given, listed], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0235']),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW }),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0235', 'alpha', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0236', 'alpha', NOW + 10 * MINUTE, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0235']);
+});
+
+test('rows without an identifier hold the listing from the earliest of them', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW - 4 * HOUR), 'github:malware': iso(NOW) });
+  const bare = (id, at) => {
+    const row = advisory(id, 'zeta', at);
+    delete row.ghsa_id;
+    return row;
+  };
+  const { http } = github(() => [
+    bare('GHSA-aaaa-bbbb-0237', NOW - 3 * HOUR),
+    bare('GHSA-aaaa-bbbb-0238', NOW - 2 * HOUR),
+    advisory('GHSA-aaaa-bbbb-0239', 'zeta', NOW - HOUR),
+  ]);
+  const result = await poll(store, http, NOW);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW - 2 * HOUR));
+});
+
+test('a row is identified by its API link alone, but not by a link that only begins with an identifier', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const { http } = github(() => {
+    const byApi = advisory('GHSA-aaaa-bbbb-0240', 'zeta', NOW + 10 * MINUTE);
+    delete byApi.ghsa_id;
+    byApi.url = 'https://api.github.com/advisories/GHSA-aaaa-bbbb-0240';
+    const longer = advisory('GHSA-aaaa-bbbb-0241', 'zeta', NOW + 10 * MINUTE);
+    delete longer.ghsa_id;
+    longer.html_url = 'https://github.com/advisories/GHSA-aaaa-bbbb-0241x';
+    return [byApi, longer];
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.ok(result.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0240'));
+  assert.ok(!result.evidence.some((item) => item.id.startsWith('github:GHSA-aaaa-bbbb-0241')));
+  assert.match(result.errors[0].message, /1 record\(s\) could not be read and give no identifier/);
+});
+
+test('a row without an identifier naming a package in capitals still holds back its stored records', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0242', HOUR);
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const { http } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0243', 'Alpha', NOW + 10 * MINUTE);
+    delete row.ghsa_id;
+    return [row];
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.ok(!result.evidence.some((item) => item.id === copy.id));
+});
+
+test('a saved time ahead of the clock for a package waiting is read as now', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0244', HOUR);
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW + DAY }),
+  });
+  const { http, log } = github(() => [advisory('GHSA-aaaa-bbbb-0244', 'alpha', NOW - DAY)]);
+  const first = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0244']);
+  assert.deepEqual(JSON.parse(first.checkpoints['github:reviewed:unconfirmed']), {});
+  log.byId.length = 0;
+  await poll(store, http, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId, []);
+});
+
+test('a scan that reaches the page limit is not held by a row without an identifier', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW - 20 * HOUR), 'github:malware': iso(NOW) });
+  const bare = advisory('GHSA-aaaa-bbbb-0245', 'zeta', NOW - 21 * HOUR + 1000);
+  delete bare.ghsa_id;
+  const rows = [
+    bare,
+    ...Array.from({ length: 60_500 }, (_, index) =>
+      advisory(
+        `GHSA-pppp-${String(index % 10_000).padStart(4, '0')}-${String(Math.floor(index / 10_000)).padStart(4, '0')}`,
+        'zeta',
+        NOW - 21 * HOUR + 2000 + index * 1000,
+      ),
+    ),
+  ];
+  const pages = () => async (raw) => {
+    const url = new URL(raw);
+    if (url.searchParams.get('type') === 'malware') return json([]);
+    const page = Number(url.searchParams.get('page') ?? '1');
+    url.searchParams.set('page', String(page + 1));
+    return json(
+      rows.slice((page - 1) * 100, page * 100),
+      page * 100 < rows.length ? { link: `<${url.href}>; rel="next"` } : {},
+    );
+  };
+  // With a token, so that the bound on re-listing without one does not decide it.
+  process.env.FOURTEENTH_GITHUB_TOKEN = 'synthetic';
+  let result;
+  try {
+    result = await poll(store, pages, NOW);
+  } finally {
+    delete process.env.FOURTEENTH_GITHUB_TOKEN;
+  }
+  assert.match(result.errors[0].message, /more updated advisories than one run reads/);
+  assert.ok(Date.parse(result.checkpoints['github:reviewed']) > Date.parse(bare.updated_at) + 2 * HOUR);
+});

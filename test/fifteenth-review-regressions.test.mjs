@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catchingUpFrom, checkHealth } from '../dist/health.js';
 import { validateDestination } from '../dist/http.js';
-import { excerptsFor, validateAnalysis } from '../dist/models.js';
+import { citable, excerptsFor, validateAnalysis } from '../dist/models.js';
 import { parseConfig } from '../dist/config.js';
 import { Store } from '../dist/store.js';
 
@@ -1004,4 +1004,23 @@ test('a clean stop recorded after this start (a clock set back) moves nothing', 
     JSON.stringify({ status: 'stopped', catching_up_since: since, heartbeat_at: iso(NOW + 20 * 60_000) }),
   );
   assert.equal(catchingUpFrom(store, iso(NOW)), since);
+});
+
+test('an excerpt is offered for citation when it holds 20 characters, emoji counted once', () => {
+  assert.equal(citable('Acme 🚨🚨🚨🚨🚨🚨🚨🚨\n'), false); // 22 UTF-16 units, 14 characters
+  assert.equal(citable('x'.repeat(19)), false);
+  assert.equal(citable('x'.repeat(20)), true);
+  assert.equal(citable('🚨'.repeat(20)), true);
+});
+
+test('excerpts are not cut before Hangul vowels or finals of the extended block', () => {
+  for (let pad = 0; pad < 8; pad++) {
+    const description = 'y'.repeat(pad) + 'ᄀힰ'.repeat(400);
+    const text = `News\n${description}`;
+    let at = 0;
+    for (const excerpt of excerptsFor({ title: 'News', description }, 0).slice(0, -1)) {
+      at += excerpt.text.length;
+      assert.doesNotMatch(text[at], /[ힰ-퟿]/u, `pad ${pad}`);
+    }
+  }
 });

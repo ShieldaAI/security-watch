@@ -381,13 +381,29 @@ function technologyInLowerCase(line: string): string {
 const SECOND_WORD_AFTER =
   '(?:The|A|An|This|That|These|Those|Its|New|Critical|Severe|Serious|Major|High|Latest|Recent|Another|' +
   'Popular|Malicious|Vulnerable|Unpatched|Patched|Outdated|Older|Several|Multiple|Many|Two|Three)';
-/** The words after which a library named second in a sentence is taken for the library. */
+/** A word saying what kind of software something is ("test" runner, "web" server). */
+const SOFTWARE_KIND =
+  '(?:web|test|testing|http|template|templating|build|javascript|js|typescript|python|ruby|rust|' +
+  'node(?:\\.js)?|css|orm|logging|validation|parsing|parser|image|ui|frontend|backend|server-side|' +
+  'open-source|npm|pypi)';
+/** Words that name software or its people. */
+const SOFTWARE_NOUN =
+  '(?:team|maintainers?|project|developers?|ecosystem|codebase|repository|' +
+  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|' +
+  'dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|cli|api|sdk|versions?|releases?|' +
+  'patch(?:es)?|fix(?:es)?)';
+/** Words that name a flaw, which may follow a few words of its kind ("remote code execution flaw"). */
+const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
+/**
+ * What may follow a library named second in a sentence for it to be taken for the library: a word
+ * about software, possibly after one saying what kind ("The Mocha test runner"), a server or an app
+ * only after such a word ("The Puma web server"), or a flaw after up to three words ("Critical Struts
+ * remote code execution flaw"). Words that also follow a brand or a malware name ("users",
+ * "security", "code", "servers", "breach") are left out.
+ */
 const SOFTWARE_WORD =
-  '(?:team|maintainers?|project|developers?|communit(?:y|ies)|ecosystem|core|codebase|repository|' +
-  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|components?|' +
-  'dependenc(?:y|ies)|gems?|crates?|servers?|clients?|apps?|applications?|runtime|runner|installer|' +
-  'cli|api|sdk|versions?|releases?|updates?|patch(?:es)?|fix(?:es)?|flaws?|bugs?|vulnerabilit(?:y|ies)|' +
-  'issues?|exploits?|security|advisor(?:y|ies)|users|devs|code|source)';
+  `(?:${SOFTWARE_KIND} (?:servers?|apps?|clients?)|(?:${SOFTWARE_KIND} )?${SOFTWARE_NOUN}|` +
+  `(?:[\\p{Ll}-]+ ){0,3}${FLAW_NOUN})`;
 function writtenAsName(names: string[]): (text: string) => boolean {
   const single = names.map((name) => name.trim()).filter((name) => /^\p{L}{3,}$/u.test(name));
   const form = capitalised;

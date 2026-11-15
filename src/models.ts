@@ -55,6 +55,11 @@ function sourcePrefix(text: string, length: number): string {
 
 // IDs select source text; the model never has to reproduce punctuation or table spacing.
 // Exported for tests only; not part of the package API.
+/** Whether an excerpt may be offered for citation: the quote contract counts 20 characters (code points). */
+export function citable(text: string): boolean {
+  return [...text].length >= 20;
+}
+// Exported for tests only; not part of the package API.
 export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, index: number): Excerpt[] {
   const text = `${evidence.title}\n${evidence.description}`;
   const excerpts: Excerpt[] = [];
@@ -80,7 +85,7 @@ export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, i
       const floor = forward(start, 20);
       if (forward(end, 20) === text.length && [...text.slice(end)].length < 20) {
         let tail = text.length;
-        for (let n = 0; n < 20 && tail > floor; n++) tail -= low(tail - 1) && tail - 2 >= floor ? 2 : 1;
+        for (let n = 0; n < 20 && tail > floor; n++) tail -= low(tail - 1) ? 2 : 1;
         end = Math.max(floor, tail);
       }
       // Whole characters: not before a combining mark (also one outside the basic plane) or a Hangul
@@ -90,7 +95,6 @@ export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, i
         /^[\uDC00-\uDFFF]$/.test(text[at] ?? '') ||
         /^[\p{M}\u1160-\u11ff\ud7b0-\ud7ff]$/u.test(String.fromCodePoint(text.codePointAt(at) ?? 32));
       while (end > floor && inside(end)) end--;
-      if (end > floor && low(end)) end--;
     }
     excerpts.push({ id: `e${index}s${excerpts.length}`, text: text.slice(start, end) });
     start = end;
@@ -806,7 +810,7 @@ export class ModelAnalyzer {
     const excerpts = new Map(
       context.evidence.flatMap((e) =>
         e.excerpts
-          .filter((excerpt) => [...excerpt.text].length >= 20)
+          .filter((excerpt) => citable(excerpt.text))
           .map((excerpt) => [excerpt.id, { evidence_id: e.id, quote: excerpt.text }] as const),
       ),
     );
