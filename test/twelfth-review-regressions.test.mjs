@@ -3,6 +3,11 @@
 // thousands of records; the confirmation and OSV boundaries; and model claims inside longer names.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
+import { notificationText } from '../dist/delivery.js';
+import { safeHttp } from '../dist/http.js';
 import { assess, decide } from '../dist/assessment.js';
 import { parseConfig, runScan } from '../dist/index.js';
 import { validateAnalysis } from '../dist/models.js';
@@ -398,7 +403,7 @@ const claim = (quote, product) => {
     );
     return true;
   } catch (error) {
-    assert.match(String(error.message ?? error), /MODEL_UNSUPPORTED_NEWS_CLAIM/);
+    if (!/MODEL_UNSUPPORTED_NEWS_CLAIM/.test(String(error.message ?? error))) throw error;
     return false;
   }
 };
@@ -413,4 +418,110 @@ test('a claim is refused inside a scoped name, after a plus, inside a word with 
     assert.equal(claim(quote, product), false, `${product} in ${quote}`);
   assert.equal(claim('नमस्ते 8.6 सर्वर प्रभावित है।', 'नमस्ते'), true);
   assert.equal(claim('C++Builder 8.6 is affected.', 'C++Builder'), true);
+});
+
+test('claims and versions read Unicode hyphens, full-width marks and text without spaces the same way', () => {
+  for (const [quote, product] of [
+    ['Confluence‑Cloud 8.6 is affected.', 'Confluence'],
+    ['express‐forms 8.6 is affected.', 'express'],
+    ['Notepad＋＋ 8.6 is affected.', 'Notepad'],
+    ['The @angular∕core 8.6 compiler is affected.', 'core'],
+  ])
+    assert.equal(claim(quote, product), false, `${product} in ${quote}`);
+  for (const [quote, product] of [
+    // A name followed by its own version, and names in a list.
+    ['Apache/8.6 servers are affected.', 'Apache'],
+    ['lodash@8.6 is affected.', 'lodash'],
+    ['node-8.6 builds are affected.', 'node'],
+    ['Chrome/Chromium 8.6 is affected.', 'Chromium'],
+    ['Windows/Linux 8.6 builds are affected.', 'Windows'],
+    // Versions next to text written without spaces.
+    ['Example Databaseのバージョン8.6以前に脆弱性があります。', 'Example Database'],
+    ['Example Database 版本8.6之前', 'Example Database'],
+  ])
+    assert.equal(claim(quote, product), true, `${product} in ${quote}`);
+});
+
+test('a one-character product cannot carry a decisive impact', () => {
+  assert.equal(
+    (() => {
+      try {
+        claim('Version 8.6 of X is affected by the flaw.', 'X');
+        return 'accepted';
+      } catch (error) {
+        return String(error.message ?? error);
+      }
+    })(),
+    'MODEL_UNSUPPORTED_NEWS_IMPACT',
+  );
+});
+
+test('a request that times out before it connects failed to connect, and one that times out after did not', async (t) => {
+  const fake = (connects) =>
+    function () {
+      const request = new EventEmitter();
+      request.write = () => true;
+      request.end = () => {
+        const socket = new EventEmitter();
+        socket.connecting = true;
+        request.emit('socket', socket);
+        if (connects) socket.emit('connect');
+      };
+      request.destroy = (error) => request.emit('error', error);
+      return request;
+    };
+  const original = http.request;
+  t.after(() => {
+    http.request = original;
+    syncBuiltinESMExports();
+  });
+  for (const [connects, code] of [
+    [false, 'CONNECTION_FAILED'],
+    [true, 'REQUEST_TIMEOUT'],
+  ]) {
+    http.request = fake(connects);
+    syncBuiltinESMExports();
+    await assert.rejects(safeHttp('http://127.0.0.1:9/', { allowPrivate: true, timeoutMs: 50 }), (error) => {
+      assert.equal(error.code, code, `connected: ${connects}`);
+      return true;
+    });
+  }
+});
+
+test('when the notes give way, the reasons that fit are still shown', () => {
+  const text = notificationText({
+    id: 'D'.repeat(200),
+    payload: JSON.stringify({
+      reason: 'R'.repeat(180),
+      assessment: {
+        id: 'F'.repeat(200),
+        event_id: 'CVE-2026-93001',
+        system_id: 'S'.repeat(200),
+        component_id: 'C'.repeat(200),
+        category: 'library',
+        title: 'T'.repeat(400),
+        priority: 'critical',
+        applicability: 'affected',
+        source_severity: 'critical',
+        summary: 'Y'.repeat(600),
+        reasons: ['a short reason'],
+        evidence_ids: [],
+        urls: [],
+        exploited: true,
+        updated_at: iso(NOW),
+        fix: '1.2.3',
+        location: {
+          system: 'W'.repeat(120),
+          owner: 'O'.repeat(80),
+          system_note: 'N'.repeat(300),
+          component: 'I'.repeat(160),
+          component_note: 'M'.repeat(300),
+        },
+      },
+    }),
+  }).text;
+  assert.ok(text.length <= 2900, `${text.length}`);
+  assert.doesNotMatch(text, /N{300}/, 'the notes gave way');
+  assert.match(text, /^• a short reason$/m);
+  assert.match(text, /^Summary: Y{600}$/m);
 });

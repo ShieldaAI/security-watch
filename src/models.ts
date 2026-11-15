@@ -284,43 +284,65 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
  * ("expressive-forms", "Node.js", "@angular/core", "Notepad++") makes one longer name.
  */
 function quotesPhrase(original: string, value: string): boolean {
-  const normal = (text: string) =>
-    text
-      .normalize('NFC')
-      .toLowerCase()
-      .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
-      .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
-  const wanted = normal(value).trim();
+  const wanted = quoteText(value).toLowerCase().trim();
   if (!wanted) return false;
-  const quote = normal(original);
-  // A letter, digit or combining mark of a script written with spaces between words. Scripts written
-  // without them (Chinese, Japanese, Thai and others) give no word boundary to check: "Strutsの" names
-  // Struts.
-  const spaced = (character: string) =>
-    /[\p{L}\p{N}\p{M}_]/u.test(character) &&
-    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u.test(
-      character,
-    );
-  // Marks that join the parts of one name: "expressive-forms", "Node.js", "@angular/core", "express#2".
-  const joiner = /[-./@#]/u;
+  const quote = quoteText(original).toLowerCase();
   const first = wanted[0]!;
   const last = wanted.at(-1)!;
+  const digit = (character: string) => /\p{N}/u.test(character);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
     const [b1 = '', b2 = ''] = [quote[at - 1], quote[at - 2]];
     const [a1 = '', a2 = ''] = [quote[at + wanted.length], quote[at + wanted.length + 1]];
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
     // (".NET" in "ASP.NET").
-    const joinedBefore = spaced(first)
-      ? spaced(b1) || (joiner.test(b1) && (spaced(b2) || b1 === '@')) || b1 === '+'
-      : spaced(b1);
-    // "Notepad" in "Notepad++", "C" in "C#".
-    const joinedAfter = spaced(last)
-      ? spaced(a1) || (joiner.test(a1) && spaced(a2)) || a1 === '+' || a1 === '#'
-      : spaced(a1);
+    const joinedBefore = spacedWord(first)
+      ? spacedWord(b1) ||
+        b1 === '+' ||
+        b1 === '@' ||
+        (/[-.#]/u.test(b1) && spacedWord(b2)) ||
+        // "core" in "@angular/core"; "Chromium" in "Chrome/Chromium" is a name of its own.
+        (b1 === '/' && /@[\p{L}\p{N}._-]+$/u.test(quote.slice(0, at - 1)))
+      : spacedWord(b1);
+    // "Notepad" in "Notepad++", "C" in "C#", "express" in "express-forms". A version after a hyphen,
+    // slash or "@" is the name's own version: "node-18", "Apache/2.4.58", "lodash@4.17.20".
+    const joinedAfter = spacedWord(last)
+      ? spacedWord(a1) ||
+        a1 === '+' ||
+        a1 === '#' ||
+        (a1 === '.' && spacedWord(a2)) ||
+        (/[-@]/u.test(a1) && spacedWord(a2) && !digit(a2)) ||
+        (a1 === '/' && first === '@' && spacedWord(a2))
+      : spacedWord(a1);
     if (joinedBefore || joinedAfter) continue;
     return true;
   }
   return false;
+}
+/**
+ * A quote and a claim read the same way: compatibility forms ("＋", "２") as their plain forms,
+ * every kind of hyphen and minus sign as a hyphen, the look-alike slashes as a slash, characters that
+ * show as nothing removed, and every kind and run of space as one space.
+ */
+function quoteText(text: string): string {
+  return text
+    .normalize('NFKC')
+    .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
+    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
+    .replace(/[\u2215\u2044]/g, '/')
+    .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
+}
+/**
+ * A letter, digit or combining mark of a script written with spaces between words. Chinese,
+ * Japanese, Korean, Thai, Lao, Khmer and Myanmar text joins words (and particles) without spaces, so
+ * a character from those scripts next to a name or a version is a boundary: "Strutsの", "2.4.1以前".
+ */
+function spacedWord(character: string): boolean {
+  return (
+    /[\p{L}\p{N}\p{M}_]/u.test(character) &&
+    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u.test(
+      character,
+    )
+  );
 }
 
 /**
@@ -341,11 +363,7 @@ function citesVersion(original: string, version: string): boolean {
   // The quote and the version the model copied from it are read the same way: hyphens, en dashes
   // and minus signs are hyphens ("CVE‑2026‑40001", "2.0–2.4"), every kind and run of space is one
   // space ("45 %"), and characters that show as nothing are dropped ("2.4.1<zero-width>.1").
-  const normal = (text: string) =>
-    text
-      .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
-      .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
-      .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
+  const normal = quoteText;
   const wanted = normal(version).trim();
   if (!wanted) return false;
   const quote = normal(original);
@@ -360,8 +378,9 @@ function citesVersion(original: string, version: string): boolean {
     const abbreviation = /(?:^|[^\p{L}\p{N}])(?:v|ver)\.?$/iu.exec(before);
     if (abbreviation && /^\d/u.test(wanted))
       before = before.slice(0, before.length - abbreviation[0].replace(/^[^vV]/u, '').length);
-    if (/[\p{L}\p{N}]$/u.test(before) || /\d\.$/u.test(before)) continue;
-    if (/^[\p{L}\p{N}]/u.test(after) || /^\.[\dx*]/iu.test(after)) continue;
+    // A letter or digit joined to it makes another token; text without spaces between words does not.
+    if (spacedWord(before.at(-1) ?? '') || /\d\.$/u.test(before)) continue;
+    if (spacedWord(after[0] ?? '') || /^\.[\dx*]/iu.test(after)) continue;
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
       /[\p{Sc}#_~∶±×№⁄∕·]$/u.test(before) ||
