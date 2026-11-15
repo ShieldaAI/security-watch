@@ -163,7 +163,7 @@ Behaviour that changes for an existing installation:
 - Hosted CI passed on 4e4e063 (pull request #13: Ubuntu with Node 24 and 26, macOS with Node 26, the packed consumer on Node 24.10.0, dependency review and CodeQL). Windows is untested.
 - Only OpenAI and Anthropic were ever checked against live APIs, on 2026-10-24; the other provider profiles are covered by simulated responses.
 - The cve.now listing order (publication date, newest first) and its `limit` parameter were checked against the live service on 2026-11-14 with a handful of requests. How often the service ingests a record more than a week after its publication date is not known.
-- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 5991ab5 (tag `next`, 110 files, 576 kB packed, nothing uploaded); the commit that records it changes only this changelog. A real publish has not been run.
+- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 3128e66 (tag `latest`, 110 files, 576 kB packed, nothing uploaded); the commit that records it changes only this changelog. A real publish has not been run.
 
 ## 0.1.0-alpha.0
 
