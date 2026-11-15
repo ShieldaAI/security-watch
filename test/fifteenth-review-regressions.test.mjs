@@ -881,3 +881,29 @@ test('a worker that dies before its second heartbeat, again and again, still use
   }
   assert.ok(failedAt !== undefined && failedAt <= 3_600_000 + 60_000, String(failedAt));
 });
+
+test('excerpts never start inside a character: astral letters with marks, Hangul written apart', () => {
+  const cases = [
+    (pad) => 'x'.repeat(pad) + '\u{1d400}́'.repeat(400),
+    (pad) => ('Apache Struts 2.5.32 영향 ' + '한국어보안'.repeat(60)).normalize('NFD') + 'y'.repeat(pad),
+    (pad) => 'y'.repeat(pad) + '각'.normalize('NFD').repeat(500),
+  ];
+  for (const make of cases)
+    for (let pad = 0; pad < 12; pad++) {
+      const description = make(pad);
+      const text = `News\n${description}`;
+      let at = 0;
+      for (const excerpt of excerptsFor({ title: 'News', description }, 0).slice(0, -1)) {
+        at += excerpt.text.length;
+        assert.doesNotMatch(text[at], /[\p{M}ᅠ-ᇿ\udc00-\udfff]/u, `pad ${pad} at ${at}`);
+      }
+    }
+});
+
+test('a version with capitals in its suffix is cited as written', () => {
+  const text = 'The vendor says Example Server 2.4.1-RC1 lets remote users run code without signing in.';
+  assert.equal(accepts(text, [text], { products: ['Example Server'], versions: ['2.4.1-RC1'] }), true);
+  // Read like the quote, also after letters that compose only once lower-cased.
+  const long = `${'T\u0308'.repeat(200)} Intro. ${text}`;
+  assert.equal(accepts(long, [text], { versions: ['2.4.1-RC1'] }), true);
+});

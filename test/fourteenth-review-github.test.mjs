@@ -1056,3 +1056,19 @@ test('a listing whose rows all lack an identifier is an outage: no failed read i
     [['GHSA-aaaa-bbbb-0210', 1]],
   );
 });
+
+test('a first-met time for rows without an identifier that lies ahead of the clock counts from now', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unidentified': String(NOW + 2 * DAY),
+  });
+  const { http } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0220', 'zeta', NOW + 10 * MINUTE);
+    delete row.ghsa_id;
+    return [row];
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.equal(result.checkpoints['github:reviewed:unidentified'], String(NOW + 30 * MINUTE));
+});

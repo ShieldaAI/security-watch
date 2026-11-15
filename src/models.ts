@@ -71,9 +71,9 @@ export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, i
       }
       // Do not leave a final fragment too short to satisfy the stored quote contract.
       if (text.length - end < 20) end = Math.max(start + 20, text.length - 20);
-      // Whole characters: not between the halves of a surrogate pair, nor before a combining mark.
-      if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
-      while (end > start + 20 && /^\p{M}$/u.test(text[end] ?? '')) end--;
+      // Whole characters: not before a combining mark or a Hangul vowel or final consonant written
+      // apart (decomposed text), nor between the halves of a surrogate pair.
+      while (end > start + 20 && /^[\p{M}\u1160-\u11ff\ud7b0-\ud7ff]$/u.test(text[end] ?? '')) end--;
       if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
     }
     excerpts.push({ id: `e${index}s${excerpts.length}`, text: text.slice(start, end) });
