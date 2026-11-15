@@ -923,9 +923,11 @@ async function github(
         blocked.set(name, {
           at: entry && seen ? entry.at : now,
           updated: Math.max(entry?.updated ?? -Infinity, version),
-          versions: Number.isFinite(version)
-            ? trimVersions(name, [...(entry?.versions ?? []), version])
-            : (entry?.versions ?? []),
+          // Trimmed only when saved, once every row of the run is known.
+          versions:
+            Number.isFinite(version) && !seen
+              ? [...(entry?.versions ?? []), version]
+              : (entry?.versions ?? []),
         });
       }
     }
@@ -1008,7 +1010,7 @@ async function github(
           .slice(0, MAX_UNREADABLE)
           .map(([name, { at, updated, versions }]) => [
             name,
-            Number.isFinite(updated) ? [at, ...versions] : at,
+            Number.isFinite(updated) ? [at, ...trimVersions(name, versions)] : at,
           ]),
       ),
     );

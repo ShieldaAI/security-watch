@@ -402,12 +402,19 @@ const SOFTWARE_NOUN =
 const SHARED_NOUN =
   '(?:devs|community|components?|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
-/** Not a software version: one that follows "CVSS" ("CVSS v3.1", "CVSS: v3.1", "CVSS version 3.1"). */
-const NOT_CVSS = '(?<!cvss[:\\s]*(?:version\\s*)?)';
+/** A word joined to a cue word that makes it something else ("npm-themed lure", "package-style"). */
+const NOT_LIBRARY_SUFFIX = '-(?:themed|style|like|branded|lures?|related|shaped)';
+/**
+ * Not a software version: one that follows "CVSS" ("CVSS v3.1", "CVSS: v3.1", "CVSS (v3.1)",
+ * "CVSS version 3.1", "CVSS-version 3.1", the second of "CVSS v3.1/v4.0"), or one that "CVSS" follows
+ * closely ("9.8 (v3.1) on the CVSS scale").
+ */
+const NOT_CVSS = '(?<!cvss[:\\s(-]*(?:version[\\s-]*)?(?:v?\\d+(?:\\.\\d+)*\\s*/\\s*)?)';
+const NOT_BEFORE_CVSS = '(?![^.]{0,24}cvss)';
 /** A version written as one, not followed by another digit group. */
 const WRITTEN_VERSION =
-  `(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}v\\d+(?:\\.\\d+)+(?!\\.?\\d)` +
-  `|(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}version \\d+(?:\\.\\d+)+(?!\\.?\\d)` +
+  `(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}v\\d+(?:\\.\\d+)+(?!\\.?\\d)${NOT_BEFORE_CVSS}` +
+  `|(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}version \\d+(?:\\.\\d+)+(?!\\.?\\d)${NOT_BEFORE_CVSS}` +
   '|@\\d+(?:\\.\\d+)+(?!\\.?\\d)' +
   // Three or more parts, but not an IP address and not a date with a four-digit year.
   '|(?:^|[^\\p{L}\\p{N}.])(?!\\d{1,2}\\.\\d{1,2}\\.(?:19|20)\\d\\d(?!\\.?\\d))(?!(?:19|20)\\d\\d\\.\\d{1,2}\\.\\d{1,2}(?!\\.?\\d))\\d+\\.\\d+\\.\\d+(?!\\.?\\d)';
@@ -420,7 +427,9 @@ const WRITTEN_VERSION =
  */
 const LIBRARY_CUE = new RegExp(
   '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|gems?|crates?|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install|' +
-    'packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\\p{L}-])|' +
+    'packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\\p{L}]|' +
+    NOT_LIBRARY_SUFFIX +
+    ')|' +
     WRITTEN_VERSION,
   'iu',
 );
@@ -429,15 +438,19 @@ const LIBRARY_CUE = new RegExp(
  * version there, which app, firmware and device news write the same way ("Firmware 4.21.3 fixes
  * it."), and not "package", which a courier story uses too.
  */
-const STRONG_LIBRARY_CUE =
-  /(?:^|[^\p{L}])(?:npm|pypi|rubygems|crates\.io|maven|nuget|(?:pip|gem|cargo|npm) install)(?![\p{L}-])/iu;
+const STRONG_LIBRARY_CUE = new RegExp(
+  '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install)(?![\\p{L}]|' +
+    NOT_LIBRARY_SUFFIX +
+    ')',
+  'iu',
+);
 /**
  * Where a sentence ends: after ".", "!" or "?" and before a capital letter or a digit, but not after
  * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.", "etc.") or a single lower-case letter. After
  * initials ("the U.S. Package scams") it does end.
  */
 const SENTENCE_END =
-  /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|etc|approx|cf|al|ca|no|nr|ver|v|\p{Ll})\.)\s+(?=[\p{Lu}\p{N}])/u;
+  /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|approx|cf|al|ca|no|nr|ver|v|\p{Ll})\.)\s+(?=[\p{Lu}\p{N}])/u;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */

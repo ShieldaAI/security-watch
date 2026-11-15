@@ -455,7 +455,6 @@ test('library cue: versions as written, CVSS forms and dates, sentence ends, str
     'i.e.',
     'incl.',
     'vs.',
-    'etc.',
     'approx.',
     'cf.',
     'al.',
@@ -476,4 +475,32 @@ test('library cue: versions as written, CVSS forms and dates, sentence ends, str
   yes('The Nest component leaks state in the library.');
   yes('The Nest issue lets pages run code in the npm package.');
   yes('The Nest community fixed it in its libraries.');
+});
+
+test('library cue edges: CVSS forms, separators, named hyphen suffixes, "etc." and digits starting a sentence', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), true, text);
+  const no = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), false, text);
+  const n = 'The Nest security team fixed it';
+  for (const v of [
+    'rated CVSS (v3.1) 8.1',
+    'rated CVSS v3.1/v4.0 8.1',
+    'under CVSS-version 3.1',
+    'for TLSv1.2',
+    'in subversion 1.2',
+  ])
+    no(`${n} ${v}.`);
+  no(`${n}, rated 9.8 (v3.1) on the CVSS scale.`);
+  yes(`${n} in the plugin-based loader.`);
+  yes(`${n} in the npm-published release.`);
+  no(`${n} in the npm-themed lure.`);
+  no(`${n}. Run npm-themed lures.`);
+  yes(`${n}. Run npm-based installs.`.replace('npm-based installs', 'npm install nest'));
+  // "etc." before a capital ends a sentence; a lower-case single letter does not.
+  no('The Puma security team warned of smishing, vishing, etc. Package notices were common.', 'puma');
+  yes(`${n}, a. Version 4.2 of it.`);
+  // A sentence may start with a digit.
+  no(`${n}. 4.2.1 was released.`);
+  // After initials a sentence ends: an ambiguous case, kept that way ("led by J. Doe").
+  no('The Express security team, led by J. Doe, released 5.0.1.', 'express');
 });

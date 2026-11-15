@@ -1894,3 +1894,32 @@ test('the saved hold keeps every update time listed in the run, beyond 50', asyn
   );
   assert.equal(JSON.parse(again.checkpoints['github:reviewed:unconfirmed']).alpha[0], NOW + 30 * MINUTE);
 });
+
+test('saved row times: all listed again keep the hold; trimmed to 50 when saved, keeping those listed; no repeats', async () => {
+  const bare = (index, at) => {
+    const row = advisory(`GHSA-wwww-${String(index).padStart(4, '0')}-wwww`, 'alpha', at);
+    delete row.ghsa_id;
+    return row;
+  };
+  const times = Array.from({ length: 55 }, (_, index) => NOW + (index + 1) * 1000);
+  const store = new Store(':memory:');
+  store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0390', 2 * HOUR)], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+  });
+  // Ten times listed twice: no repeats are saved.
+  const all = github(() => [...times, ...times.slice(0, 10)].map((at, index) => bare(index, at)));
+  const first = await poll(store, all.http, NOW + 30 * MINUTE);
+  const [at1, ...saved1] = JSON.parse(first.checkpoints['github:reviewed:unconfirmed']).alpha;
+  assert.deepEqual(saved1, times);
+  // All listed again: nothing new, the hold keeps its time.
+  const second = await poll(store, all.http, NOW + 45 * MINUTE);
+  assert.equal(JSON.parse(second.checkpoints['github:reviewed:unconfirmed']).alpha[0], at1);
+  // Only three listed: trimmed to 50, keeping those three.
+  const few = github(() => times.slice(0, 3).map((at, index) => bare(index, at)));
+  const third = await poll(store, few.http, NOW + 60 * MINUTE);
+  const [, ...saved3] = JSON.parse(third.checkpoints['github:reviewed:unconfirmed']).alpha;
+  assert.equal(saved3.length, 50);
+  for (const t of times.slice(0, 3)) assert.ok(saved3.includes(t));
+  assert.equal(new Set(saved3).size, 50);
+});
