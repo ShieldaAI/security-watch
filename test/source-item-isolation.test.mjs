@@ -141,9 +141,9 @@ test('GitHub keeps valid later items and another advisory category, and reports 
   const cfg = config({ github: true });
   const first = await collectSources(inventory, cfg, { 'github:reviewed': OLD }, http, NOW);
   assert.equal(first.evidence.length, 1);
-  // A row that cannot be read and gives no identifier is reported; holding the checkpoint for it
-  // would stop GitHub for good, so it moves on.
-  assert.equal(first.checkpoints['github:reviewed'], DATE);
+  // A row that cannot be read and gives no identifier is reported and holds the checkpoint, so it
+  // is listed again and read once GitHub serves it with an identifier (for at most a day).
+  assert.equal(first.checkpoints['github:reviewed'], OLD);
   assert.match(first.errors[0].message, /give no identifier/);
   assert.equal(first.checkpoints['github:malware'], DATE);
   assert.doesNotMatch(JSON.stringify(first.errors), /not-for-diagnostics/);
@@ -175,8 +175,8 @@ test('future records cannot poison valid partial records and are asked for again
     result.evidence.map((item) => item.id),
     ['github:GHSA-aaaa-aaaa-aaaa'],
   );
-  // The future-dated record is remembered by identifier, so the checkpoint can move on.
-  assert.equal(result.checkpoints['github:reviewed'], DATE);
+  // The future-dated record is remembered by identifier; the row without one holds the checkpoint.
+  assert.equal(result.checkpoints['github:reviewed'], OLD);
   assert.deepEqual(
     JSON.parse(result.checkpoints['github:reviewed:unreadable']).map(([id]) => id),
     // Kept as GitHub wrote it, so that the request by identifier uses GitHub's own spelling.

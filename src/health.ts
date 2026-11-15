@@ -3,6 +3,8 @@ import { Store } from './store.js';
 
 /** How long a running worker may take over its first scan before health reports none. */
 const FIRST_SCAN_GRACE = 3_600_000;
+/** How long a worker that died may have run after its last heartbeat (written every 15 seconds). */
+const CRASH_MARGIN = 60_000;
 
 export interface HealthReport {
   ok: boolean;
@@ -36,6 +38,7 @@ function time(value: unknown): number {
 export function catchingUpFrom(store: Store, startedAt: string): string {
   try {
     const previous = JSON.parse(store.getMeta('worker') ?? 'null') as {
+      status?: string;
       catching_up_since?: string;
       started_at?: string;
       heartbeat_at?: string;
@@ -48,9 +51,12 @@ export function catchingUpFrom(store: Store, startedAt: string): string {
     );
     const start = Date.parse(startedAt);
     if (!Number.isFinite(since) || since > start || scanned >= since) return startedAt;
-    // Only running time counts: the time the worker was stopped moves the start forward. A crash
-    // loop is down for seconds, so it cannot renew the grace; a stop of any length costs nothing.
-    const down = Number.isFinite(seen) && seen >= since && seen <= start ? start - seen : 0;
+    // Only running time counts: the time the worker was stopped moves the start forward. A clean stop
+    // records its last moment. A worker that died may have run up to a heartbeat interval past its
+    // last heartbeat, so that much more of the gap counts as running: a crash loop, down for seconds,
+    // cannot renew the grace however soon it dies.
+    const gap = Number.isFinite(seen) && seen >= since && seen <= start ? start - seen : 0;
+    const down = previous?.status === 'stopped' ? gap : Math.max(0, gap - CRASH_MARGIN);
     return new Date(since + down).toISOString();
   } catch {
     return startedAt;

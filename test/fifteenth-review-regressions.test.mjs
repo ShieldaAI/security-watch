@@ -723,7 +723,7 @@ test('only running time counts against the catch-up grace: the time stopped move
     const kept = Date.parse(catchingUpFrom(store, iso(NOW)));
     assert.equal(NOW - kept, Date.parse(iso(NOW - ago)) - Date.parse(since), String(ago));
   }
-  // A crash loop down for seconds keeps nearly all of what it used.
+  // A clean stop seconds ago moves it by those seconds.
   seenAgo(5_000);
   assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 3 * 3_600_000 + 5_000));
   seenAgo(61 * 60_000, 'started_at');
@@ -735,9 +735,27 @@ test('only running time counts against the catch-up grace: the time stopped move
   // The later of the two counts.
   store.setMeta(
     'worker',
-    JSON.stringify({ catching_up_since: since, started_at: since, heartbeat_at: iso(NOW - 5 * 60_000) }),
+    JSON.stringify({
+      status: 'stopped',
+      catching_up_since: since,
+      started_at: since,
+      heartbeat_at: iso(NOW - 5 * 60_000),
+    }),
   );
   assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 3 * 3_600_000 + 5 * 60_000));
+  // A worker that died (still "running") may have run a minute past its last heartbeat.
+  for (const status of ['running', 'stopping', undefined]) {
+    store.setMeta(
+      'worker',
+      JSON.stringify({ status, catching_up_since: since, heartbeat_at: iso(NOW - 5 * 60_000) }),
+    );
+    assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 3 * 3_600_000 + 4 * 60_000), String(status));
+    store.setMeta(
+      'worker',
+      JSON.stringify({ status, catching_up_since: since, heartbeat_at: iso(NOW - 30_000) }),
+    );
+    assert.equal(catchingUpFrom(store, iso(NOW)), since, String(status));
+  }
   // A last sign of life before the catch-up start or after this start moves nothing.
   store.setMeta(
     'worker',
@@ -837,4 +855,29 @@ test('excerpts are cut between whole characters, and a Greek word cut after a si
   const greek = 'Η ενημέρωση αφορά το Apache Struts 2.5.32 και το ΣΥΣΤΗΜΑ ελέγχου πρόσβασης σήμερα.';
   const cut = greek.slice(0, greek.indexOf('ΣΥΣ') + 3);
   assert.equal(accepts(greek, [cut], { products: ['Apache Struts'] }), true);
+});
+
+test('a worker that dies before its second heartbeat, again and again, still uses up its grace', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const config = parseConfig({ version: 1 });
+  store.setMeta('last_scan', 'null');
+  let at = NOW;
+  let failedAt;
+  // Each life lasts 12 seconds with one heartbeat at its start, and the restart takes a second.
+  for (let life = 0; life < 400 && failedAt === undefined; life++) {
+    const since = catchingUpFrom(store, iso(at));
+    store.setMeta(
+      'worker',
+      JSON.stringify({
+        status: 'running',
+        started_at: iso(at),
+        catching_up_since: since,
+        heartbeat_at: iso(at),
+      }),
+    );
+    if (!checkHealth(store, config, at + 10_000).ok) failedAt = at - NOW;
+    at += 13_000;
+  }
+  assert.ok(failedAt !== undefined && failedAt <= 3_600_000 + 60_000, String(failedAt));
 });

@@ -117,3 +117,18 @@ test('the matcher follows entries added to or removed from the same inventory ob
   inv.systems[0].components.pop();
   assert.equal(evidenceRelevant(record, inv), false);
 });
+
+test('a library named second in a sentence counts only after an article or a word of severity or novelty', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const text of [
+    'American Express customers were targeted by a phishing wave.',
+    'Federal Express drivers were told to update the app.',
+  ])
+    assert.equal(packageMentioned(text, component('express')), false, text);
+  for (const text of [
+    'New Express vulnerability lets attackers bypass routing.',
+    'Critical Express flaw lets attackers bypass routing.',
+    'The Express maintainers released a fix.',
+  ])
+    assert.equal(packageMentioned(text, component('express')), true, text);
+});

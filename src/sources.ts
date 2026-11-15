@@ -684,7 +684,19 @@ async function github(
    * (`pending`: [id, first met, failed attempts]) and those given up on (`skipped`); the next
    * values are set for the following run.
    */
-  unreadable: { pending?: string; skipped?: string; nextPending?: string; nextSkipped?: string } = {},
+  unreadable: {
+    pending?: string;
+    skipped?: string;
+    nextPending?: string;
+    nextSkipped?: string;
+    /** When rows without a usable identifier were first met, as milliseconds; '' when none were. */
+    unidentifiedSince?: string;
+    nextUnidentifiedSince?: string;
+    /** Stored records read before this time are not confirmed as current (rows without an identifier
+     * were met for longer than a day then), and its next value. */
+    unconfirmedBefore?: string;
+    nextUnconfirmedBefore?: string;
+  } = {},
 ): Promise<Evidence[]> {
   const { start, chainStart } = githubWindow(checkpoint, since, now);
   const url = new URL(GITHUB);
@@ -742,8 +754,16 @@ async function github(
   }
   /** Records met in this run that could not be read: the identifier as GitHub wrote it, and when it was updated. */
   const unreadableNow = new Map<string, { id: string; updated: number }>();
-  /** Records that could not be read and give no usable identifier. */
+  /** Records that could not be read and give no usable identifier, and the earliest update among them. */
   let unidentified = 0;
+  let unidentifiedFrom = Infinity;
+  // Such a record cannot be remembered by identifier: it holds the checkpoint at its update for a day
+  // from when such records were first met, so it is listed again and read once GitHub serves it with
+  // an identifier; after that the chain of confirmed stored records is broken instead.
+  const firstUnidentified = unreadable.unidentifiedSince ? Number(unreadable.unidentifiedSince) : NaN;
+  const unidentifiedSince =
+    Number.isFinite(firstUnidentified) && firstUnidentified <= now ? firstUnidentified : now;
+  const holdUnidentified = now - unidentifiedSince <= UNREADABLE_HOLD_HOURS * HOUR;
   /** Rows of the listing, readable or not, and the latest update time among them. */
   let rows = 0;
   let readableRows = 0;
@@ -756,10 +776,11 @@ async function github(
   const outage = () =>
     rows > 0 &&
     readableRows === 0 &&
-    [...unreadableNow.keys()].some((k) => {
-      const entry = pending.get(k);
-      return !entry || now - entry.firstMet <= UNREADABLE_HOLD_HOURS * HOUR;
-    });
+    ((unidentified > 0 && holdUnidentified) ||
+      [...unreadableNow.keys()].some((k) => {
+        const entry = pending.get(k);
+        return !entry || now - entry.firstMet <= UNREADABLE_HOLD_HOURS * HOUR;
+      }));
   const updatedAt = (item: unknown) => {
     const updated =
       typeof item === 'object' && item !== null
@@ -784,7 +805,11 @@ async function github(
         skipped.delete(key(id));
       }
     } else if (id) unreadableNow.set(key(id), { id, updated: updatedAt(item) });
-    else unidentified++;
+    else {
+      unidentified++;
+      const updated = updatedAt(item);
+      unidentifiedFrom = Math.min(unidentifiedFrom, Number.isFinite(updated) ? updated : start);
+    }
     return parsed;
   };
   /** Records given up on in this run. */
@@ -843,6 +868,13 @@ async function github(
       rewind = Math.min(rewind ?? Infinity, earliest(kept.map(([, entry]) => entry)));
     // Nothing in the listing could be read: the window is listed again on the next run.
     if (!readSomething) rewind = start;
+    if (unidentified) {
+      unreadable.nextUnidentifiedSince = String(unidentifiedSince);
+      if (holdUnidentified) rewind = Math.min(rewind ?? Infinity, unidentifiedFrom);
+      // After a day the checkpoint moves on; one of them may be a newer version of any stored record,
+      // so none read before now is confirmed again until GitHub serves it anew.
+      else unreadable.nextUnconfirmedBefore = timestamp(now);
+    } else unreadable.nextUnidentifiedSince = '';
     unreadable.nextPending = JSON.stringify(
       kept.map(([, { id, firstMet, attempts, updated }]) => [
         id,
@@ -872,7 +904,7 @@ async function github(
       );
     if (unidentified)
       parts.push(
-        `GitHub: ${unidentified} record(s) could not be read and give no identifier; no stored record was confirmed as current in this run.`,
+        `GitHub: ${unidentified} record(s) could not be read and give no identifier; no stored record was confirmed as current in this run${holdUnidentified ? ', and the listing is read again from the earliest of them' : ''}.`,
       );
     if (refused)
       parts.push('GitHub refused requests for single records (rate limit); they are asked for again later.');
@@ -996,6 +1028,7 @@ async function github(
           !evidence.has(item.id) &&
           !unconfirmed.has(key(item.id.slice(7))) &&
           Date.parse(item.fetched_at) >= chainStart &&
+          !(Date.parse(item.fetched_at) < Date.parse(unreadable.unconfirmedBefore ?? '')) &&
           Date.parse(item.fetched_at) <= now &&
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         )
@@ -1490,7 +1523,16 @@ export async function collectSources(
   const jobs: { source: string; run: () => Promise<Evidence[] | FeedResult> }[] = [];
   const githubUnreadable: Record<
     'reviewed' | 'malware',
-    { pending?: string; skipped?: string; nextPending?: string; nextSkipped?: string }
+    {
+      pending?: string;
+      skipped?: string;
+      nextPending?: string;
+      nextSkipped?: string;
+      unidentifiedSince?: string;
+      nextUnidentifiedSince?: string;
+      unconfirmedBefore?: string;
+      nextUnconfirmedBefore?: string;
+    }
   > = {
     reviewed: {},
     malware: {},
@@ -1513,6 +1555,8 @@ export async function collectSources(
     for (const type of ['reviewed', 'malware'] as const) {
       githubUnreadable[type].pending = checkpoints[`github:${type}:unreadable`];
       githubUnreadable[type].skipped = checkpoints[`github:${type}:skipped`];
+      githubUnreadable[type].unidentifiedSince = checkpoints[`github:${type}:unidentified`];
+      githubUnreadable[type].unconfirmedBefore = checkpoints[`github:${type}:unconfirmed_before`];
       jobs.push({
         source: `github:${type}`,
         run: () =>
@@ -1612,6 +1656,10 @@ export async function collectSources(
       const state = githubUnreadable[job.source === 'github:reviewed' ? 'reviewed' : 'malware'];
       if (state.nextPending !== undefined) result.checkpoints[`${job.source}:unreadable`] = state.nextPending;
       if (state.nextSkipped !== undefined) result.checkpoints[`${job.source}:skipped`] = state.nextSkipped;
+      if (state.nextUnidentifiedSince !== undefined)
+        result.checkpoints[`${job.source}:unidentified`] = state.nextUnidentifiedSince;
+      if (state.nextUnconfirmedBefore !== undefined)
+        result.checkpoints[`${job.source}:unconfirmed_before`] = state.nextUnconfirmedBefore;
     }
     if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
       result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');
