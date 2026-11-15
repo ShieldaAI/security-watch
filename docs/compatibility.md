@@ -2,7 +2,7 @@
 
 This page says what you can rely on between releases of `@shieldaai/security-watch` 1.x, and what may change. Versions follow [semantic versioning](https://semver.org/): a major version may break what is listed here, a minor version adds without breaking, a patch version only fixes.
 
-Release candidates (`1.0.0-rc.N`, published under the `next` tag) can still change anything on this page. The policy binds from `1.0.0`.
+The policy binds from `1.0.0`, the first stable release. Prereleases of later versions (published under the `next` tag) can still change anything on this page.
 
 ## What stays stable in 1.x
 
