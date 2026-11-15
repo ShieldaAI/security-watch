@@ -71,9 +71,13 @@ export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, i
       }
       // Do not leave a final fragment too short to satisfy the stored quote contract.
       if (text.length - end < 20) end = Math.max(start + 20, text.length - 20);
-      // Whole characters: not before a combining mark or a Hangul vowel or final consonant written
-      // apart (decomposed text), nor between the halves of a surrogate pair.
-      while (end > start + 20 && /^[\p{M}\u1160-\u11ff\ud7b0-\ud7ff]$/u.test(text[end] ?? '')) end--;
+      // Whole characters: not before a combining mark (also one outside the basic plane) or a Hangul
+      // vowel or final consonant written apart (decomposed text), nor between the halves of a
+      // surrogate pair.
+      const inside = (at: number) =>
+        /^[\uDC00-\uDFFF]$/.test(text[at] ?? '') ||
+        /^[\p{M}\u1160-\u11ff\ud7b0-\ud7ff]$/u.test(String.fromCodePoint(text.codePointAt(at) ?? 32));
+      while (end > start + 20 && inside(end)) end--;
       if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
     }
     excerpts.push({ id: `e${index}s${excerpts.length}`, text: text.slice(start, end) });
@@ -376,13 +380,15 @@ function inQuote(
       for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1))
         spans.push([at, at + wanted.length]);
   }
-  // Quotes that overlap or meet in the evidence are one stretch of it: a name split across two
-  // cited excerpts (cut in the middle of unspaced text) is still inside the quotes.
+  // Quotes that overlap, meet or are apart only by spaces in the evidence are one stretch of it: a
+  // name split across two cited excerpts is still inside the quotes (a quote is read without the
+  // space an excerpt ends with).
   spans.sort((a, b) => a[0] - b[0]);
   const merged: [number, number][] = [];
   for (const [from, to] of spans) {
     const last = merged.at(-1);
-    if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+    if (last && (from <= last[1] || /^\s+$/u.test(text.slice(last[1], from))))
+      last[1] = Math.max(last[1], to);
     else merged.push([from, to]);
   }
   return { text, within: (start, end) => merged.some(([from, to]) => start >= from && end <= to) };

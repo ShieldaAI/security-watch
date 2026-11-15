@@ -907,3 +907,54 @@ test('a version with capitals in its suffix is cited as written', () => {
   const long = `${'T\u0308'.repeat(200)} Intro. ${text}`;
   assert.equal(accepts(long, [text], { versions: ['2.4.1-RC1'] }), true);
 });
+
+test('quotes apart only by spaces are one stretch: a name split at an excerpt cut after a space', () => {
+  const text = 'Affected products include Example Gateway, Apache Struts 2.5.32, Example Portal and more.';
+  const cut = text.indexOf('Struts');
+  const quotes = [text.slice(0, cut), text.slice(cut)];
+  assert.equal(accepts(text, quotes, { products: ['Apache Struts'] }), true);
+  assert.equal(accepts(text, quotes, { products: ['Struts 2.5.32'], versions: ['2.5.32'] }), true);
+  // Apart by a word: not one stretch.
+  const gap = [text.slice(0, cut - 7), text.slice(cut)];
+  assert.equal(accepts(text, gap, { products: ['Apache Struts'] }), false);
+  // Every excerpt cut of a long list without full stops keeps a claim across it.
+  const list = Array.from({ length: 60 }, (_, index) => `Example Product ${index} 1.${index}.0`).join(', ');
+  const excerpts = excerptsFor({ title: 'News', description: list }, 0).map((excerpt) => excerpt.text);
+  assert.ok(excerpts.length > 1);
+  for (let index = 0; index < 60; index++)
+    assert.equal(
+      accepts(list, excerpts, { products: [`Example Product ${index}`], versions: [`1.${index}.0`] }),
+      true,
+      String(index),
+    );
+});
+
+test('excerpt cuts: marks outside the basic plane, unspaced decomposed text, every final sigma', () => {
+  for (const description of [
+    'x'.repeat(300) + '\u{11005}\u{11038}'.repeat(300),
+    'ệ'.normalize('NFD').repeat(200) + ' Apache Struts 2.5.32',
+  ]) {
+    const text = `News\n${description}`;
+    let at = 0;
+    for (const excerpt of excerptsFor({ title: 'News', description }, 0).slice(0, -1)) {
+      at += excerpt.text.length;
+      const next = String.fromCodePoint(text.codePointAt(at));
+      assert.doesNotMatch(next, /^[\p{M}\udc00-\udfff]$/u, `at ${at}`);
+    }
+  }
+  // A quote ending after a capital sigma inside a word, with another final sigma before it.
+  const greek = 'Η ΟΔΟΣ προς το Apache Struts 2.5.32 και το ΣΥΣΤΗΜΑ ελέγχου πρόσβασης σήμερα.';
+  const quote = greek.slice(0, greek.indexOf('ΣΥΣ') + 3);
+  assert.equal(accepts(greek, [quote], { products: ['Apache Struts'] }), true);
+});
+
+test('a closing bracket or quotation mark straight after a name does not join it to the next word', () => {
+  for (const text of [
+    'The vendor says 「Apache Struts」が影響を受ける and users should update without delay.',
+    'The vendor says 【Apache Struts】lets remote users run code without signing in.',
+    'The vendor says «Apache Struts»lets remote users run code without signing in.',
+    'The vendor says (Apache Struts)lets remote users run code without signing in.',
+    'The vendor says “Apache Struts”is affected and users should update without delay.',
+  ])
+    assert.equal(accepts(text, [text], { products: ['Apache Struts'] }), true, text);
+});
