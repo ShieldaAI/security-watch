@@ -158,7 +158,6 @@ test('a library named second in a sentence: kinds of software and flaws after it
     assert.equal(packageMentioned(text, component(name)), true, text);
   for (const [name, text] of [
     ['puma', 'The Puma users were told to reset passwords.'],
-    ['express', 'The Express security team responded.'],
     ['bootstrap', 'The Bootstrap code was stolen.'],
     ['meteor', 'The Meteor exploit kit spread.'],
     ['meteor', 'The Meteor servers went down.'],
@@ -166,6 +165,34 @@ test('a library named second in a sentence: kinds of software and flaws after it
     ['thor', 'The Thor code was leaked online.'],
     ['puma', 'The Puma apparel line sold out.'],
     ['puma', 'The Puma releasers met.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), false, text);
+});
+
+test('second-word rule: software words, capitalised kinds, up to three words naming the kind of flaw', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const [name, text] of [
+    ['puma', 'The Puma HTTP server fixes request smuggling.'],
+    ['express', 'The Express JavaScript framework fixed it.'],
+    ['rails', 'The Rails core team released a fix.'],
+    ['react', 'The React community reacted to the bug.'],
+    ['express', 'The Express security team responded.'],
+    ['express', 'The Express advisory lists two flaws.'],
+    ['react', 'Critical React issue lets pages run code.'],
+    ['react', 'The React devs shipped a patch.'],
+    ['struts', 'Critical Struts remote code execution flaw disclosed.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), true, text);
+  for (const [name, text] of [
+    ['struts', 'Critical Struts remote code execution sandbox flaw disclosed.'],
+    ['thor', 'The Thor ransomware decryptor bug was found.'],
+    ['express', 'The Express mobile banking app flaw leaked data.'],
+    ['express', 'The Express rewards portal injection worried users.'],
+    ['meteor', 'The Meteor botnet command injection flaw spread.'],
+    ['meteor', 'The Meteor shower bug was annoying.'],
+    ['puma', 'The Puma store had a bug.'],
+    ['mongoose', 'The Mongoose ransomware exploits a flaw.'],
+    ['express', 'The Express Remote code flaw was found.'],
   ])
     assert.equal(packageMentioned(text, component(name)), false, text);
 });

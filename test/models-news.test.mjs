@@ -801,3 +801,34 @@ test('schema-ignoring models cannot use an unscoped versioned product to declare
       assert.equal(calls, 1, 'Cached output must receive the same target guard as fresh output');
     });
 });
+
+test('an excerpt under 20 characters (emoji counted once) is not offered for citation', async () => {
+  const short = {
+    ...article,
+    id: 'osv:short',
+    kind: 'advisory',
+    source: 'osv',
+    title: 'Acme 🚨🚨🚨🚨🚨🚨🚨🚨',
+    description: '',
+    content_status: undefined,
+  };
+  let body;
+  await analyze(payload(), {
+    evidence: [article, short],
+    target: { ...finding, evidence_ids: [article.id, short.id] },
+    http: async (_url, options) => {
+      body = options.body;
+      return response(payload());
+    },
+  });
+  const request = JSON.parse(body);
+  const context = JSON.parse(request.messages[1].content);
+  const excerpt = context.evidence
+    .flatMap((item) => item.excerpts)
+    .find((item) => item.text.startsWith('Acme 🚨'));
+  assert.ok(excerpt, 'the short advisory is in the context');
+  const { messages, ...rest } = request;
+  assert.ok(!JSON.stringify(rest).includes(`"${excerpt.id}"`), 'its excerpt is not offered for citation');
+  const ids = [...new Set(JSON.stringify(rest).match(/e\d+s\d+/g) ?? [])];
+  assert.ok(ids.length > 0 && !ids.includes(excerpt.id), JSON.stringify({ ids, short: excerpt.id }));
+});

@@ -803,6 +803,8 @@ async function github(
    */
   let unidentifiedHold = Infinity;
   const blocked = new Map<string, number>();
+  /** Packages named by such rows in this run: kept while their rows are still listed. */
+  const seenNow = new Set<string>();
   try {
     const saved: unknown = JSON.parse(unreadable.unconfirmed || '{}');
     if (typeof saved === 'object' && saved !== null && !Array.isArray(saved))
@@ -867,12 +869,17 @@ async function github(
         unidentifiedRecent = true;
         unidentifiedHold = Math.min(unidentifiedHold, updated);
       }
-      // A stored record read after the row's update is current: listing the row again does not make
-      // it wait again.
-      const at = Number.isFinite(updated) ? updated : now;
+      // Held back from when the row is first seen, not from its update: GitHub may list a row late,
+      // after a stored record was confirmed. A row seen before (its package's time is not earlier
+      // than the row's update) keeps that time, so listing it again does not make records read
+      // since wait again.
       const named = githubPackageNames(item);
-      for (const name of named.length ? named : ['*'])
-        blocked.set(name, Math.max(blocked.get(name) ?? -Infinity, at));
+      for (const name of named.length ? named : ['*']) {
+        seenNow.add(name);
+        const first = blocked.get(name);
+        if (first === undefined || !(first >= (Number.isFinite(updated) ? updated : Infinity)))
+          blocked.set(name, now);
+      }
     }
     return parsed;
   };
@@ -951,7 +958,7 @@ async function github(
     unreadable.nextUnconfirmed = JSON.stringify(
       Object.fromEntries(
         [...blocked]
-          .filter(([name, at]) => waitingFor(name, at))
+          .filter(([name, at]) => seenNow.has(name) || waitingFor(name, at))
           .sort((a, b) => b[1] - a[1])
           .slice(0, MAX_UNREADABLE),
       ),

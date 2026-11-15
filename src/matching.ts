@@ -381,29 +381,38 @@ function technologyInLowerCase(line: string): string {
 const SECOND_WORD_AFTER =
   '(?:The|A|An|This|That|These|Those|Its|New|Critical|Severe|Serious|Major|High|Latest|Recent|Another|' +
   'Popular|Malicious|Vulnerable|Unpatched|Patched|Outdated|Older|Several|Multiple|Many|Two|Three)';
-/** A word saying what kind of software something is ("test" runner, "web" server). */
+/** A word saying what kind of software something is ("test" runner, "web" server, "HTTP" server). */
 const SOFTWARE_KIND =
-  '(?:web|test|testing|http|template|templating|build|javascript|js|typescript|python|ruby|rust|' +
-  'node(?:\\.js)?|css|orm|logging|validation|parsing|parser|image|ui|frontend|backend|server-side|' +
-  'open-source|npm|pypi)';
+  '(?:web|Web|test|testing|http|HTTP|template|templating|build|javascript|JavaScript|js|JS|typescript|' +
+  'TypeScript|python|Python|ruby|Ruby|rust|Rust|node(?:\\.js)?|Node(?:\\.js)?|css|CSS|orm|ORM|logging|' +
+  'validation|parsing|parser|image|ui|UI|frontend|backend|server-side|open-source|npm|PyPI|pypi)';
 /** Words that name software or its people. */
 const SOFTWARE_NOUN =
-  '(?:team|maintainers?|project|developers?|ecosystem|codebase|repository|' +
-  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|' +
+  '(?:team|core(?: team)?|maintainers?|project|developers?|devs|community|ecosystem|codebase|repository|' +
+  'librar(?:y|ies)|framework|packages?|modules?|components?|plugins?|extensions?|middleware|router|' +
   'dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|cli|api|sdk|versions?|releases?|' +
-  'patch(?:es)?|fix(?:es)?)';
-/** Words that name a flaw, which may follow a few words of its kind ("remote code execution flaw"). */
+  'patch(?:es)?|fix(?:es)?|issues?|advisor(?:y|ies)|' +
+  'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
+/** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
+/** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
+const FLAW_KIND =
+  '(?:remote|code|command|execution|sandbox|deserialization|sql|path|traversal|prototype|pollution|' +
+  'denial-of-service|request|smuggling|cross-site|scripting|xss|ssrf|csrf|xxe|authentication|auth|' +
+  'authorization|privilege|escalation|buffer|overflow|memory|corruption|use-after-free|arbitrary|file|' +
+  'upload|read|write|information|disclosure|open|redirect|header|cache|poisoning|type|confusion|' +
+  'integer|timing|template|server-side|critical|severe|zero-day|regex|redos|security|input|validation|' +
+  'race|condition|session|cookie|token|signature|verification|certificate|tls|ssl)';
 /**
  * What may follow a library named second in a sentence for it to be taken for the library: a word
  * about software, possibly after one saying what kind ("The Mocha test runner"), a server or an app
- * only after such a word ("The Puma web server"), or a flaw after up to three words ("Critical Struts
- * remote code execution flaw"). Words that also follow a brand or a malware name ("users",
- * "security", "code", "servers", "breach") are left out.
+ * only after such a word ("The Puma web server"), or a flaw after up to three words saying what kind
+ * of flaw ("Critical Struts remote code execution flaw"). Words that also follow a brand or a malware
+ * name ("users", "code", "servers", "breach", "ransomware") are left out.
  */
 const SOFTWARE_WORD =
-  `(?:${SOFTWARE_KIND} (?:servers?|apps?|clients?)|(?:${SOFTWARE_KIND} )?${SOFTWARE_NOUN}|` +
-  `(?:[\\p{Ll}-]+ ){0,3}${FLAW_NOUN})`;
+  `(?:${SOFTWARE_KIND} (?:servers?|apps?|applications?|clients?)|(?:${SOFTWARE_KIND} )?${SOFTWARE_NOUN}|` +
+  `(?:${FLAW_KIND} ){0,3}${FLAW_NOUN})`;
 function writtenAsName(names: string[]): (text: string) => boolean {
   const single = names.map((name) => name.trim()).filter((name) => /^\p{L}{3,}$/u.test(name));
   const form = capitalised;

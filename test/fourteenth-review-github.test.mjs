@@ -1528,3 +1528,181 @@ test('a scan that reaches the page limit is not held by a row without an identif
   assert.match(result.errors[0].message, /more updated advisories than one run reads/);
   assert.ok(Date.parse(result.checkpoints['github:reviewed']) > Date.parse(bare.updated_at) + 2 * HOUR);
 });
+
+test('a row without an identifier that GitHub lists late still holds back a record confirmed since its update', async () => {
+  const store = new Store(':memory:');
+  const copy = { ...waitingCopy('GHSA-aaaa-bbbb-0301', 30 * MINUTE), modified_at: iso(NOW - 2 * DAY) };
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW - 30 * MINUTE), 'github:malware': iso(NOW) });
+  const widened = NOW - 10 * MINUTE;
+  const { http, log } = github(
+    (now) => {
+      // The record itself (found by identifier), and from NOW + 20 min its late row without one.
+      const rows = [
+        advisory('GHSA-aaaa-bbbb-0302', 'zeta', NOW - 20 * MINUTE),
+        advisory('GHSA-aaaa-bbbb-0301', 'alpha', NOW - DAY),
+      ];
+      if (now >= NOW + 20 * MINUTE) {
+        const row = advisory('GHSA-aaaa-bbbb-0301', 'alpha', widened);
+        delete row.ghsa_id;
+        rows.push(row);
+      }
+      return rows;
+    },
+    {
+      byId: () =>
+        json({
+          ...advisory('GHSA-aaaa-bbbb-0301', 'alpha', widened),
+          vulnerabilities: [
+            {
+              package: { ecosystem: 'npm', name: 'alpha' },
+              vulnerable_version_range: '< 4.0.0',
+              first_patched_version: null,
+            },
+          ],
+        }),
+    },
+  );
+  const a = await poll(store, http, NOW);
+  assert.ok(
+    a.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW)),
+    'confirmed after the update',
+  );
+  const b = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0301']);
+  assert.equal(b.evidence.find((item) => item.id === copy.id).packages[0].range, '< 4.0.0');
+  await poll(store, http, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0301'], 'not again while the row is listed');
+});
+
+test('a row without an identifier or update time holds back stored records for the packages it names', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0303', HOUR);
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    // Two remembered records take the budget, so the stored record is not read again in this scan.
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0304', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+      ['GHSA-aaaa-bbbb-0305', NOW - HOUR, 1, NOW - 20 * DAY],
+    ]),
+  });
+  const { http } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0306', 'zeta', NOW + 10 * MINUTE),
+    advisory('GHSA-aaaa-bbbb-0304', 'zeta', NOW - 20 * DAY, false),
+    advisory('GHSA-aaaa-bbbb-0305', 'zeta', NOW - 20 * DAY, false),
+  ]);
+  // The listing also carries a row with neither identifier nor update time.
+  const withBare = (now) => {
+    const raw = http(now);
+    return async (url) => {
+      const response = await raw(url);
+      const parsed = new URL(url);
+      if (parsed.pathname !== '/advisories' || parsed.searchParams.get('type') === 'malware') return response;
+      const rows = JSON.parse(response.body);
+      rows.unshift({
+        summary: 'alpha flaw',
+        vulnerabilities: [{ package: { ecosystem: 'npm', name: 'alpha' } }],
+      });
+      return { ...response, body: JSON.stringify(rows) };
+    };
+  };
+  const result = await poll(store, withBare, NOW + 30 * MINUTE);
+  assert.ok(!result.evidence.some((item) => item.id === copy.id));
+  assert.deepEqual(Object.keys(JSON.parse(result.checkpoints['github:reviewed:unconfirmed'])), ['alpha']);
+});
+
+test('with one request left, a stored record waiting to be read again takes it before a given-up record', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0307', HOUR);
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0308', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+    ]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0309']),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW }),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0307', 'alpha', NOW - DAY),
+    advisory('GHSA-aaaa-bbbb-0308', 'zeta', NOW - 20 * DAY, false),
+    advisory('GHSA-aaaa-bbbb-0309', 'zeta', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0308', 'GHSA-aaaa-bbbb-0307']);
+});
+
+test('every package waiting is remembered, the latest first, and each record for it is read again in turn', async () => {
+  const store = new Store(':memory:');
+  const inventory2 = {
+    systems: [
+      {
+        id: 'prod',
+        name: 'prod',
+        updated_at: iso(NOW),
+        products: [],
+        keywords: [],
+        components: [
+          { id: 'c:alpha', ecosystem: 'npm', name: 'alpha', version: '3.0.0' },
+          { id: 'c:beta', ecosystem: 'npm', name: 'beta', version: '3.0.0' },
+        ],
+      },
+    ],
+  };
+  const copies = [
+    waitingCopy('GHSA-aaaa-bbbb-0310', 3 * HOUR),
+    waitingCopy('GHSA-aaaa-bbbb-0311', 2 * HOUR),
+    waitingCopy('GHSA-aaaa-bbbb-0312', 4 * HOUR, 'beta'),
+  ];
+  store.saveEvidence(copies, {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0313', NOW - 2 * HOUR, 1, NOW - 20 * DAY],
+    ]),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW - 30 * MINUTE, beta: NOW + DAY }),
+  });
+  // The records are not served, so they stay waiting (and become remembered records).
+  const http = async (raw) => {
+    const url = new URL(raw);
+    if (url.pathname === '/advisories') return json([]);
+    return { status: 404, headers: {}, body: '' };
+  };
+  const result = await collectSources(
+    inventory2,
+    config,
+    store.checkpoints(),
+    http,
+    NOW + 30 * MINUTE,
+    store.evidence(),
+  );
+  const saved = JSON.parse(result.checkpoints['github:reviewed:unconfirmed']);
+  // A time ahead of the clock is read as now; the latest is listed first.
+  assert.deepEqual(Object.entries(saved), [
+    ['beta', NOW + 30 * MINUTE],
+    ['alpha', NOW - 30 * MINUTE],
+  ]);
+});
+
+test('while a stored record waiting to be read again keeps a turn, given-up records take theirs in order', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0320', HOUR);
+  const given = {
+    ...storedCopy('GHSA-aaaa-bbbb-0322'),
+    packages: [{ ecosystem: 'npm', name: 'zeta', range: '<2.0.0' }],
+  };
+  store.saveEvidence([copy, given], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0321', 'GHSA-aaaa-bbbb-0322']),
+    'github:reviewed:unconfirmed': JSON.stringify({ alpha: NOW }),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0320', 'alpha', NOW - DAY),
+    advisory('GHSA-aaaa-bbbb-0321', 'zeta', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0322', 'zeta', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  // One turn for the given-up records: the next in order, not the one with a stored copy.
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0321', 'GHSA-aaaa-bbbb-0320']);
+});
