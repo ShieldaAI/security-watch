@@ -287,62 +287,70 @@ function quotesPhrase(original: string, value: string): boolean {
   const wanted = quoteText(value).toLowerCase().trim();
   if (!wanted) return false;
   const quote = quoteText(original).toLowerCase();
-  const first = wanted[0]!;
-  const last = wanted.at(-1)!;
-  const digit = (character: string) => /\p{N}/u.test(character);
+  const first = [...wanted][0]!;
+  const last = [...wanted].at(-1)!;
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
-    const [b1 = '', b2 = ''] = [quote[at - 1], quote[at - 2]];
-    const [a1 = '', a2 = ''] = [quote[at + wanted.length], quote[at + wanted.length + 1]];
+    // Whole characters (code points) on either side, not halves of a surrogate pair.
+    const [b2 = '', b1 = ''] = [...quote.slice(Math.max(0, at - 4), at)].slice(-2);
+    const rest = quote.slice(at + wanted.length);
+    const [a1 = '', a2 = ''] = [...rest.slice(0, 4)];
+    const mark = (character: string) => !/[\p{L}\p{N}\p{M}_]/u.test(character);
+    // A version straight after a hyphen, "@" or "/" is the name's own version ("node-18",
+    // "lodash@4.17.20", "Apache/2.4.58"); "vue-3d-model" and "express@4evil" are other names.
+    const ownVersion = /^[-@/]v?\d+(?:\.\d+)*(?![\p{L}\p{N}_@/-])/u.test(rest);
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
     // (".NET" in "ASP.NET").
-    const joinedBefore = spacedWord(first)
-      ? spacedWord(b1) ||
-        b1 === '+' ||
-        b1 === '@' ||
-        (/[-.#]/u.test(b1) && spacedWord(b2)) ||
-        // "core" in "@angular/core"; "Chromium" in "Chrome/Chromium" is a name of its own.
-        (b1 === '/' && /@[\p{L}\p{N}._-]+$/u.test(quote.slice(0, at - 1)))
-      : spacedWord(b1);
-    // "Notepad" in "Notepad++", "C" in "C#", "express" in "express-forms". A version after a hyphen,
-    // slash or "@" is the name's own version: "node-18", "Apache/2.4.58", "lodash@4.17.20".
-    const joinedAfter = spacedWord(last)
-      ? spacedWord(a1) ||
+    const joinedBefore = mark(first)
+      ? joins(b1, b1)
+      : joins(first, b1) || b1 === '+' || b1 === '@' || b1 === '/' || (/[-.#]/u.test(b1) && joins(first, b2));
+    // "Notepad" in "Notepad++", "C" in "C#", "express" in "express-forms", "Apache" in
+    // "apache/struts".
+    const joinedAfter = mark(last)
+      ? joins(a1, a1)
+      : joins(last, a1) ||
         a1 === '+' ||
         a1 === '#' ||
-        (a1 === '.' && spacedWord(a2)) ||
-        (/[-@]/u.test(a1) && spacedWord(a2) && !digit(a2)) ||
-        (a1 === '/' && first === '@' && spacedWord(a2))
-      : spacedWord(a1);
+        (a1 === '.' && joins(last, a2)) ||
+        (/[-@/]/u.test(a1) && !ownVersion && (joins(last, a2) || a1 === '/'));
     if (joinedBefore || joinedAfter) continue;
     return true;
   }
   return false;
 }
 /**
- * A quote and a claim read the same way: compatibility forms ("＋", "２") as their plain forms,
- * every kind of hyphen and minus sign as a hyphen, the look-alike slashes as a slash, characters that
- * show as nothing removed, and every kind and run of space as one space.
+ * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
+ * kind of hyphen and minus sign as a hyphen, the look-alike slashes as a slash, characters that show
+ * as nothing removed, and every kind and run of space as one space. Other compatibility forms are
+ * kept: a superscript, a circled digit or a fraction is not the digit it resembles ("2.4¹").
  */
 function quoteText(text: string): string {
   return text
-    .normalize('NFKC')
+    .normalize('NFC')
+    .replace(/[\uff01-\uff5e]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
     .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
-    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\uff0d]/g, '-')
+    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63]/g, '-')
     .replace(/[\u2215\u2044]/g, '/')
-    .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
+    .replace(/\s+/g, ' ');
 }
+/** Scripts written without spaces between words. Korean is written with spaces. */
+const UNSPACED =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+const HANGUL = /\p{Script=Hangul}/u;
 /**
- * A letter, digit or combining mark of a script written with spaces between words. Chinese,
- * Japanese, Korean, Thai, Lao, Khmer and Myanmar text joins words (and particles) without spaces, so
- * a character from those scripts next to a name or a version is a boundary: "Strutsの", "2.4.1以前".
+ * Whether a character next to a name or version continues it. Digits of any script join. A letter of
+ * a script written without spaces gives no boundary to check, so it does not join ("Strutsの",
+ * "2.4.1以前"); a change between Korean and another script is a boundary too ("Struts의"), while
+ * Korean letters join each other.
  */
-function spacedWord(character: string): boolean {
-  return (
-    /[\p{L}\p{N}\p{M}_]/u.test(character) &&
-    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u.test(
-      character,
-    )
-  );
+function joins(edge: string, neighbour: string): boolean {
+  const wordy = (character: string) => /[\p{L}\p{N}\p{M}_]/u.test(character);
+  if (!wordy(edge) || !wordy(neighbour)) return false;
+  // A superscript or subscript digit is a footnote or a formula, not more of the version ("2.4¹").
+  if (/[\u00b2\u00b3\u00b9\u2070-\u209f]/u.test(neighbour)) return false;
+  if (/\p{N}/u.test(neighbour)) return true;
+  if (UNSPACED.test(neighbour)) return false;
+  if (HANGUL.test(neighbour) || HANGUL.test(edge)) return HANGUL.test(neighbour) && HANGUL.test(edge);
+  return !UNSPACED.test(edge);
 }
 
 /**
@@ -379,11 +387,11 @@ function citesVersion(original: string, version: string): boolean {
     if (abbreviation && /^\d/u.test(wanted))
       before = before.slice(0, before.length - abbreviation[0].replace(/^[^vV]/u, '').length);
     // A letter or digit joined to it makes another token; text without spaces between words does not.
-    if (spacedWord(before.at(-1) ?? '') || /\d\.$/u.test(before)) continue;
-    if (spacedWord(after[0] ?? '') || /^\.[\dx*]/iu.test(after)) continue;
+    if (joins([...wanted][0]!, [...before].at(-1) ?? '') || /\d\.$/u.test(before)) continue;
+    if (joins([...wanted].at(-1)!, [...after][0] ?? '') || /^\.[\dx*]/iu.test(after)) continue;
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
-      /[\p{Sc}#_~∶±×№⁄∕·]$/u.test(before) ||
+      /[\p{Sc}#_~∶±×№·]$/u.test(before) ||
       /[\p{L}\p{N}]\+$/u.test(before) ||
       // A time ("10:30") or a thousands separator ("4'200"); a quotation mark or a label is not one.
       /\d['’]$/u.test(before) ||
@@ -405,7 +413,10 @@ function citesVersion(original: string, version: string): boolean {
     if (
       // A plus sign joined to more is build metadata ("2.4.1+build.5"); alone it means "and later"
       // ("3.0+ are affected").
-      /^(?: ?[%‰％٪\p{Sc}°×]|[_~·∶⁄∕]|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(after) ||
+      // Units written as one symbol ("8.0.3㎳", "2㎝") are amounts too.
+      /^(?: ?[%‰٪\p{Sc}°×\u3380-\u33ff]|[_~·∶]|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(
+        after,
+      ) ||
       // A qualifier that makes it another release ("2.4.1.RELEASE", "5.3.20.Final", "1.0.M2").
       // A file extension does not ("log4j-2.17.1.jar", "foo-1.2.3.tar.gz").
       /^\.(?:release|final|ga|snapshot|build|sp\d*|cr\d*|rc\d*|m\d+|beta\d*|alpha\d*|post\d*|dev\d*|pre(?:view)?\d*|v\d{6,})(?![\p{L}\p{N}])/iu.test(

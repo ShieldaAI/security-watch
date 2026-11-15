@@ -366,7 +366,7 @@ test('a stored OSV record is refreshed whatever the letter case of its package n
 
 // ---- Model claims ----------------------------------------------------------------------------------
 
-const claim = (quote, product) => {
+const claim = (quote, product, version = '8.6') => {
   const story = {
     id: 'feed:x:entry:13',
     source: 'feed:x',
@@ -393,7 +393,7 @@ const claim = (quote, product) => {
           classification: 'new_vulnerability',
           impact: 'affected',
           affected_products: [product],
-          affected_versions: ['8.6'],
+          affected_versions: [version],
           prerequisites: [],
           rationale: 'Checked.',
           quotes: [{ evidence_id: story.id, quote }],
@@ -426,15 +426,26 @@ test('claims and versions read Unicode hyphens, full-width marks and text withou
     ['express‐forms 8.6 is affected.', 'express'],
     ['Notepad＋＋ 8.6 is affected.', 'Notepad'],
     ['The @angular∕core 8.6 compiler is affected.', 'core'],
+    // A token after a hyphen or "@" that starts with a digit is not a version: another name.
+    ['vue-3d-model 8.6 is affected.', 'vue'],
+    ['node-7z 8.6 is affected.', 'node'],
+    ['react-16-polyfill 8.6 is affected.', 'react'],
+    ['Confluence-2fa-plugin 8.6 is affected.', 'Confluence'],
+    ['express@4evil 8.6 is affected.', 'express'],
+    // A path names a repository, not the product; a "/" list is refused rather than guessed.
+    ['github.com/apache/struts 8.6 is affected.', 'Apache'],
+    ['grafana/loki 8.6 is affected.', 'Grafana'],
+    ['Chrome/Chromium 8.6 is affected.', 'Chromium'],
+    // A digit joined to the name, and Korean inside a Korean word.
+    ['Struts2 8.6 is affected.', 'Struts'],
+    ['\uce74\uce74\uc624\ud1a1 8.6 is affected.', '\uce74\uce74\uc624'],
   ])
     assert.equal(claim(quote, product), false, `${product} in ${quote}`);
   for (const [quote, product] of [
-    // A name followed by its own version, and names in a list.
+    // A name followed by its own version.
     ['Apache/8.6 servers are affected.', 'Apache'],
     ['lodash@8.6 is affected.', 'lodash'],
     ['node-8.6 builds are affected.', 'node'],
-    ['Chrome/Chromium 8.6 is affected.', 'Chromium'],
-    ['Windows/Linux 8.6 builds are affected.', 'Windows'],
     // Versions next to text written without spaces.
     ['Example Databaseのバージョン8.6以前に脆弱性があります。', 'Example Database'],
     ['Example Database 版本8.6之前', 'Example Database'],
@@ -524,4 +535,70 @@ test('when the notes give way, the reasons that fit are still shown', () => {
   assert.doesNotMatch(text, /N{300}/, 'the notes gave way');
   assert.match(text, /^• a short reason$/m);
   assert.match(text, /^Summary: Y{600}$/m);
+});
+
+test('a version is not read into superscripts, circled digits or digits of another script', () => {
+  for (const [quote, version] of [
+    ['Example Server 2.4¹ is affected.', '2.41'],
+    ['Example Server 2.4.1² is affected.', '2.4.12'],
+    ['Example Server ⒈⒉ is affected.', '1.2'],
+    ['Example Server 2.4.① is affected.', '2.4.1'],
+    ['Example Server 2.4.1๑ is affected.', '2.4.1'],
+    ['Example Server 版本2.4〇 is affected.', '2.4'],
+    ['Example Server 2.4.1𐒡 is affected.', '2.4.1'],
+  ])
+    assert.equal(claim(quote, 'Example Server', version), false, `${version} in ${quote}`);
+  for (const [quote, version] of [
+    ['Example Server 2.4¹ is affected.', '2.4'],
+    ['Example Server ２.４.１ is affected.', '2.4.1'],
+    ['Example Server 2.4.1버전 is affected.', '2.4.1'],
+    ['Example Server Struts의 2.4.1 is affected.', '2.4.1'],
+  ])
+    assert.equal(claim(quote, 'Example Server', version), true, `${version} in ${quote}`);
+});
+
+test('a version followed by a unit written as one symbol is an amount', () => {
+  for (const [quote, version] of [
+    ['Example Server answered in 8.0.3㎳ under load.', '8.0.3'],
+    ['Example Server shows a 2㎝ gap on the screen.', '2'],
+  ])
+    assert.equal(claim(quote, 'Example Server', version), false, `${version} in ${quote}`);
+});
+
+test('claim boundaries: "#" before a name, a deeper scoped path, and Thai text after a name', () => {
+  assert.equal(claim('C#Express 8.6 is affected.', 'Express'), false);
+  assert.equal(claim('#Express 8.6 is affected.', 'Express'), true);
+  assert.equal(claim('@angular/core/testing 8.6 is affected.', '@angular/core'), false);
+  assert.equal(claim('@angular/core 8.6 is affected.', '@angular/core'), true);
+  assert.equal(claim('Example Serverเวอร์ชัน 8.6', 'Example Server'), true);
+});
+
+test('a network that cannot be reached before connecting is a failed connection', async (t) => {
+  const original = http.request;
+  t.after(() => {
+    http.request = original;
+    syncBuiltinESMExports();
+  });
+  for (const code of ['ENETUNREACH', 'EHOSTUNREACH', 'ECONNREFUSED']) {
+    http.request = function () {
+      const request = new EventEmitter();
+      request.write = () => true;
+      request.end = () => {
+        const socket = new EventEmitter();
+        socket.connecting = true;
+        request.emit('socket', socket);
+        request.emit('error', Object.assign(new Error(code), { code }));
+      };
+      request.destroy = () => {};
+      return request;
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(
+      safeHttp('http://127.0.0.1:9/', { allowPrivate: true, timeoutMs: 1000 }),
+      (error) => {
+        assert.equal(error.code, 'CONNECTION_FAILED', code);
+        return true;
+      },
+    );
+  }
 });
