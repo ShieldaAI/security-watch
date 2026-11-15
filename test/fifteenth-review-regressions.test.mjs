@@ -504,12 +504,17 @@ test('a claim that runs past the end of its quote is not supported by it', () =>
   assert.equal(accepts(text, ['The advisory says Example Server 2.4.1'], { versions: ['2.4.1'] }), true);
 });
 
-test('an image tag cites its version; a port and a vector do not', () => {
+test('a port, a vector and an image tag do not cite a version; a label with spaces does', () => {
   const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
-  assert.equal(accepts(sentence('nginx:1.25.3'), [sentence('nginx:1.25.3')], { versions: ['1.25.3'] }), true);
+  // An image tag cannot be told from "timeout:2.5.32" by its spelling: it is refused, and the
+  // analysis goes to review.
   assert.equal(
-    accepts(sentence('library/nginx:1.25.3'), [sentence('library/nginx:1.25.3')], { versions: ['1.25.3'] }),
-    true,
+    accepts(sentence('nginx:1.25.3'), [sentence('nginx:1.25.3')], { versions: ['1.25.3'] }),
+    false,
+  );
+  assert.equal(
+    accepts(sentence('timeout:2.5.32'), [sentence('timeout:2.5.32')], { versions: ['2.5.32'] }),
+    false,
   );
   assert.equal(
     accepts(sentence('example.com:443'), [sentence('example.com:443')], { versions: ['443'] }),
@@ -521,7 +526,6 @@ test('an image tag cites its version; a port and a vector do not', () => {
     true,
   );
 });
-
 test('a fixture scan that saves its results does not mark the inventory as current', (t) => {
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const examples = fileURLToPath(new URL('../examples/', import.meta.url));
@@ -594,23 +598,45 @@ test('quotes that meet in the evidence form one stretch, and a claim across them
   assert.equal(accepts(text, [text.slice(0, cut)], { products: ['Example Server'] }), false);
 });
 
-test('more label languages, left-side joiners, apostrophes, brackets and a tilde after a version', () => {
+test('more label languages, left-side joiners, apostrophes and a tilde after a version', () => {
   const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
-  for (const body of ['Versionen:2.5.32', 'Versão:2.5.32', 'Версия:2.5.32', 'Versiones:2.5.32'])
-    assert.equal(accepts(sentence(body), [sentence(body)], { versions: ['2.5.32'] }), true, body);
+  // Two-part versions: only the label makes them a citation.
+  for (const body of [
+    'Versionen:2.5',
+    'Vers\u00e3o:2.5',
+    'Vers\u00f5es:2.5',
+    '\u0412\u0435\u0440\u0441\u0438\u044f:2.5',
+    '\u0412\u0435\u0440\u0441\u0438\u0438:2.5',
+    'Versiones:2.5',
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { versions: ['2.5'] }), true, body);
   for (const [body, product] of [
     ['evil:express', 'express'],
     ['x~express', 'express'],
     ["express'forms", 'express'],
-    ['express(forms)', 'express'],
-    ['express…forms', 'express'],
+    ['express\u2019forms', 'express'],
+    ["Notepad'sx", 'Notepad'],
+    ['x\u00a9Struts', 'Struts'],
   ])
     assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), false, body);
-  assert.equal(accepts(sentence("Notepad's"), [sentence("Notepad's")], { products: ['Notepad'] }), true);
+  for (const [body, product] of [
+    ["Notepad's", 'Notepad'],
+    ["Struts' x", 'Struts'],
+    [':Struts', 'Struts'],
+    ['Struts( and', 'Struts'],
+    ['express\u2014forms', 'express'],
+    // Brackets and an ellipsis after a name are ordinary prose ("Intel(R)", "Java(TM)", a Chinese
+    // advisory's full-width bracket), not part of the name.
+    ['Intel(R) Xeon(R)', 'Intel'],
+    ['Oracle Java(TM) SE', 'Java'],
+    ['Apache Struts\uff08CVE-2026-1234\uff09', 'Apache Struts'],
+    ['Struts\u2026and Spring', 'Struts'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), true, body);
   assert.equal(accepts(sentence('2.4.1~1'), [sentence('2.4.1~1')], { versions: ['2.4.1'] }), false);
+  assert.equal(accepts(sentence('1~2.4.1'), [sentence('1~2.4.1')], { versions: ['2.4.1'] }), false);
   assert.equal(accepts(sentence('2.0.0~2.4.1'), [sentence('2.0.0~2.4.1')], { versions: ['2.0.0'] }), true);
 });
-
 test('product claims and claims before the quote are checked against the quote too', () => {
   const text = 'Struts is mentioned first. The report covers several items in this cycle today.';
   assert.equal(
@@ -618,4 +644,66 @@ test('product claims and claims before the quote are checked against the quote t
     false,
   );
   assert.equal(accepts(text, ['Struts is mentioned first. The report'], { products: ['Struts'] }), true);
+});
+
+test('property: reading the text twice changes nothing, for every letter followed by combining marks', () => {
+  // The positions found in one reading must hold in the next: lowering the case can produce a
+  // pair that composes ("T" and a diaeresis).
+  for (const prefix of ['T\u0308', '\u03aa\u0301', '\u0386\u0345', '\u0130\u0301']) {
+    const outside = `${prefix.repeat(40)} The report covers several items in this cycle. Struts 2.5.32 is affected now.`;
+    assert.equal(
+      accepts(outside, ['The report covers several items in this cycle.'], {
+        products: ['Struts'],
+        versions: ['2.5.32'],
+      }),
+      false,
+      prefix,
+    );
+    const inside = `${prefix.repeat(40)} The report covers Struts 2.5.32 in this cycle. End of the report text.`;
+    assert.equal(
+      accepts(inside, ['The report covers Struts 2.5.32 in this cycle.'], {
+        products: ['Struts'],
+        versions: ['2.5.32'],
+      }),
+      true,
+      prefix,
+    );
+  }
+});
+
+test('merged spans: quotes out of order, one inside another, and one character apart', () => {
+  const text = 'The advisory says Example Server 2.4.1 is affected in this release cycle.';
+  const at = text.indexOf('Server');
+  // Out of order and meeting: one stretch.
+  assert.equal(
+    accepts(text, [text.slice(at + 3), text.slice(0, at + 3)], { products: ['Example Server'] }),
+    true,
+  );
+  // One inside the other: the outer one stands.
+  assert.equal(accepts(text, [text, text.slice(at, at + 25)], { versions: ['2.4.1'] }), true);
+  // One character apart: not one stretch.
+  assert.equal(
+    accepts(text, [text.slice(0, at + 3), text.slice(at + 4)], { products: ['Example Server'] }),
+    false,
+  );
+});
+
+test('a catch-up start ahead of the clock (a clock set back) is not kept', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.setMeta('worker', JSON.stringify({ status: 'running', catching_up_since: iso(NOW + 3_600_000) }));
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW));
+  // In health, a catch-up start after the worker's own start counts from the start.
+  const config = parseConfig({ version: 1 });
+  store.setMeta(
+    'worker',
+    JSON.stringify({
+      status: 'running',
+      started_at: iso(NOW - 2 * 3_600_000),
+      catching_up_since: iso(NOW - 10 * 60_000),
+      heartbeat_at: iso(NOW),
+    }),
+  );
+  store.setMeta('last_scan', 'null');
+  assert.equal(checkHealth(store, config, NOW).ok, false, 'two hours since the start, not ten minutes');
 });

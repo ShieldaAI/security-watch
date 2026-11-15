@@ -296,9 +296,9 @@ function quotesPhrase(
   value: string,
   within: (start: number, end: number) => boolean = () => true,
 ): boolean {
-  const wanted = quoteText(value).toLowerCase().trim();
+  const wanted = readText(value).trim();
   if (!wanted) return false;
-  const quote = quoteText(original).toLowerCase();
+  const quote = readText(original);
   const first = [...wanted][0]!;
   const last = [...wanted].at(-1)!;
   const attached = (character: string) =>
@@ -346,8 +346,6 @@ function quotesPhrase(
         // Any other mark or symbol written straight between the name and more of a word ("Notepad➕x",
         // "struts∖x"), except the punctuation of a sentence.
         (attached(a1) && joins(last, a2)) ||
-        // A bracket or an ellipsis with no space on either side joins too ("express(forms)").
-        (/[(…]/u.test(a1) && joins(last, a2)) ||
         // An apostrophe joins too, except in a possessive ("Notepad's").
         (/['’]/u.test(a1) && joins(last, a2) && !(a2 === 's' && !joins('s', a3)));
     if (joinedBefore || joinedAfter || (!mark(first) && attached(b1) && joins(first, b2))) continue;
@@ -364,10 +362,10 @@ function inQuote(
   evidence: string,
   quotes: string[],
 ): { text: string; within: (start: number, end: number) => boolean } {
-  const text = quoteText(evidence).toLowerCase();
+  const text = readText(evidence);
   const spans: [number, number][] = [];
   for (const quote of quotes) {
-    const wanted = quoteText(quote).toLowerCase().trim();
+    const wanted = readText(quote).trim();
     if (wanted)
       for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1))
         spans.push([at, at + wanted.length]);
@@ -389,6 +387,14 @@ function inQuote(
  * as nothing removed, and every kind and run of space as one space. Other compatibility forms are
  * kept: a superscript, a circled digit or a fraction is not the digit it resembles ("2.4¹").
  */
+/**
+ * Text as every claim check reads it: quoteText, lower case, and composed again, since lowering
+ * the case can produce a pair that composes ("T" and a diaeresis become "ẗ"). Reading it again
+ * changes nothing, so positions found in one reading hold in the next.
+ */
+function readText(text: string): string {
+  return quoteText(text).toLowerCase().normalize('NFC');
+}
 function quoteText(text: string): string {
   return (
     text
@@ -455,7 +461,7 @@ function citesVersion(
   // The quote and the version the model copied from it are read the same way: hyphens, en dashes
   // and minus signs are hyphens ("CVE‑2026‑40001", "2.0–2.4"), every kind and run of space is one
   // space ("45 %"), and characters that show as nothing are dropped ("2.4.1<zero-width>.1").
-  const normal = quoteText;
+  const normal = readText;
   const wanted = normal(version).trim();
   // A version begins and ends with a letter or digit: "2.4." is not cited by "2.4.1".
   if (!/^[\p{L}\p{N}](?:.*[\p{L}\p{N}])?$/u.test(wanted)) return false;
@@ -481,13 +487,6 @@ function citesVersion(
       /(?:(?:^|[^\p{L}\p{N}\-])(?:versions?|releases?|affected|fixed(?: in)?|patched|vulnerable|ver|versión|versiones|versionen|versão|versões|версия|версии)|版本|バージョン|버전) ?:$/iu.test(
         before,
       );
-    // An image and its tag ("nginx:1.25.3"): a name with a letter, then a version of three parts or
-    // more; a port ("example.com:443") or a vector ("CVSS:3.1") is not one.
-    const dockerTag =
-      /(?:^|[\s(\[])[a-z0-9][a-z0-9._\/-]*[a-z][a-z0-9._\/-]*:$/u.test(before) &&
-      /^\d+\.\d+\.\d+/u.test(wanted) &&
-      // A label joined to another word ("x-affected:") is neither a label nor an image.
-      !/(?:versions?|releases?|affected|fixed|patched|vulnerable|ver):$/iu.test(before);
     const rangeEnd = /\d~$/u.test(before) && dotted(wanted) && dotted(/([\d.]+)~$/u.exec(before)![1]!);
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
@@ -497,7 +496,7 @@ function citesVersion(
       /\d['’]$/u.test(before) ||
       // After a colon joined to a word or number: a port ("example.com:443"), a vector
       // ("CVSS:3.1"), an address ("::1"), a time.
-      (!labelled && !dockerTag && /[\p{L}\p{N}:]:$/u.test(before)) ||
+      (!labelled && /[\p{L}\p{N}:]:$/u.test(before)) ||
       // A protocol version ("HTTP/2", "TLS/1.3"); a product and its version ("Apache/2.4.58") is a
       // citation.
       /(?:^|[^\p{L}])(?:https?|http2|tls|ssl|ssh|smb|smtp|imap|pop3|spdy|quic|rtsp|sip|snmp|ftp|ldap)\/$/iu.test(
