@@ -291,7 +291,9 @@ function quotesPhrase(original: string, value: string): boolean {
   const last = [...wanted].at(-1)!;
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
     // Whole characters (code points) on either side, not halves of a surrogate pair.
-    const [b2 = '', b1 = ''] = [...quote.slice(Math.max(0, at - 4), at)].slice(-2);
+    const before = [...quote.slice(Math.max(0, at - 4), at)];
+    const b1 = before.at(-1) ?? '';
+    const b2 = before.at(-2) ?? '';
     const rest = quote.slice(at + wanted.length);
     const [a1 = '', a2 = ''] = [...rest.slice(0, 4)];
     const mark = (character: string) => !/[\p{L}\p{N}\p{M}_]/u.test(character);

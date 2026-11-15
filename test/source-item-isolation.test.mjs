@@ -179,7 +179,8 @@ test('future records cannot poison valid partial records and are asked for again
   assert.equal(result.checkpoints['github:reviewed'], DATE);
   assert.deepEqual(
     JSON.parse(result.checkpoints['github:reviewed:unreadable']).map(([id]) => id),
-    ['GHSA-BBBB-BBBB-BBBB'],
+    // Kept as GitHub wrote it, so that the request by identifier uses GitHub's own spelling.
+    ['GHSA-bbbb-bbbb-bbbb'],
   );
   assert.equal(result.errors.length, 1);
 });

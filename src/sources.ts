@@ -48,6 +48,7 @@ const OWED_GITHUB_ATTEMPTS = 3;
 /** How many such records are remembered, and how many are asked for by identifier in one run. */
 const MAX_UNREADABLE = 2_000;
 const REFETCH_PER_RUN = 10;
+const REFETCH_WITHOUT_TOKEN = 2;
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue {
@@ -706,11 +707,14 @@ async function github(
   const invalid = new SourceItemFailures();
   // A record that cannot be read is remembered by its identifier, as cve.now remembers the records
   // it still owes, so the checkpoint keeps moving. It is asked for by identifier on later runs and
-  // given up on only after OWED_ATTEMPTS failed reads in runs that read other records and a day
-  // after it was first met. A stored copy of a record whose newer version could not be read is
-  // never confirmed as current: it ages, and exclusions resting on it go to review.
+  // given up on only after OWED_GITHUB_ATTEMPTS failed reads in runs that read other records and a
+  // day after it was first met. A stored copy of a record whose newer version could not be read is
+  // never confirmed as current: it ages, and exclusions resting on it go to review. A run that can
+  // read nothing is a format outage: the checkpoint waits, so that the whole window is listed again
+  // once GitHub serves the usual format.
   const key = (id: string) => id.toUpperCase();
-  const pending = new Map<string, { firstMet: number; attempts: number }>();
+  type Remembered = { id: string; firstMet: number; attempts: number; updated: number };
+  const pending = new Map<string, Remembered>();
   const skipped = new Set<string>();
   try {
     for (const entry of JSON.parse(unreadable.pending ?? '[]') as unknown[])
@@ -720,25 +724,38 @@ async function github(
         typeof entry[1] === 'number' &&
         typeof entry[2] === 'number'
       )
-        pending.set(key(entry[0]), { firstMet: Math.min(entry[1], now), attempts: entry[2] });
+        pending.set(key(entry[0]), {
+          id: entry[0],
+          firstMet: Math.min(entry[1], now),
+          attempts: entry[2],
+          updated: typeof entry[3] === 'number' && entry[3] <= now ? entry[3] : NaN,
+        });
     for (const id of JSON.parse(unreadable.skipped ?? '[]') as unknown[])
       if (typeof id === 'string') skipped.add(key(id));
   } catch {
     // An unreadable list only means those records are found again when GitHub next updates them.
   }
-  /** Records met in this run that could not be read, by identifier. */
-  const unreadableNow = new Set<string>();
+  /** Records met in this run that could not be read: the identifier as GitHub wrote it, and when it was updated. */
+  const unreadableNow = new Map<string, { id: string; updated: number }>();
   /** Records that could not be read and give no usable identifier. */
   let unidentified = 0;
   /** Rows of the listing, readable or not, and the latest update time among them. */
   let rows = 0;
+  let readableRows = 0;
   let reachedRow = -Infinity;
+  /** A format outage: the listing had rows and none of them could be read. */
+  const outage = () => rows > 0 && readableRows === 0;
+  const updatedAt = (item: unknown) => {
+    const updated =
+      typeof item === 'object' && item !== null
+        ? Date.parse(String((item as Record<string, unknown>).updated_at))
+        : NaN;
+    return Number.isFinite(updated) && updated <= now ? updated : NaN;
+  };
   const ghsaId = (item: unknown) => {
     const id =
       typeof item === 'object' && item !== null ? (item as Record<string, unknown>).ghsa_id : undefined;
-    return typeof id === 'string' && /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i.test(id)
-      ? key(id)
-      : undefined;
+    return typeof id === 'string' && /^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/i.test(id) ? id : undefined;
   };
   const read = (item: unknown) => {
     const parsed = invalid.read(() => githubRecord(item, type, now));
@@ -748,41 +765,78 @@ async function github(
       // Read now: what earlier runs could not read is settled. Another revision of it in this run
       // that cannot be read is still reported.
       if (id) {
-        pending.delete(id);
-        skipped.delete(id);
+        pending.delete(key(id));
+        skipped.delete(key(id));
       }
-    } else if (id) unreadableNow.add(id);
+    } else if (id) unreadableNow.set(key(id), { id, updated: updatedAt(item) });
     else unidentified++;
     return parsed;
   };
   /** Records given up on in this run. */
   let passed = 0;
-  /** Settles the remembered records for the next run. Called once the listing has been read. */
-  const settle = (readSomething: boolean) => {
-    const nextPending = new Map<string, { firstMet: number; attempts: number }>();
-    for (const [id, entry] of pending) nextPending.set(id, entry);
-    for (const id of unreadableNow) {
-      const before = pending.get(id) ?? { firstMet: now, attempts: 0 };
-      // A run in which nothing could be read is a format outage, not a bad record.
+  /** Records asked for by identifier and read in this run. */
+  let recovered = 0;
+  /** By-identifier requests refused for this client (rate limit). */
+  let refused = false;
+  /**
+   * Settles the remembered records for the next run, and says where the next run must start when
+   * the listing has to be read again: during a format outage, for remembered records beyond the cap,
+   * and once records can be read again while some are still remembered.
+   */
+  const settle = (readSomething: boolean): number | undefined => {
+    const nextPending = new Map<string, Remembered>(pending);
+    for (const [k, { id, updated }] of unreadableNow) {
+      const before = pending.get(k) ?? { id, firstMet: now, attempts: 0, updated };
+      // A run whose listing could read nothing is a format outage, not a bad record.
       const attempts = before.attempts + (readSomething ? 1 : 0);
       if (attempts >= OWED_GITHUB_ATTEMPTS && now - before.firstMet > UNREADABLE_HOLD_HOURS * HOUR) {
-        nextPending.delete(id);
-        skipped.add(id);
+        nextPending.delete(k);
+        skipped.add(k);
         passed++;
-      } else nextPending.set(id, { firstMet: before.firstMet, attempts });
+      } else
+        nextPending.set(k, {
+          id: before.id,
+          firstMet: before.firstMet,
+          attempts,
+          updated: Number.isFinite(updated) ? updated : before.updated,
+        });
     }
-    // Bounded: the records first met longest ago are kept; the rest are given up on at once.
+    let rewind: number | undefined;
+    const earliest = (entries: Remembered[]) =>
+      Math.min(...entries.map((entry) => entry.updated).filter(Number.isFinite));
+    // Bounded: the records first met longest ago are kept. The rest are not given up on: the
+    // listing is read again from the oldest of them.
     const ordered = [...nextPending].sort((a, b) => a[1].firstMet - b[1].firstMet);
-    for (const [id] of ordered.slice(MAX_UNREADABLE)) {
-      skipped.add(id);
-      passed++;
-    }
+    const beyond = ordered.slice(MAX_UNREADABLE).map(([, entry]) => entry);
+    if (beyond.length) rewind = earliest(beyond);
+    const kept = ordered.slice(0, MAX_UNREADABLE);
+    // Records read again by identifier: the format is back. What is still remembered is listed again.
+    if (recovered && kept.length)
+      rewind = Math.min(rewind ?? Infinity, earliest(kept.map(([, entry]) => entry)));
+    // Nothing in the listing could be read: the window is listed again on the next run.
+    if (!readSomething) rewind = start;
     unreadable.nextPending = JSON.stringify(
-      ordered.slice(0, MAX_UNREADABLE).map(([id, { firstMet, attempts }]) => [id, firstMet, attempts]),
+      kept.map(([, { id, firstMet, attempts, updated }]) => [
+        id,
+        firstMet,
+        attempts,
+        ...(Number.isFinite(updated) ? [updated] : []),
+      ]),
     );
-    unreadable.nextSkipped = JSON.stringify([...skipped].slice(-MAX_UNREADABLE));
+    // A record given up on that still has a stored copy is never forgotten, or that copy would be
+    // confirmed again.
+    const withCopy = new Set(
+      stored.filter((item) => item.source === `github:${type}`).map((item) => key(item.id.slice(7))),
+    );
+    const list = [...skipped];
+    const keep = [
+      ...list.filter((id) => !withCopy.has(id)).slice(-MAX_UNREADABLE),
+      ...list.filter((id) => withCopy.has(id)),
+    ];
+    unreadable.nextSkipped = JSON.stringify(keep);
+    return rewind !== undefined && Number.isFinite(rewind) ? rewind : undefined;
   };
-  const problems = () => {
+  const problems = (rewind: number | undefined) => {
     const parts: string[] = [];
     if (unreadableNow.size)
       parts.push(
@@ -796,6 +850,10 @@ async function github(
       parts.push(
         `GitHub: ${unidentified} record(s) could not be read and give no identifier; no stored record was confirmed as current in this run.`,
       );
+    if (refused)
+      parts.push('GitHub refused requests for single records (rate limit); they are asked for again later.');
+    if (rewind !== undefined)
+      parts.push('The next run lists the records since the oldest that could not be read again.');
     return parts.join(' ');
   };
   try {
@@ -806,12 +864,12 @@ async function github(
         // that could not be read count as progress: they are remembered by identifier.
         if (rows < MAX_PAGES * 90 || !Number.isFinite(reachedRow) || reachedRow <= start)
           throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
-        settle(evidence.size > 0);
-        const note = problems();
+        const rewind = settle(!outage());
+        const note = problems(rewind);
         throw new PartialSourceError(
           `GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.${note ? ` ${note}` : ''}`,
           [...evidence.values()],
-          timestamp(Math.min(now, reachedRow + HOUR)),
+          timestamp(Math.min(now, (rewind ?? reachedRow) + HOUR)),
         );
       }
       if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
@@ -829,40 +887,42 @@ async function github(
         throw new SourceError('GitHub returned more records than the requested page limit.');
       for (const item of items) {
         rows++;
-        const updated =
-          typeof item === 'object' && item !== null
-            ? Date.parse(String((item as Record<string, unknown>).updated_at))
-            : NaN;
-        if (Number.isFinite(updated) && updated <= now) reachedRow = Math.max(reachedRow, updated);
-        read(item);
+        const updated = updatedAt(item);
+        if (Number.isFinite(updated)) reachedRow = Math.max(reachedRow, updated);
+        if (read(item)) readableRows++;
       }
       const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
       next = nextGithubLink(link);
     }
     // Remembered records that this window did not list are asked for by identifier, the longest
-    // waiting first, a few per run.
-    const asked = [...pending]
-      .filter(([id]) => !unreadableNow.has(id) && !evidence.has(`github:${id}`))
-      .sort((a, b) => a[1].firstMet - b[1].firstMet)
-      .slice(0, REFETCH_PER_RUN);
-    for (const [id] of asked) {
+    // waiting first, a few per run: two without a token, whose requests GitHub limits to 60 an hour.
+    const asked = [...pending.values()]
+      .filter((entry) => !unreadableNow.has(key(entry.id)) && !evidence.has(`github:${entry.id}`))
+      .sort((a, b) => a.firstMet - b.firstMet)
+      .slice(0, token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN);
+    for (const entry of asked) {
       try {
-        const response = await http(`${GITHUB}/${encodeURIComponent(id)}`, {
+        const response = await http(`${GITHUB}/${encodeURIComponent(entry.id)}`, {
           headers,
           maxBytes: 1_000_000,
           redirects: 0,
         });
         // GitHub answers that it has no such record, or serves it in a form that cannot be read: a
-        // failed read. Any other failure says nothing about the record.
-        if (response.status === 404) unreadableNow.add(id);
-        else if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
-        else if (!read(JSON.parse(response.body) as unknown)) unreadableNow.add(id);
+        // failed read. A refusal for this client ends the requests; any other failure says nothing
+        // about the record.
+        if (response.status === 404) unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
+        else if (response.status === 403 || response.status === 429) {
+          refused = true;
+          break;
+        } else if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
+        else if (read(JSON.parse(response.body) as unknown)) recovered++;
+        else unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
       } catch (error) {
         if (sourceCanceled(error)) throw error;
         // A failed request says nothing about the record: it is asked for again next run.
       }
     }
-    settle(evidence.size > 0);
+    const rewind = settle(!outage());
     // Every record modified since the window's start has been read. A stored record fetched after
     // that start and not among them is unchanged, so it is confirmed as current: without this an
     // exclusion drawn from it would turn into an "unknown" two poll intervals after it was first
@@ -873,7 +933,7 @@ async function github(
         system.components.map((component) => component.name.toLowerCase()),
       ),
     );
-    const unconfirmed = new Set([...unreadableNow, ...pending.keys(), ...skipped]);
+    const unconfirmed = new Set([...unreadableNow.keys(), ...pending.keys(), ...skipped]);
     // A record that could not be read and has no identifier may be the new version of any stored one.
     if (!unidentified)
       for (const item of stored)
@@ -886,9 +946,14 @@ async function github(
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         )
           evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
-    const note = problems();
-    // The checkpoint moves on: what could not be read is remembered by identifier.
-    if (note) throw new PartialSourceError(note, [...evidence.values()], timestamp(now));
+    const note = problems(rewind);
+    // The checkpoint moves on, unless the listing must be read again from an earlier point.
+    if (note)
+      throw new PartialSourceError(
+        note,
+        [...evidence.values()],
+        timestamp(rewind === undefined ? now : Math.min(now, rewind + HOUR)),
+      );
     return [...evidence.values()];
   } catch (error) {
     throwSourceFailure(error, [...evidence.values()]);

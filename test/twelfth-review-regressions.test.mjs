@@ -180,7 +180,7 @@ test('a GitHub record that cannot be read is remembered by identifier and given 
   assert.equal(first.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'the checkpoint moves on');
   assert.deepEqual(
     pending(first).map(([key, , attempts]) => [key, attempts]),
-    [[id.toUpperCase(), 1]],
+    [[id, 1]],
   );
   assert.ok(!first.evidence.some((item) => item.id === `github:${id}`), 'its stored copy is not confirmed');
   // A run in which nothing at all can be read is an outage: no attempt is counted.
@@ -748,4 +748,19 @@ test('a trademark sign or another script hyphen after a name', () => {
   assert.equal(claim('Confluence℠ 8.6 is affected.', 'Confluence'), true);
   for (const mark of ['⸗', '֊', '゠'])
     assert.equal(claim(`Confluence${mark}Cloud 8.6 is affected.`, 'Confluence'), false, mark);
+});
+
+test('claim edges: a slash after the name, a name inside text without spaces, and a letter outside the BMP', () => {
+  assert.equal(claim('Apache/Tomcat 8.6 is affected.', 'Apache'), false);
+  // Japanese gives no word boundary to check: the name as written is accepted.
+  assert.equal(claim('トヨタ自動車 8.6 is affected.', 'トヨタ'), true);
+  // A Deseret letter (outside the Basic Multilingual Plane) joined to the name continues it.
+  assert.equal(claim('𐐀Struts 8.6 is affected.', 'Struts'), false);
+  assert.equal(claim('Struts𐐀 8.6 is affected.', 'Struts'), false);
+});
+
+test('a letter joined to a name at the very start of a quote continues it', () => {
+  assert.equal(claim('XStruts 8.6 is affected by the flaw.', 'Struts'), false);
+  assert.equal(claim('-Struts 8.6 is affected by the flaw.', 'Struts'), true);
+  assert.equal(claim('Struts 8.6 is affected by the flaw.', 'Struts'), true);
 });
