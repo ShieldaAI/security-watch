@@ -46,7 +46,7 @@ const UNREADABLE_HOLD_HOURS = 24;
 /** Failed reads, in runs that read other records, before such a record is given up on. */
 const OWED_GITHUB_ATTEMPTS = 3;
 /** How many such records are remembered, and how many are asked for by identifier in one run. */
-const MAX_UNREADABLE = 2_000;
+const MAX_UNREADABLE = 10_000;
 const REFETCH_PER_RUN = 10;
 const REFETCH_WITHOUT_TOKEN = 2;
 type RecordValue = Record<string, unknown>;
@@ -743,8 +743,18 @@ async function github(
   let rows = 0;
   let readableRows = 0;
   let reachedRow = -Infinity;
-  /** A format outage: the listing had rows and none of them could be read. */
-  const outage = () => rows > 0 && readableRows === 0;
+  /**
+   * A format outage: the listing had rows and none of them could be read, and some were first met
+   * within the last day. A window that has held only records that cannot be read for longer than
+   * that holds bad records, not an outage, so the checkpoint may move again.
+   */
+  const outage = () =>
+    rows > 0 &&
+    readableRows === 0 &&
+    [...unreadableNow.keys()].some((k) => {
+      const entry = pending.get(k);
+      return !entry || now - entry.firstMet <= UNREADABLE_HOLD_HOURS * HOUR;
+    });
   const updatedAt = (item: unknown) => {
     const updated =
       typeof item === 'object' && item !== null
@@ -808,9 +818,18 @@ async function github(
     // Bounded: the records first met longest ago are kept. The rest are not given up on: the
     // listing is read again from the oldest of them.
     const ordered = [...nextPending].sort((a, b) => a[1].firstMet - b[1].firstMet);
-    const beyond = ordered.slice(MAX_UNREADABLE).map(([, entry]) => entry);
-    if (beyond.length) rewind = earliest(beyond);
-    const kept = ordered.slice(0, MAX_UNREADABLE);
+    // Beyond the cap the records whose day has passed are given up on first, then the newest: the
+    // checkpoint must always be able to move.
+    const overdue = (entry: Remembered) => now - entry.firstMet > UNREADABLE_HOLD_HOURS * HOUR;
+    const byPriority = [...ordered].sort(
+      (a, b) => Number(overdue(a[1])) - Number(overdue(b[1])) || a[1].firstMet - b[1].firstMet,
+    );
+    for (const [k] of byPriority.slice(MAX_UNREADABLE)) {
+      skipped.add(k);
+      passed++;
+    }
+    const keptKeys = new Set(byPriority.slice(0, MAX_UNREADABLE).map(([k]) => k));
+    const kept = ordered.filter(([k]) => keptKeys.has(k));
     // Records read again by identifier: the format is back. What is still remembered is listed again.
     if (recovered && kept.length)
       rewind = Math.min(rewind ?? Infinity, earliest(kept.map(([, entry]) => entry)));

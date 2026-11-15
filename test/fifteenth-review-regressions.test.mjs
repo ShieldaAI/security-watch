@@ -231,3 +231,42 @@ test('a fixture preview treats its records as read now, whatever date the file c
     !report.findings.some((finding) => finding.reasons.some((reason) => /evidence is stale/.test(reason))),
   );
 });
+
+test('a version cut from the start of a word is refused even when another quote supports the product', () => {
+  const text = 'Example Server is affected. Example Server 12.4.1 lets unauthenticated users upload files.';
+  assert.equal(
+    accepts(text, ['Example Server is affected.', '2.4.1 lets unauthenticated users'], {
+      products: ['Example Server'],
+      versions: ['2.4.1'],
+    }),
+    false,
+  );
+  assert.equal(
+    accepts(text, ['Example Server is affected.', '12.4.1 lets unauthenticated users'], {
+      products: ['Example Server'],
+      versions: ['12.4.1'],
+    }),
+    true,
+  );
+});
+
+test('every occurrence of a free quote is widened: one whole occurrence is enough', () => {
+  const text = 'Example Server 12.4.1 is old. Example Server 2.4.1 is affected by the flaw.';
+  assert.equal(accepts(text, ['2.4.1 is affected by the flaw.'], { versions: ['2.4.1'] }), true);
+});
+
+test('a version after a label colon or at either end of a tilde range is cited', () => {
+  const chinese = 'Apache Struts 2.0.0~2.5.32 存在远程代码执行漏洞，请尽快升级。';
+  assert.equal(accepts(chinese, [chinese], { versions: ['2.5.32'] }), true);
+  assert.equal(accepts(chinese, [chinese], { versions: ['2.0.0'] }), true);
+  const label = 'Affected Version:2.5.32 and earlier releases are vulnerable.';
+  assert.equal(
+    accepts(label, ['2.5.32 and earlier releases are vulnerable.'], { versions: ['2.5.32'] }),
+    true,
+  );
+  for (const text of [
+    'Scores CVSS:3.1 for the flaw in this release cycle.',
+    'It listens on example.com:443 in this cycle.',
+  ])
+    assert.equal(accepts(text, [text], { versions: [text.includes('CVSS') ? '3.1' : '443'] }), false, text);
+});

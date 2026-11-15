@@ -280,14 +280,18 @@ test('once a record is read again by identifier, the listing is read again from 
   assert.deepEqual(second.errors, []);
 });
 
-test('remembered records beyond the cap are listed again, not given up on', async () => {
+test('beyond the cap of 10,000 remembered records, those whose day has passed are given up on first, and the checkpoint moves', async () => {
   const store = new Store(':memory:');
-  const remember = Array.from({ length: 2_001 }, (_, index) => [
-    `GHSA-cccc-${String(index).padStart(4, '0')}-cccc`,
-    NOW - DAY + index,
-    1,
-    NOW - 10 * HOUR + index * 1000,
-  ]);
+  // 9,999 met an hour ago, and two met two days ago.
+  const remember = [
+    ...Array.from({ length: 9_999 }, (_, index) => [
+      `GHSA-cccc-${String(index).padStart(4, '0')}-cccc`,
+      NOW - HOUR + index,
+      1,
+    ]),
+    ['GHSA-old0-0000-old0', NOW - 2 * DAY, 1],
+    ['GHSA-old1-0000-old1', NOW - 2 * DAY + 1, 1],
+  ];
   store.saveEvidence([], {
     'github:reviewed': iso(NOW),
     'github:malware': iso(NOW),
@@ -297,10 +301,26 @@ test('remembered records beyond the cap are listed again, not given up on', asyn
     byId: () => ({ status: 503, headers: {}, body: '' }),
   });
   const result = await poll(store, http, NOW + 30 * MINUTE);
-  assert.equal(remembered(result).length, 2_000);
-  assert.equal(JSON.parse(result.checkpoints['github:reviewed:skipped']).length, 0, 'none is given up on');
-  // The newest, beyond the cap, is listed again from its update time.
-  assert.equal(result.checkpoints['github:reviewed'], iso(NOW - 10 * HOUR + 2_000 * 1000 + HOUR));
+  assert.equal(remembered(result).length, 10_000);
+  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:skipped']), ['GHSA-OLD1-0000-OLD1']);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'the checkpoint moves');
+});
+
+test('a window holding only records that cannot be read for more than a day is not an outage', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([['GHSA-aaaa-bbbb-0060', NOW - 2 * DAY, 1]]),
+  });
+  const { http } = github(() => [advisory('GHSA-aaaa-bbbb-0060', 'zeta', NOW + 5 * MINUTE, false)]);
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'the checkpoint moves');
+  assert.deepEqual(
+    remembered(result).map(([, , attempts]) => attempts),
+    [2],
+    'the failed read counts',
+  );
 });
 
 test('a record given up on keeps its place while its stored copy exists', async () => {
@@ -546,4 +566,50 @@ test('a failed request for a single GitHub record is reported, not swallowed', a
     [1],
     'not a failed read',
   );
+});
+
+test('a format outage over more rows than one scan reads holds the checkpoint too', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  const rows = Array.from({ length: 5_100 }, (_, index) =>
+    advisory(`GHSA-gggg-${String(index).padStart(4, '0')}-gggg`, `other-${index}`, NOW + index * 100, false),
+  );
+  const http = () => async (raw) => {
+    const url = new URL(raw);
+    if (url.searchParams.get('type') === 'malware') return json([]);
+    const page = Number(url.searchParams.get('page') ?? 0);
+    const headers = {};
+    if (rows.length > (page + 1) * 100) {
+      const next = new URL(url);
+      next.searchParams.set('page', String(page + 1));
+      headers.link = `<${next.href}>; rel="next"`;
+    }
+    return json(rows.slice(page * 100, page * 100 + 100), headers);
+  };
+  const result = await poll(store, http, NOW + HOUR);
+  assert.equal(result.checkpoints['github:reviewed'], iso(NOW), 'not moved past rows that could not be read');
+  // Each remembered row keeps the update time it was listed with, for the listing to come back to.
+  const [first] = remembered(result);
+  assert.equal(first[3], NOW);
+});
+
+test('a record read again by identifier keeps the update time it was listed with', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0070', NOW - 2 * HOUR, 1, NOW - 3 * HOUR],
+      ['GHSA-aaaa-bbbb-0071', NOW - HOUR, 1, NOW + DAY],
+    ]),
+  });
+  const { http } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0070', 'zeta', NOW - 3 * HOUR, false),
+    advisory('GHSA-aaaa-bbbb-0071', 'zeta', NOW - 3 * HOUR, false),
+  ]);
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  const entries = Object.fromEntries(remembered(result).map((entry) => [entry[0], entry]));
+  assert.equal(entries['GHSA-aaaa-bbbb-0070'][3], NOW - 3 * HOUR, 'kept through a failed read by identifier');
+  // A time ahead of the clock is not kept.
+  assert.equal(entries['GHSA-aaaa-bbbb-0071'].length, 3);
 });

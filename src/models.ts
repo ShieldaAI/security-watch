@@ -351,14 +351,16 @@ function widened(evidence: string, quote: string): string[] {
     let start = at;
     let end = at + wanted.length;
     // At most 64 characters on either side, which is longer than any name or version.
-    while (start > Math.max(0, at - 64) && part.test(before(start)) && part.test(after(start)))
+    while (start > Math.max(0, at - 64) && part.test(before(start)) && part.test(after(start))) {
       start -= before(start).length;
+    }
     while (
       end < Math.min(text.length, at + wanted.length + 64) &&
       part.test(after(end)) &&
       part.test(before(end))
-    )
+    ) {
       end += after(end).length;
+    }
     out.push(text.slice(start, end).toLowerCase());
   }
   return out;
@@ -441,15 +443,21 @@ function citesVersion(original: string, version: string): boolean {
     // A letter or digit joined to it makes another token; text without spaces between words does not.
     if (joins([...wanted][0]!, [...before].at(-1) ?? '') || /\d\.$/u.test(before)) continue;
     if (joins([...wanted].at(-1)!, [...after][0] ?? '') || /^\.[\dx*]/iu.test(after)) continue;
+    // A label ("Version:2.5.32", "Affected versions: 2.5.32") or the end of a range written with a
+    // tilde ("2.0.0~2.5.32") is a citation.
+    const labelled = /(?:^|[^\p{L}])(?:versions?|releases?|affected|fixed|patched|vulnerable|ver):$/iu.test(
+      before,
+    );
+    const rangeEnd = /\d~$/u.test(before) && dotted(wanted) && dotted(/([\d.]+)~$/u.exec(before)![1]!);
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (
-      /[\p{Sc}#_~∶±×№·]$/u.test(before) ||
+      (!rangeEnd && /[\p{Sc}#_~∶±×№·]$/u.test(before)) ||
       /[\p{L}\p{N}]\+$/u.test(before) ||
       // A time ("10:30") or a thousands separator ("4'200"); a quotation mark or a label is not one.
       /\d['’]$/u.test(before) ||
       // After a colon joined to a word or number: a port ("example.com:443"), a vector
       // ("CVSS:3.1"), an address ("::1"), a time.
-      /[\p{L}\p{N}:]:$/u.test(before) ||
+      (!labelled && /[\p{L}\p{N}:]:$/u.test(before)) ||
       // A protocol version ("HTTP/2", "TLS/1.3"); a product and its version ("Apache/2.4.58") is a
       // citation.
       /(?:^|[^\p{L}])(?:https?|http2|tls|ssl|ssh|smb|smtp|imap|pop3|spdy|quic|rtsp|sip|snmp|ftp|ldap)\/$/iu.test(
@@ -466,7 +474,7 @@ function citesVersion(original: string, version: string): boolean {
       // A plus sign joined to more is build metadata ("2.4.1+build.5"); alone it means "and later"
       // ("3.0+ are affected").
       // Units written as one symbol ("8.0.3㎳", "2㎝") are amounts too.
-      /^(?: ?[%‰٪\p{Sc}°×\u3380-\u33ff]|[_~·∶]|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(
+      /^(?: ?[%‰٪\p{Sc}°×\u3380-\u33ff]|[_·∶]|~(?!\d)|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(
         after,
       ) ||
       // A qualifier that makes it another release ("2.4.1.RELEASE", "5.3.20.Final", "1.0.M2").
