@@ -670,3 +670,82 @@ test('a backlog with many records that cannot be read still makes progress, reme
   assert.doesNotMatch(second.errors[0]?.message ?? '', /pagination limit/);
   assert.equal(JSON.parse(second.checkpoints['github:reviewed:unreadable']).length, 750);
 });
+
+test('merged events keep their identifiers through scans that read only stored evidence', async () => {
+  const scanConfig = parseConfig({
+    version: 1,
+    sources: { cve_now: false, hacker_news: false, osv: false, github: false, kev: false },
+    policy: { library: { levels: ['high', 'critical'], channels: ['slack'] } },
+    notifications: { slack: { webhook_url_env: 'TWELFTH_REVIEW_SLACK' } },
+  });
+  const store = new Store(':memory:');
+  const inv = inventory([
+    ['alpha', '1.0.0'],
+    ['beta', '1.0.0'],
+  ]);
+  const advisory = (id, aliases, names, source, at) => ({
+    id: `${source}:${id}`,
+    source,
+    kind: 'advisory',
+    title: id,
+    url: 'https://example.com/a',
+    description: '',
+    aliases,
+    severity: 'high',
+    modified_at: iso(NOW - DAY),
+    fetched_at: iso(at),
+    packages: names.map((name) => ({ ecosystem: 'npm', name, range: '<2.0.0' })),
+  });
+  await runScan({
+    config: scanConfig,
+    inventory: inv,
+    store,
+    fixture: [
+      advisory('CVE-2026-0001', ['CVE-2026-0001'], ['alpha'], 'cve_now', NOW),
+      advisory('CVE-2026-0002', ['CVE-2026-0002'], ['beta'], 'cve_now', NOW),
+    ],
+    now: NOW,
+  });
+  const library = () =>
+    store
+      .findings()
+      .filter((finding) => finding.category === 'library' && finding.active !== false)
+      .map((finding) => [finding.component_id, finding.id])
+      .sort();
+  const libraryJobs = () =>
+    store
+      .jobs()
+      .filter((job) => store.findings().find((f) => f.id === job.finding_id)?.category === 'library').length;
+  const before = library();
+  const jobs = libraryJobs();
+  // The merging advisory arrives; then scans run on stored evidence alone, with no source enabled.
+  store.saveEvidence(
+    [
+      advisory(
+        'GHSA-aaaa-bbbb-cccc',
+        ['GHSA-aaaa-bbbb-cccc', 'CVE-2026-0001', 'CVE-2026-0002'],
+        ['alpha', 'beta'],
+        'osv',
+        NOW + MINUTE,
+      ),
+    ],
+    {},
+  );
+  for (const at of [NOW + 2 * MINUTE, NOW + 3 * MINUTE, NOW + 4 * MINUTE])
+    await runScan({
+      config: scanConfig,
+      inventory: inv,
+      store,
+      now: at,
+      http: async () => assert.fail('no request'),
+    });
+  assert.deepEqual(library(), before);
+  assert.equal(libraryJobs(), jobs, 'no new alert');
+});
+
+test('a trademark sign or another script hyphen after a name', () => {
+  assert.equal(claim('Confluence™ 8.6 is affected.', 'Confluence'), true);
+  assert.equal(claim('Confluence℠ 8.6 is affected.', 'Confluence'), true);
+  for (const mark of ['⸗', '֊', '゠'])
+    assert.equal(claim(`Confluence${mark}Cloud 8.6 is affected.`, 'Confluence'), false, mark);
+});

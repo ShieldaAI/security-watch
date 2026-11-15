@@ -328,7 +328,7 @@ function quoteText(text: string): string {
     .normalize('NFC')
     .replace(/[\uff01-\uff5e]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
     .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
-    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63]/g, '-')
+    .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\u2e17\u058a\u30a0\u1400]/g, '-')
     .replace(/[\u2215\u2044]/g, '/')
     .replace(/\s+/g, ' ');
 }
