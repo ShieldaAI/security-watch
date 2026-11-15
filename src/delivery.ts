@@ -173,7 +173,14 @@ export const sendEmail: EmailSender = async (message) => {
 
 function safeText(input: string, length: number, mentions = true): string {
   // The length is applied last: what is removed or reduced below must not count against it.
-  const cleaned = cleanText(input, Math.max(length, 4000))
+  // Invisible characters go before any limit is applied, so they cannot push the visible end of a
+  // value past it.
+  const cleaned = cleanText(
+    input
+      .replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, ' ')
+      .replace(/[\r\p{Default_Ignorable_Code_Point}\p{Cf}\ufff9-\ufffc]/gu, ''),
+    Math.max(length, 4000),
+  )
     // A lone half of a surrogate pair is not text; services may refuse a message that has one.
     .replace(/\p{Cs}/gu, '\ufffd')
     // Fillers that show as a blank (braille blank, Hangul fillers) are spaces to the reader. Some
@@ -355,15 +362,17 @@ export function notificationText(job: Notification): { subject: string; text: st
       text: [...head(notes), ...kept, SHORTENED, ...tail, ...links.slice(0, count)].join('\n'),
     };
   }
-  // Only identifiers at their longest get here: the summary is cut to what is left.
+  // Only identifiers at their longest get here: the summary is cut until the message fits.
   const lines = head(false).slice(0, -1);
-  // Each group-mention break added after the cut takes one more character.
-  const breaks = a.summary.split('@').length - 1;
-  const room = MESSAGE_LIMIT - size([...lines, SHORTENED, ...tail]) - 1 - 'Summary: '.length - breaks;
-  return {
-    subject,
-    text: [...lines, `Summary: ${single(a.summary, Math.max(1, room))}`, SHORTENED, ...tail].join('\n'),
-  };
+  const message = (cap: number) =>
+    [...lines, `Summary: ${single(a.summary, cap)}`, SHORTENED, ...tail].join('\n');
+  let cap = 750;
+  let text = message(cap);
+  while (text.length > MESSAGE_LIMIT && cap > 1) {
+    cap = Math.max(1, cap - (text.length - MESSAGE_LIMIT));
+    text = message(cap);
+  }
+  return { subject, text };
 }
 function digestText(jobs: Notification[]): { subject: string; text: string } {
   const subject = `Security Watch digest: ${jobs.length} findings`;

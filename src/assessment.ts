@@ -45,6 +45,8 @@ function newestEvidence(evidence: Evidence[]): Evidence[] {
 interface Group {
   event: string;
   evidence: Evidence[];
+  /** Identifiers of this event that earlier findings were reported under, the preferred first. */
+  reported?: string[];
 }
 function eventId(ids: string[]): string {
   return [...ids].sort((a, b) => {
@@ -88,6 +90,10 @@ function groupEvidence(input: Evidence[], knownEvents: ReadonlySet<string> = new
     // retired and raised again as a new finding.
     const known = ids.filter((id) => knownEvents.has(id));
     group.event = eventId(known.length ? known : ids);
+    if (known.length > 1)
+      group.reported = [...known].sort((a, b) =>
+        a === group.event ? -1 : b === group.event ? 1 : a.localeCompare(b),
+      );
     for (const id of ids) aliasGroups.set(id, group);
   }
   const news = new Map<string, Group>();
@@ -202,7 +208,12 @@ function base(
   now: number,
   category: Assessment['category'],
   component?: string,
+  knownFindings: ReadonlySet<string> = new Set(),
 ): Assessment {
+  // Two events reported separately can turn out to be one (a GHSA that lists both CVEs). Each
+  // finding keeps the identifier it was reported under, so neither is retired and raised again.
+  const event =
+    group.reported?.find((id) => knownFindings.has(hash([id, system.id, component ?? null]))) ?? group.event;
   const sourceSeverity = highest(
     ...group.evidence.filter((item) => !item.withdrawn).map((item) => item.severity),
   );
@@ -213,8 +224,8 @@ function base(
     group.evidence.find((item) => item.kind === 'advisory' && !item.withdrawn)?.title ??
     (reports[0] ?? group.evidence[0]!).title;
   return {
-    id: hash([group.event, system.id, component ?? null]),
-    event_id: group.event,
+    id: hash([event, system.id, component ?? null]),
+    event_id: event,
     system_id: system.id,
     ...(component ? { component_id: component } : {}),
     category,
@@ -249,6 +260,8 @@ export function assess(
   evidenceAsOf = now,
   /** Event identifiers of findings already reported; an event keeps the one it was reported under. */
   knownEvents: ReadonlySet<string> = new Set(),
+  /** Identifiers of findings already reported, for an event that merges two reported ones. */
+  knownFindings: ReadonlySet<string> = new Set(),
 ): Assessment[] {
   const output: Assessment[] = [];
   const index = new Map<System, Map<string, Component[]>>();
@@ -310,7 +323,7 @@ export function assess(
         if (!matching.length) {
           if (hasCandidates && packageMentioned(newsText, component)) {
             componentMatched = true;
-            const result = base(group, system, now, 'library', component.id);
+            const result = base(group, system, now, 'library', component.id, knownFindings);
             result.news_candidate = true;
             result.reasons.push(
               unclaimedNews
@@ -337,6 +350,7 @@ export function assess(
           now,
           matching.some((match) => match.item.malware) ? 'malware' : 'library',
           component.id,
+          knownFindings,
         );
         const active = matching.filter((match) => !match.item.withdrawn);
         const states = active.map((match) => recordStatus(match.claims, component.version));
@@ -413,6 +427,7 @@ export function assess(
           now,
           isNews ? 'news' : 'product',
           `product:${product.name.toLowerCase()}`,
+          knownFindings,
         );
         result.applicability = isNews ? 'relevant' : 'unknown';
         result.withdrawn = !isNews && advisories.every((item) => item.withdrawn);
@@ -490,6 +505,18 @@ export function decide(assessment: Assessment, config: Config): Decision {
       (assessment.category === 'news' && assessment.relevance === 'irrelevant'));
   if (!channels.length && !quietAi)
     return { action: 'record', channels: [], reason: 'This category has no configured delivery channels.' };
+  // Every supported range excludes the installed version; only the age of the evidence is in
+  // question. That is a source outage, which the source's health finding reports on its own
+  // channels: an urgent alert for every exclusion would repeat it on every outage. As for a current
+  // exclusion, no override applies: an exploited or malicious advisory for other versions is not
+  // about the installed one.
+  if (assessment.stale_exclusion)
+    return {
+      action: 'digest',
+      channels,
+      reason:
+        'The advisory ranges exclude this installed version, but the advisory evidence is out of date (see the source health finding); included in the review digest.',
+    };
   if (assessment.category === 'malware' && policy.malware_override)
     return {
       action: 'notify',
@@ -592,16 +619,6 @@ export function decide(assessment: Assessment, config: Config): Decision {
   if (!channels.length)
     return { action: 'record', channels: [], reason: 'This category has no configured delivery channels.' };
   if (uncertain) {
-    // Every supported range excludes the installed version; only the age of the evidence is in
-    // question. That is a source outage, which the source's health finding reports on its own
-    // channels: an urgent alert for every exclusion would repeat it on every outage.
-    if (assessment.stale_exclusion)
-      return {
-        action: 'digest',
-        channels,
-        reason:
-          'The advisory ranges exclude this installed version, but the advisory evidence is out of date (see the source health finding); included in the review digest.',
-      };
     if (
       policy.urgent_unknown &&
       severityRank[highest(assessment.source_severity, assessment.priority)] >= severityRank.critical

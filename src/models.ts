@@ -280,28 +280,44 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
 /**
  * Whether a quote contains this product name or prerequisite as whole words: "express" is not in
  * "expressive-forms", "authenticated" is not in "unauthenticated", and "forms 4" is not in
- * "forms 4.17.1". A word joined to the phrase by a hyphen or a dot ("expressive-forms",
- * "Node.js") makes one longer name.
+ * "forms 4.17.1". A word joined to the phrase by a hyphen, dot, slash, "@" or "#", or a "+" after it
+ * ("expressive-forms", "Node.js", "@angular/core", "Notepad++") makes one longer name.
  */
 function quotesPhrase(original: string, value: string): boolean {
   const normal = (text: string) =>
     text
+      .normalize('NFC')
       .toLowerCase()
       .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
       .replace(/[\s\u00a0\u2000-\u200a\u202f\u205f\u3000]+/g, ' ');
   const wanted = normal(value).trim();
   if (!wanted) return false;
   const quote = normal(original);
-  const word = /[\p{L}\p{N}_]/u;
+  // A letter, digit or combining mark of a script written with spaces between words. Scripts written
+  // without them (Chinese, Japanese, Thai and others) give no word boundary to check: "Strutsの" names
+  // Struts.
+  const spaced = (character: string) =>
+    /[\p{L}\p{N}\p{M}_]/u.test(character) &&
+    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u.test(
+      character,
+    );
+  // Marks that join the parts of one name: "expressive-forms", "Node.js", "@angular/core", "express#2".
+  const joiner = /[-./@#]/u;
+  const first = wanted[0]!;
+  const last = wanted.at(-1)!;
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
-    const before = quote.slice(Math.max(0, at - 2), at);
-    const after = quote.slice(at + wanted.length, at + wanted.length + 2);
-    const joinedBefore =
-      word.test(before.at(-1) ?? '') || (/[-.]/u.test(before.at(-1) ?? '') && word.test(before.at(-2) ?? ''));
-    const joinedAfter =
-      word.test(after[0] ?? '') || (/[-.]/u.test(after[0] ?? '') && word.test(after[1] ?? ''));
-    // A phrase that itself starts or ends with a mark is taken as written.
-    if ((joinedBefore && word.test(wanted[0]!)) || (joinedAfter && word.test(wanted.at(-1)!))) continue;
+    const [b1 = '', b2 = ''] = [quote[at - 1], quote[at - 2]];
+    const [a1 = '', a2 = ''] = [quote[at + wanted.length], quote[at + wanted.length + 1]];
+    // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
+    // (".NET" in "ASP.NET").
+    const joinedBefore = spaced(first)
+      ? spaced(b1) || (joiner.test(b1) && (spaced(b2) || b1 === '@')) || b1 === '+'
+      : spaced(b1);
+    // "Notepad" in "Notepad++", "C" in "C#".
+    const joinedAfter = spaced(last)
+      ? spaced(a1) || (joiner.test(a1) && spaced(a2)) || a1 === '+' || a1 === '#'
+      : spaced(a1);
+    if (joinedBefore || joinedAfter) continue;
     return true;
   }
   return false;

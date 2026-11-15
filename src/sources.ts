@@ -478,8 +478,16 @@ async function osv(
       }
     }
     const ids = new Set(matched.keys());
+    // Stored records are refreshed while their package is in the inventory: one for a package that
+    // was removed concerns no finding, and re-reading all of history would grow without end.
+    const names = new Set(queries.map((query) => query.name.toLowerCase()));
     for (const item of previous)
-      if (item.source === 'osv' && item.id.startsWith('osv:')) ids.add(item.id.slice(4));
+      if (
+        item.source === 'osv' &&
+        item.id.startsWith('osv:') &&
+        (item.packages ?? []).some((claim) => names.has(claim.name.toLowerCase()))
+      )
+        ids.add(item.id.slice(4));
     if (ids.size > MAX_ADVISORIES)
       throw new SourceError('OSV historical advisory limit reached; collection is incomplete.');
     // Bounded parallelism; historical IDs are refreshed even when they disappear from exact-version queries.
@@ -633,6 +641,27 @@ function nextGithubLink(link: string | undefined): string | undefined {
   }
   return undefined;
 }
+/**
+ * Where a GitHub scan's window starts, and since when every modification has been read through an
+ * unbroken chain of scans. A catch-up over more updates than one scan reads moves the window start on
+ * from scan to scan; the chain still covers everything since the scan that began it.
+ */
+function githubWindow(
+  checkpoint: string | undefined,
+  since: string | undefined,
+  now: number,
+): { start: number; chainStart: number } {
+  const saved = checkpoint === undefined ? undefined : Date.parse(checkpoint);
+  if (saved !== undefined && !Number.isFinite(saved))
+    throw new SourceError('Invalid source checkpoint; reset it before collecting.');
+  // A checkpoint ahead of the clock (a clock that was wrong, then corrected) would never be reached:
+  // collection starts as on a new installation, as cve.now does.
+  const previous = saved === undefined || saved > now ? now - 7 * 24 * HOUR : saved;
+  const start = Math.max(0, previous - HOUR);
+  const chained = since ? Date.parse(since) : NaN;
+  return { start, chainStart: Number.isFinite(chained) && chained <= start ? chained : start };
+}
+
 async function github(
   type: 'reviewed' | 'malware',
   checkpoint: string | undefined,
@@ -641,14 +670,9 @@ async function github(
   now: number,
   inventory: Inventory,
   stored: Evidence[],
+  since: string | undefined,
 ): Promise<Evidence[]> {
-  const saved = checkpoint === undefined ? undefined : Date.parse(checkpoint);
-  if (saved !== undefined && !Number.isFinite(saved))
-    throw new SourceError('Invalid source checkpoint; reset it before collecting.');
-  // A checkpoint ahead of the clock (a clock that was wrong, then corrected) would never be reached:
-  // collection starts as on a new installation, as cve.now does.
-  const previous = saved === undefined || saved > now ? now - 7 * 24 * HOUR : saved;
-  const start = Math.max(0, previous - HOUR);
+  const { start, chainStart } = githubWindow(checkpoint, since, now);
   const url = new URL(GITHUB);
   url.searchParams.set('type', type);
   // GitHub's search-date parser rejects fractional seconds, unlike checkpoint timestamps.
@@ -718,7 +742,7 @@ async function github(
         if (
           item.source === `github:${type}` &&
           !evidence.has(item.id) &&
-          Date.parse(item.fetched_at) >= start &&
+          Date.parse(item.fetched_at) >= chainStart &&
           Date.parse(item.fetched_at) <= now &&
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         )
@@ -1222,7 +1246,16 @@ export async function collectSources(
       jobs.push({
         source: `github:${type}`,
         run: () =>
-          github(type, checkpoints[`github:${type}`], config, http, now, inventory, previousEvidence),
+          github(
+            type,
+            checkpoints[`github:${type}`],
+            config,
+            http,
+            now,
+            inventory,
+            previousEvidence,
+            checkpoints[`github:${type}:since`],
+          ),
       });
   if (config.sources.kev) jobs.push({ source: 'kev', run: () => kev(http, now, previousEvidence) });
   for (const vendor of new Set(config.sources.vendor_feeds ?? [])) {
@@ -1281,7 +1314,14 @@ export async function collectSources(
       if (error instanceof PartialSourceError) {
         collected = error.evidence;
         // An ordered source that ran out of room continues from the last record it processed.
-        if (error.resume) result.checkpoints[job.source] = error.resume;
+        if (error.resume) {
+          result.checkpoints[job.source] = error.resume;
+          // A GitHub catch-up goes on next time; remember where its chain of scans began.
+          if (job.source.startsWith('github:'))
+            result.checkpoints[`${job.source}:since`] = timestamp(
+              githubWindow(checkpoints[job.source], checkpoints[`${job.source}:since`], now).chainStart,
+            );
+        }
         packageResults = error.packageResults;
       }
     }
@@ -1310,7 +1350,10 @@ export async function collectSources(
       return false;
     });
     result.evidence.push(...evidence);
-    if (!incomplete) result.checkpoints[job.source] = timestamp(now);
+    if (!incomplete) {
+      result.checkpoints[job.source] = timestamp(now);
+      if (job.source.startsWith('github:')) result.checkpoints[`${job.source}:since`] = '';
+    }
     // Remember what the feed listed, so the next poll can tell a late arrival from an old entry.
     if (!Array.isArray(collected) && !incomplete)
       result.checkpoints[`${job.source}:listed`] = JSON.stringify(collected.listed.slice(0, 2_000));

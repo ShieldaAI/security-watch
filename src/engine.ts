@@ -192,6 +192,9 @@ export async function runScan(options: {
       .filter((finding) => finding.active !== false && finding.category !== 'health')
       .map((finding) => finding.event_id),
   );
+  const knownFindings = new Set(
+    [...previousById.values()].filter((finding) => finding.active !== false).map((finding) => finding.id),
+  );
   const decisions: Record<string, Decision> = {};
   let remediationEvidence = store.evidence();
   const persist = (assessment: Assessment) => {
@@ -302,7 +305,7 @@ export async function runScan(options: {
     // of that evidence as of the last collection: time that passed while the monitor was stopped
     // must not turn an exclusion into an urgent "unknown" that the refresh then takes back.
     const collectedAt = Math.min(now, lastCollection(store, cached));
-    const current = assess(inventory, cached, config, now, collectedAt, knownEvents);
+    const current = assess(inventory, cached, config, now, collectedAt, knownEvents, knownFindings);
     const ids = new Set(current.map((a) => a.id));
     for (const finding of current)
       if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById, collectedAt)));
@@ -326,7 +329,7 @@ export async function runScan(options: {
   const evidence = store.evidence();
   remediationEvidence = evidence;
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
-  const findings = assess(inventory, evidence, config, now, now, knownEvents);
+  const findings = assess(inventory, evidence, config, now, now, knownEvents, knownFindings);
   const bases = new Map(findings.map((a) => [a.id, basis(a, evidenceById)]));
   const errors = [
     ...result.errors,

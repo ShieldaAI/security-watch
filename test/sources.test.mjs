@@ -139,7 +139,10 @@ test('OSV splits inventories into batches of at most 100 and no matches create n
 });
 
 test('historical OSV IDs refresh after disappearing from query results so withdrawals are observed', async () => {
-  const previous = [{ id: 'osv:GHSA-aaaa-aaaa-aaaa', source: 'osv' }];
+  // A stored record for an inventory package: refreshed although the query no longer names it.
+  const previous = [
+    { id: 'osv:GHSA-aaaa-aaaa-aaaa', source: 'osv', packages: [{ ecosystem: 'npm', name: 'alpha' }] },
+  ];
   let fullReads = 0;
   const result = await collectSources(
     inventory(),
@@ -267,7 +270,7 @@ test('valid unsorted OSV events and independent limit events preserve version-bo
           );
         },
         NOW,
-        [{ id: 'osv:OSV-boundary', source: 'osv' }],
+        [{ id: 'osv:OSV-boundary', source: 'osv', packages: [{ ecosystem: 'npm', name: 'alpha' }] }],
       );
       assert.deepEqual(result.errors, []);
       const actual = ['0.5.0', '1.0.0', '2.0.0', '3.0.0'].map((version) => {

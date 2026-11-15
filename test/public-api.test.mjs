@@ -48,7 +48,11 @@ test('the version is defined once and the documents agree with it', () => {
   const lock = JSON.parse(read('../package-lock.json'));
   assert.equal(lock.version, version);
   assert.equal(lock.packages[''].version, version);
-  assert.ok(read('../compose.yaml').includes(`shielda-security-watch:${version}`));
+  const images = [...read('../compose.yaml').matchAll(/image: shielda-security-watch:(\S+)/g)].map(
+    ([, tag]) => tag,
+  );
+  assert.ok(images.length >= 2, 'both services name the image');
+  for (const tag of images) assert.equal(tag, version, 'compose.yaml');
   assert.ok(read('../CHANGELOG.md').includes(`## ${version}`));
   assert.equal(engines.node, '>=24.10.0');
   // A prerelease never publishes to the default tag, and a stable release always does.

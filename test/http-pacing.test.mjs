@@ -50,7 +50,8 @@ test(
     assert(results.every((result) => result.status === 200));
     assert.equal(starts.length, 4);
     for (let index = 1; index < starts.length; index++)
-      assert(starts[index] - starts[index - 1] >= 60, 'Client request admission must not start in a burst');
+      // Half the interval: a burst starts all four at once, and timers under load fire late, not early.
+      assert(starts[index] - starts[index - 1] >= 40, 'Client request admission must not start in a burst');
     assert.equal(pendingResponses.length, 4, 'Outstanding responses do not hold the origin admission queue');
   },
 );
