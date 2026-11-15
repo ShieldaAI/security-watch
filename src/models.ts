@@ -58,6 +58,13 @@ function sourcePrefix(text: string, length: number): string {
 export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, index: number): Excerpt[] {
   const text = `${evidence.title}\n${evidence.description}`;
   const excerpts: Excerpt[] = [];
+  // Lengths are counted in characters (code points), as the quote contract counts them.
+  const low = (at: number) => /^[\uDC00-\uDFFF]$/.test(text[at] ?? '');
+  const forward = (from: number, count: number) => {
+    let at = from;
+    for (let n = 0; n < count && at < text.length; n++) at += (text.codePointAt(at) ?? 0) > 0xffff ? 2 : 1;
+    return at;
+  };
   let start = 0;
   while (start < text.length) {
     let end = Math.min(start + 480, text.length);
@@ -69,16 +76,21 @@ export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, i
         const space = section.lastIndexOf(' ');
         if (space >= 240) end = start + space + 1;
       }
-      // Do not leave a final fragment too short to satisfy the stored quote contract.
-      if (text.length - end < 20) end = Math.max(start + 20, text.length - 20);
+      // Neither this excerpt nor the final fragment is shorter than the stored quote contract allows.
+      const floor = forward(start, 20);
+      if (forward(end, 20) === text.length && [...text.slice(end)].length < 20) {
+        let tail = text.length;
+        for (let n = 0; n < 20 && tail > floor; n++) tail -= low(tail - 1) && tail - 2 >= floor ? 2 : 1;
+        end = Math.max(floor, tail);
+      }
       // Whole characters: not before a combining mark (also one outside the basic plane) or a Hangul
       // vowel or final consonant written apart (decomposed text), nor between the halves of a
       // surrogate pair.
       const inside = (at: number) =>
         /^[\uDC00-\uDFFF]$/.test(text[at] ?? '') ||
         /^[\p{M}\u1160-\u11ff\ud7b0-\ud7ff]$/u.test(String.fromCodePoint(text.codePointAt(at) ?? 32));
-      while (end > start + 20 && inside(end)) end--;
-      if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
+      while (end > floor && inside(end)) end--;
+      if (end > floor && low(end)) end--;
     }
     excerpts.push({ id: `e${index}s${excerpts.length}`, text: text.slice(start, end) });
     start = end;
@@ -794,7 +806,7 @@ export class ModelAnalyzer {
     const excerpts = new Map(
       context.evidence.flatMap((e) =>
         e.excerpts
-          .filter((excerpt) => excerpt.text.length >= 20)
+          .filter((excerpt) => [...excerpt.text].length >= 20)
           .map((excerpt) => [excerpt.id, { evidence_id: e.id, quote: excerpt.text }] as const),
       ),
     );

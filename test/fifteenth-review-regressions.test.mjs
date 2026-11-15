@@ -958,3 +958,50 @@ test('a closing bracket or quotation mark straight after a name does not join it
   ])
     assert.equal(accepts(text, [text], { products: ['Apache Struts'] }), true, text);
 });
+
+test('every excerpt offered holds at least 20 characters, counted as the quote contract counts them', () => {
+  for (let pad = 0; pad < 40; pad++)
+    for (const ending of ['Update now 🚨🚨', '𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕', 'Update now please']) {
+      const description = `${'Example Server 2.4.1 lets remote users upload files. '.repeat(10)}${'x'.repeat(pad)} ${ending}`;
+      const excerpts = excerptsFor({ title: 'News', description }, 0);
+      assert.equal(excerpts.map((excerpt) => excerpt.text).join(''), `News\n${description}`);
+      for (const excerpt of excerpts)
+        assert.ok([...excerpt.text].length >= 20, `${pad} ${JSON.stringify(excerpt.text)}`);
+    }
+});
+
+test('the final fragment holds 20 characters when the cut falls just before the end', () => {
+  for (let length = 440; length < 520; length++)
+    for (const ending of ['🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨', 'Update now 🚨🚨', '𝐀'.repeat(25)]) {
+      const description = `${'x'.repeat(length)}${ending}`;
+      const excerpts = excerptsFor({ title: 'News', description }, 0);
+      assert.equal(excerpts.map((excerpt) => excerpt.text).join(''), `News\n${description}`);
+      for (const excerpt of excerpts)
+        assert.ok([...excerpt.text].length >= 20, `${length} ${JSON.stringify(excerpt.text)}`);
+    }
+});
+
+test('a long run of combining marks is cut without hanging', { timeout: 5000 }, () => {
+  const description = 'a' + '́'.repeat(1000) + ' Apache Struts 2.5.32 is affected.';
+  const excerpts = excerptsFor({ title: 'News', description }, 0);
+  assert.equal(excerpts.map((excerpt) => excerpt.text).join(''), `News\n${description}`);
+  for (const excerpt of excerpts) assert.ok([...excerpt.text].length >= 20);
+});
+
+test('a quote inside another keeps the outer stretch, also for a claim past the inner one', () => {
+  const text = 'The vendor says Example Server 2.4.1 has a serious bug that lets users upload files.';
+  const inner = text.slice(0, text.indexOf('2.4.1') + 5);
+  assert.equal(accepts(text, [text, inner], { products: ['serious bug'] }), true);
+  assert.equal(accepts(text, [inner, text], { products: ['serious bug'] }), true);
+});
+
+test('a clean stop recorded after this start (a clock set back) moves nothing', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const since = iso(NOW - 3_600_000);
+  store.setMeta(
+    'worker',
+    JSON.stringify({ status: 'stopped', catching_up_since: since, heartbeat_at: iso(NOW + 20 * 60_000) }),
+  );
+  assert.equal(catchingUpFrom(store, iso(NOW)), since);
+});
