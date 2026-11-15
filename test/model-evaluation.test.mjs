@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CORPUS,
   evaluateModels,
+  evaluationExitCode,
   evaluationFixture,
   parseEvaluationOptions,
   scoreEvaluation,
@@ -183,4 +184,49 @@ test('evaluation refuses unknown cases/providers and unbounded request/token opt
     ['--timeout-seconds', 'Infinity'],
   ])
     assert.throws(() => parseEvaluationOptions(args), /INVALID_OPTIONS/);
+});
+
+test('live evaluation gates accepted wrong labels and measures actual unnecessary outbox alerts', async () => {
+  const corpus = structuredClone(CORPUS);
+  corpus.cases = corpus.cases.filter((item) => ['php-fixed', 'php-missing-version'].includes(item.id));
+  let request = 0;
+  const wrong = await evaluateModels(options(['--live']), {
+    env,
+    corpus,
+    now: () => NOW,
+    http: async () => {
+      const id = request++ === 0 ? 'php-fixed' : 'php-missing-version';
+      return responseFor(id, id === 'php-fixed' ? 'affected' : 'unknown');
+    },
+  });
+  assert.equal(wrong.metrics.accepted, 2);
+  assert.equal(wrong.quality_gate.label_mismatches, 1);
+  assert.equal(wrong.outcome_metrics.unnecessary_immediate_alert_trials, 1);
+  assert.equal(evaluationExitCode(wrong), 1);
+  request = 0;
+  const correct = await evaluateModels(options(['--live']), {
+    env,
+    corpus,
+    now: () => NOW,
+    http: async () => {
+      const id = request++ === 0 ? 'php-fixed' : 'php-missing-version';
+      return responseFor(id, id === 'php-fixed' ? 'not_affected' : 'unknown');
+    },
+  });
+  assert.equal(correct.quality_gate.passed, true);
+  assert.equal(evaluationExitCode(correct), 0);
+  assert(correct.outcome_metrics.nonactionable_digest_notifications > 0);
+});
+test('live evaluation exit never promotes partial or unattempted reports', async () => {
+  const value = await evaluateModels(options(['--live', '--max-requests', '1']), {
+    env,
+    now: () => NOW,
+    http: async () => responseFor('php-fixed', 'not_affected'),
+  });
+  assert.equal(value.metrics.accepted, 1);
+  assert.equal(evaluationExitCode(value), 1);
+  assert.equal(value.quality_gate.complete, false);
+  assert.equal(evaluationExitCode(await evaluateModels(options(), { env })), 3);
+  assert.throws(() => parseEvaluationOptions(['--cases', 'php-fixed,php-fixed']));
+  assert.throws(() => parseEvaluationOptions(['--providers', 'openai,openai']));
 });

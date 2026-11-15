@@ -130,7 +130,7 @@ test('new vulnerability analysis targets the configured product and event and pr
     event_id: CVE,
     verified_aliases: [CVE],
     installed_version_known: true,
-    component_id: 'product:acme gateway',
+    component_id: 'p0',
     category: 'product',
   });
   assert.equal(context.system.products[0].version, '2.4.0');
@@ -147,7 +147,7 @@ test('new vulnerability analysis targets the configured product and event and pr
   assert.equal(decide(result, configuration()).action, 'notify');
 });
 
-test('an explicitly fixed installed product version is recorded quietly as model-claimed not affected', async () => {
+test('an explicitly fixed installed product version remains model-claimed and requires review', async () => {
   const fixed = { ...system, products: [{ ...system.products[0], version: '2.5.0' }] };
   const result = await analyze(
     payload({
@@ -159,7 +159,8 @@ test('an explicitly fixed installed product version is recorded quietly as model
   assert.equal(result.news_analysis.impact, 'not_affected');
   assert.equal(result.relevance, 'irrelevant');
   assert.equal(result.applicability, 'unknown');
-  assert.equal(decide(result, configuration()).action, 'record');
+  assert.equal(decide(result, configuration()).action, 'digest');
+  assert.ok(decide(result, configuration()).review);
 });
 
 for (const product of ['Another Gateway', 'Acme Controller'])
@@ -203,7 +204,8 @@ test('a mere product mention is general news while a known-vulnerability exploit
     { evidence: [{ ...article, aliases: [], description: general }] },
   );
   assert.equal(result.news_analysis.classification, 'general_news');
-  assert.equal(decide(result, configuration()).action, 'record');
+  assert.equal(decide(result, configuration()).action, 'digest');
+  assert.ok(decide(result, configuration()).review);
   const known = `Attackers are now exploiting known ${CVE} in Acme Gateway versions before 2.5.0; the original patch remains available.`;
   const update = await analyze(payload({ classification: 'known_vulnerability_update' }, known), {
     evidence: [{ ...article, description: known }],
@@ -232,7 +234,8 @@ test('a product finding linked to a noncritical CVE can use news analysis withou
   });
   assert.equal(result.relevance, 'irrelevant');
   assert.equal(result.applicability, 'unknown');
-  assert.equal(decide(result, configuration()).action, 'record');
+  assert.equal(decide(result, configuration()).action, 'digest');
+  assert.ok(decide(result, configuration()).review);
   const critical = await analyze(data, {
     evidence: [article, advisory],
     target: {
@@ -797,4 +800,35 @@ test('schema-ignoring models cannot use an unscoped versioned product to declare
       }
       assert.equal(calls, 1, 'Cached output must receive the same target guard as fresh output');
     });
+});
+
+test('an excerpt under 20 characters (emoji counted once) is not offered for citation', async () => {
+  const short = {
+    ...article,
+    id: 'osv:short',
+    kind: 'advisory',
+    source: 'osv',
+    title: 'Acme 🚨🚨🚨🚨🚨🚨🚨🚨',
+    description: '',
+    content_status: undefined,
+  };
+  let body;
+  await analyze(payload(), {
+    evidence: [article, short],
+    target: { ...finding, evidence_ids: [article.id, short.id] },
+    http: async (_url, options) => {
+      body = options.body;
+      return response(payload());
+    },
+  });
+  const request = JSON.parse(body);
+  const context = JSON.parse(request.messages[1].content);
+  const excerpt = context.evidence
+    .flatMap((item) => item.excerpts)
+    .find((item) => item.text.startsWith('Acme 🚨'));
+  assert.ok(excerpt, 'the short advisory is in the context');
+  const { messages, ...rest } = request;
+  assert.ok(!JSON.stringify(rest).includes(`"${excerpt.id}"`), 'its excerpt is not offered for citation');
+  const ids = [...new Set(JSON.stringify(rest).match(/e\d+s\d+/g) ?? [])];
+  assert.ok(ids.length > 0 && !ids.includes(excerpt.id), JSON.stringify({ ids, short: excerpt.id }));
 });

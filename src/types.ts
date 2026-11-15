@@ -4,22 +4,97 @@ export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
 export type Channel = 'slack' | 'email';
-export interface Component {
+export interface Provenance {
+  source: string;
+  reference?: string;
+  recorded_at?: string;
+}
+export interface DeploymentObservation {
+  observed_at: string;
+  method: string;
+  reference?: string;
+}
+export type ArtifactKind =
+  | 'application'
+  | 'library'
+  | 'mcp_server'
+  | 'mcp_client'
+  | 'plugin'
+  | 'skill'
+  | 'model'
+  | 'container'
+  | 'other';
+/** An operator's recorded result. Security Watch does not perform cryptographic verification. */
+export interface DeclaredVerification {
+  status: 'verified' | 'failed' | 'unknown';
+  reference: string;
+  recorded_at: string;
+  recorded_by?: string;
+}
+export interface DependencyLink {
+  ref: string;
+  component_id?: string;
+}
+export interface DependencyRelationship {
+  ref: string;
+  depends_on: string[];
+}
+/** Lifecycle evidence is never an instruction to close or downgrade a finding. */
+export interface DeclaredRemediation {
+  event_id: string;
+  stage: 'proposed' | 'changed' | 'deployed';
+  verification: 'supported' | 'failed' | 'unknown';
+  reference: string;
+  recorded_at: string;
+  recorded_by?: string;
+}
+export interface InventoryEvidence {
+  origin?: string;
+  digest?: string;
+  provenance?: Provenance;
+  observation?: DeploymentObservation;
+  artifact_kind?: ArtifactKind;
+  purl?: string;
+  source_url?: string;
+  source_revision?: string;
+  sbom_ref?: string;
+  dependencies?: DependencyLink[];
+  signature_verification?: DeclaredVerification;
+  attestation_verification?: DeclaredVerification;
+  remediation_evidence?: DeclaredRemediation[];
+}
+export interface Component extends InventoryEvidence {
   id: string;
   ecosystem: Ecosystem;
   name: string;
   version?: string;
+  /** Operator's pointer to where this library is used. Shown in notifications; never sent to models or sources. */
+  note?: string;
 }
 export interface Product {
   name: string;
   version?: string;
   keywords: string[];
+  /** Operator's pointer to where this product runs. Shown in notifications; never sent to models or sources. */
+  note?: string;
 }
-export interface System {
+/** Where a reader should look to confirm a finding. Copied from the inventory; not security evidence. */
+export interface FindingLocation {
+  system: string;
+  owner?: string;
+  system_note?: string;
+  component?: string;
+  component_note?: string;
+}
+export interface System extends InventoryEvidence {
   id: string;
   name: string;
   environment: string;
   owner?: string;
+  /** Operator's pointer to where this system lives. Shown in notifications; never sent to models or sources. */
+  note?: string;
+  configuration?: Record<string, string | boolean | number>;
+  sbom_dependencies?: DependencyRelationship[];
   exposure: 'internet' | 'internal' | 'unknown';
   criticality: Severity;
   updated_at: string;
@@ -29,6 +104,9 @@ export interface System {
 }
 export interface Inventory {
   systems: System[];
+  import_warnings?: string[];
+  /** Entries that are accepted as written but may not be what was meant. They do not degrade a scan. */
+  name_notices?: string[];
 }
 export interface PackageClaim {
   ecosystem: string;
@@ -37,6 +115,14 @@ export interface PackageClaim {
   versions?: string[];
   matched_versions?: string[];
   fixed?: string;
+}
+export interface CvssV4BaseScore {
+  /** Validated source vector; optional contextual metrics may be present. */
+  vector: string;
+  /** Exact CVSS-B vector used to derive score. CVSS is owned by FIRST and used by permission. */
+  base_vector: string;
+  score: number;
+  context_removed: boolean;
 }
 export interface Evidence {
   id: string;
@@ -49,6 +135,8 @@ export interface Evidence {
   content_status?: 'full' | 'excerpt' | 'unavailable';
   aliases: string[];
   severity: Severity;
+  /** Bounded source diagnostics. Does not establish applicability, exploitation or deployment context. */
+  cvss_v4?: { base_scores: CvssV4BaseScore[]; unsupported_vectors: number };
   modified_at: string;
   fetched_at: string;
   published_at?: string;
@@ -59,6 +147,8 @@ export interface Evidence {
 }
 export interface ModelSpec {
   provider: ModelProvider;
+  /** Minimal identifiers by default. Extra deployment context requires explicit opt-in per model. */
+  disclosure_profile?: 'minimal' | 'deployment-context';
   output_format?: OutputFormat;
   model: string;
   api_key_env: string;
@@ -103,6 +193,10 @@ export interface Config {
     urgent_unknown: boolean;
     exploited_override: boolean;
     malware_override: boolean;
+    /** Review both AI-only dismissal routes by default. */
+    ai_dismissals?: 'review' | 'record';
+    /** Deprecated configuration alias; true maps to review, false to record. */
+    review_before_news_suppression?: boolean;
     health_channels: Channel[];
   };
   notifications: {
@@ -141,8 +235,17 @@ export interface Rule {
 export interface Assessment {
   /** Only news evidence supports this candidate; AI impact remains a separate claim. */
   news_only?: boolean;
+  remediation?: RemediationEvidence;
+  /** Inventory names and notes for the reader of a notification. Not part of alert deduplication. */
+  location?: FindingLocation;
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
+  /**
+   * The supported version ranges exclude the installed version, but the advisory evidence has not
+   * been refreshed for two poll intervals, so applicability is `unknown`. The source's own health
+   * finding reports the outage; this result goes to the review digest instead of an urgent alert.
+   */
+  stale_exclusion?: boolean;
   active?: boolean;
   id: string;
   event_id: string;
@@ -171,7 +274,22 @@ export interface Assessment {
     status: 'complete' | 'unavailable' | 'conflicting';
   };
 }
+export type AiReviewReason = 'ai_general_news' | 'ai_not_affected' | 'ai_irrelevant';
+export interface AiReview {
+  finding_id: string;
+  revision: number;
+  reason: AiReviewReason;
+  status: 'pending' | 'investigate' | 'dismissed' | 'superseded';
+  created_at: number;
+  reviewed_at: number | null;
+  reviewer: string | null;
+  note: string | null;
+  evidence: { source: string; id: string; content_hash: string }[];
+  assessment: Assessment;
+}
 export interface Decision {
+  /** A durable local review is required even when channels is empty. */
+  review?: AiReviewReason;
   action: 'notify' | 'digest' | 'record';
   channels: Channel[];
   reason: string;
@@ -179,11 +297,15 @@ export interface Decision {
 export interface Notification {
   id: string;
   finding_id: string;
+  /** The persisted finding revision selected when this delivery was enqueued. */
+  revision?: number;
   channel: Channel;
   payload: string;
   status: 'pending' | 'sending' | 'accepted' | 'unknown' | 'failed';
   attempts: number;
   available_at: number;
+  /** Local UTC time in milliseconds when the destination acknowledged this notification. */
+  accepted_at?: number;
   last_error?: string;
 }
 export interface HttpOptions {
@@ -206,10 +328,47 @@ export interface HttpResult {
   body: string;
 }
 export type HttpClient = (url: string, options?: HttpOptions) => Promise<HttpResult>;
+export interface CoverageReceipt {
+  source: string;
+  attempted_at: string;
+  last_success_at?: string;
+  fresh_until?: string;
+  status: 'complete' | 'partial' | 'failed';
+  freshness: 'fresh' | 'stale' | 'never';
+  evidence_count: number;
+  errors: string[];
+  scope: string;
+  /**
+   * Present on an incomplete receipt when the source still read every record for the inventory's own
+   * packages; what it missed are other records. Version exclusions from the source remain supported.
+   */
+  package_results?: 'complete';
+}
+export interface InventoryDrift {
+  system_id: string;
+  component_id?: string;
+  change: 'added' | 'removed' | 'changed';
+  fields: string[];
+  before_digest?: string;
+  after_digest?: string;
+}
+export interface RemediationEvidence {
+  status: 'review_required' | 'version_excluded' | 'observed_version_excluded';
+  observed_at?: string;
+  artifact_digest?: string;
+  source_urls: string[];
+  requirements: string[];
+  configuration: Record<string, string | boolean | number>;
+  note: string;
+  operator_records?: DeclaredRemediation[];
+  signature_verification?: DeclaredVerification;
+  attestation_verification?: DeclaredVerification;
+}
 export interface SourceResult {
   evidence: Evidence[];
   errors: { source: string; message: string }[];
   checkpoints: Record<string, string>;
+  coverage: CoverageReceipt[];
 }
 export interface AiAnalysis {
   relevance: 'relevant' | 'irrelevant' | 'unknown';

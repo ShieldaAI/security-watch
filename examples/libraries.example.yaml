@@ -15,6 +15,8 @@ systems:
         - requests
         - name: urllib3
           version: '2.2.3'
+          # Optional: where this library is used. Repeated in every alert about it.
+          note: billing worker, services/billing/requirements.txt
       php:
         - name: symfony/http-foundation
           version: '6.4.0'

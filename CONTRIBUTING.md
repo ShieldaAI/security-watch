@@ -1,6 +1,6 @@
 # Contributing
 
-Security Watch uses TypeScript and requires Node.js 24 or newer. Keep source evidence, version applicability, contextual priority and notification policy separate when adding features.
+Security Watch uses TypeScript and requires Node.js 24.10 or newer. Keep source evidence, version applicability, contextual priority and notification policy separate when adding features.
 
 ## Local development
 
@@ -59,6 +59,8 @@ The result reports passed, failed and skipped providers without raw model output
 
 Keep provider and source schemas explicit. Do not accept a new service's response as trustworthy merely because it is syntactically valid. Unsupported affected-range formats must remain unknown. New inventory adapters must describe what their data actually establishes about deployment.
 
+`src/word-filter.ts` is generated: a filter of English dictionary words that the news matcher uses to tell `entities` from `axios`. Regenerate it with `node scripts/build-word-filter.mjs` on macOS or a BSD, where `/usr/share/dict/web2` and `/usr/share/dict/propernames` exist; the output is committed and no build needs the word lists. Words of security writing that the 1934 dictionary lacks, the commonest words and the well-known library names are lists in `src/everyday-words.ts`.
+
 ## Pull requests
 
 For behavioral changes, include a concise reproduction, before/after behavior, relevant tests and any change to coverage or privacy. Tests should exercise outcomes rather than mirror implementation details.
@@ -81,7 +83,7 @@ Use fixture-based affected/fixed pairs, conflicting sources, malformed input, so
 
 ## Releases
 
-The package is `@shieldaai/security-watch`; releases currently use the `alpha` tag. Before publishing, commit the reviewed changes, run `npm run check`, and inspect the output of `npm pack --dry-run`. The check command installs the tarball in a clean consumer and verifies the CLI, types and runtime exports. `prepublishOnly` repeats the checks and requires a clean checkout.
+The package is `@shieldaai/security-watch`. Stable versions publish under `latest` and prereleases (release candidates) under `next`. The one supported publish command is `npm run release` (rehearse with `npm run release -- --dry-run`): it chooses the tag from the version and passes it to `npm publish` explicitly. Do not run `npm publish` yourself and do not pass `--tag`. npm hands a command-line option to lifecycle scripts only when it differs from the default, so `prepublishOnly` cannot tell `npm publish --tag latest` from a bare `npm publish`, while npm lets that option override `publishConfig.tag`. `prepublishOnly` therefore refuses a publish that does not carry the tag statement `npm run release` sets, and any tag that is wrong for the version. `npm run release` accepts only `--dry-run` and `--otp=CODE`. These checks prevent mistakes; they are lifecycle scripts, so `npm publish --ignore-scripts` or setting `SECURITY_WATCH_RELEASE_TAG` by hand bypasses them, and neither is ever the right thing to do. `npm run release` and the release check refuse to run when npm is set to ignore scripts or to use another registry (`--ignore-scripts` or `--registry` typed before the `--`, a line in `.npmrc`, or an `npm_config_` environment variable), including a scoped `@shieldaai:registry` line in `.npmrc`. A scoped registry typed as an option before the `--` is not passed on by npm at all, so the publish goes to the official registry. The release check also refuses a package that would contain a file that is not in git, such as an ignored file left in `docs/` or `examples/`. The version is defined in `package.json`; `test/public-api.test.mjs` checks that the lockfile, `compose.yaml`, `CHANGELOG.md`, the README, `docs/offline-advisory-preview.md` and `scripts/check-docker.mjs` agree with it and that the exported names match `scripts/public-api.json`. A change to that list is a compatibility decision: record it in the changelog and follow the [compatibility policy](docs/compatibility.md). Before publishing, commit the reviewed changes, run `npm run check`, and inspect the output of `npm pack --dry-run`. The check command installs the tarball in a clean consumer and verifies the CLI, types and runtime exports. `prepublishOnly` repeats the checks and requires a clean checkout.
 
 Only repository administrators can create `v*` release tags. These tags cannot be changed or deleted, including by administrators.
 

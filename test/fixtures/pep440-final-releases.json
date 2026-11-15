@@ -1,0 +1,771 @@
+{
+  "reference": "Python packaging 26.3 SpecifierSet.contains",
+  "source": "https://packaging.pypa.io/en/stable/specifiers.html",
+  "cases": [
+    {
+      "version": "0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": ">= 1.10.0, < 1.30.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": ">= 2.0.0, < 2.2.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": "==1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0",
+      "range": "==1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "01.000",
+      "range": "==1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": "==1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1",
+      "range": "!=1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": "!=1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": "!=1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "10.0",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": "!=1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "0",
+      "range": ">1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": ">1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": ">1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": ">1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": ">1.0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "10.0",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": ">1.0",
+      "expected": "affected"
+    },
+    {
+      "version": "0",
+      "range": "<=1",
+      "expected": "affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": "<=1",
+      "expected": "affected"
+    },
+    {
+      "version": "1",
+      "range": "<=1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0",
+      "range": "<=1",
+      "expected": "affected"
+    },
+    {
+      "version": "01.000",
+      "range": "<=1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": "<=1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "01.000",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "affected"
+    },
+    {
+      "version": "2",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": ">=0,<2,!=1.29.1",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": ">=9007199254740991",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": ">=9007199254740991",
+      "expected": "affected"
+    },
+    {
+      "version": "0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "0.0.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "01.000",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.0.0.1",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.8.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.10.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.29.1",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "1.30.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.1.1",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "2.2.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "10.0",
+      "range": "<0",
+      "expected": "not_affected"
+    },
+    {
+      "version": "9007199254740991",
+      "range": "<0",
+      "expected": "not_affected"
+    }
+  ]
+}

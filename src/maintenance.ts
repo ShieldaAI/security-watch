@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
@@ -15,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PilotReportError, validatePilotWindow, type PilotReport, type PilotWindow } from './pilot-report.js';
 
 export interface RetentionPolicy {
   analysis_cache_days?: number;
@@ -83,7 +85,58 @@ export async function verifyBackup(
   path: string,
   options: { max_bytes?: number } = {},
 ): Promise<BackupVerification> {
-  const maxBytes = options.max_bytes ?? DEFAULT_BACKUP_LIMIT;
+  return withVerifiedBackup(path, options.max_bytes ?? DEFAULT_BACKUP_LIMIT, false, (report) => report);
+}
+
+/** Keep the original standalone backup free of SQLite's WAL reader coordination files. */
+export async function readPilotBackupReport(path: string, window: PilotWindow): Promise<PilotReport> {
+  const range = validatePilotWindow(window, Date.now());
+  return withPrivatePilotBackup(path, async (restored) => {
+    const { readPilotReport } = await import('./store.js');
+    const report = readPilotReport(restored, range);
+    report.snapshot.source = 'verified_backup';
+    // A standalone backup does not record its capture time or later live worker activity.
+    report.snapshot.reviews.oldest_open_age_ms = null;
+    if (report.snapshot.source_coverage) report.snapshot.source_coverage.freshness = null;
+    if (report.snapshot.last_scan) report.snapshot.last_scan.age_ms = null;
+    return report;
+  });
+}
+
+/** Bind consumers to the bytes copied and verified by the isolated backup reader. */
+export async function withPrivatePilotBackup<T>(
+  path: string,
+  inspect: (restored: string, sourceSha256: string) => T | Promise<T>,
+): Promise<T> {
+  try {
+    return await withVerifiedBackup(
+      path,
+      DEFAULT_BACKUP_LIMIT,
+      true,
+      async (verified, restored, sourceSha256) => {
+        const { SCHEMA_VERSION } = await import('./store.js');
+        // Schema 6 already retains dated revisions and AI reviews. Its copy migrates with unknown receipt times.
+        if (
+          verified.schema_version < 6 ||
+          verified.verified_schema_version !== SCHEMA_VERSION ||
+          !sourceSha256
+        )
+          throw new PilotReportError('database');
+        return inspect(restored, sourceSha256);
+      },
+    );
+  } catch (error) {
+    if (error instanceof PilotReportError) throw error;
+    throw new PilotReportError('database');
+  }
+}
+
+async function withVerifiedBackup<T>(
+  path: string,
+  maxBytes: number,
+  requirePrivate: boolean,
+  inspect: (report: BackupVerification, restored: string, sourceSha256?: string) => T | Promise<T>,
+): Promise<T> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 ** 3)
     throw new Error('Backup byte limit must be between 1 byte and 20 GiB');
   const temporary = mkdtempSync(join(tmpdir(), 'security-watch-verify-'));
@@ -92,7 +145,14 @@ export async function verifyBackup(
     // A bounded subprocess also keeps a damaged backup from blocking the worker indefinitely.
     const result = await runFile(
       process.execPath,
-      [fileURLToPath(import.meta.url), '--verify-copy', resolve(path), temporary, String(maxBytes)],
+      [
+        fileURLToPath(import.meta.url),
+        '--verify-copy',
+        resolve(path),
+        temporary,
+        String(maxBytes),
+        ...(requirePrivate ? ['--private'] : []),
+      ],
       {
         timeout: 60_000,
         killSignal: 'SIGKILL',
@@ -101,10 +161,13 @@ export async function verifyBackup(
         windowsHide: true,
       },
     );
-    const report = JSON.parse(result.stdout) as BackupVerification | { ok: false; error: string };
+    const report = JSON.parse(result.stdout) as
+      (BackupVerification & { source_sha256?: string }) | { ok: false; error: string };
     if (!report.ok) throw new Error(report.error);
-    return report;
+    const { source_sha256, ...verification } = report;
+    return await inspect(verification, join(temporary, 'restored.db'), source_sha256);
   } catch (error) {
+    if (error instanceof PilotReportError) throw error;
     if (error instanceof Error && error.message.startsWith('Backup ')) throw error;
     throw new Error('Backup verification failed or exceeded its time limit; the original was not changed');
   } finally {
@@ -124,8 +187,14 @@ function requireStandalone(path: string): void {
   }
 }
 
-async function inspectCopy(source: string, directory: string, maxBytes: number): Promise<BackupVerification> {
+async function inspectCopy(
+  source: string,
+  directory: string,
+  maxBytes: number,
+  requirePrivate: boolean,
+): Promise<BackupVerification & { source_sha256?: string }> {
   requireStandalone(source);
+  const digest = requirePrivate ? createHash('sha256') : undefined;
   const destination = join(directory, 'restored.db');
   const input = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   let bytes = 0;
@@ -133,6 +202,8 @@ async function inspectCopy(source: string, directory: string, maxBytes: number):
     const before = fstatSync(input);
     if (!before.isFile() || before.nlink !== 1)
       throw new Error('Backup must be a regular file without links');
+    if (requirePrivate && process.platform !== 'win32' && (before.mode & 0o077) !== 0)
+      throw new Error('Backup must have private permissions');
     if (before.size > maxBytes) throw new Error('Backup exceeds the configured byte limit');
     const output = openSync(
       destination,
@@ -146,6 +217,7 @@ async function inspectCopy(source: string, directory: string, maxBytes: number):
         if (!length) break;
         bytes += length;
         if (bytes > maxBytes) throw new Error('Backup exceeds the configured byte limit');
+        digest?.update(buffer.subarray(0, length));
         let offset = 0;
         while (offset < length) offset += writeSync(output, buffer, offset, length - offset);
       }
@@ -214,7 +286,19 @@ async function inspectCopy(source: string, directory: string, maxBytes: number):
         'status',
         'attempts',
         'available_at',
+        'accepted_at',
         'last_error',
+      ],
+      ai_reviews: [
+        'finding_id',
+        'revision',
+        'reason',
+        'status',
+        'evidence_refs',
+        'created_at',
+        'reviewed_at',
+        'reviewer',
+        'note',
       ],
       budgets: ['day', 'requests', 'tokens', 'usd'],
       finding_revisions: ['finding_id', 'revision', 'payload', 'decision', 'recorded_at'],
@@ -235,6 +319,8 @@ async function inspectCopy(source: string, directory: string, maxBytes: number):
     for (const table of ['evidence', 'findings', 'notifications', 'finding_revisions', 'evidence_revisions'])
       if (database.prepare(`SELECT 1 FROM ${table} WHERE NOT json_valid(payload) LIMIT 1`).get())
         throw new Error('Backup contains invalid saved JSON');
+    if (database.prepare('SELECT 1 FROM ai_reviews WHERE NOT json_valid(evidence_refs) LIMIT 1').get())
+      throw new Error('Backup contains invalid review evidence');
     const count = (table: string) =>
       Number(database.prepare(`SELECT count(*) AS total FROM ${table}`).get()!.total);
     const rawScan = database.prepare("SELECT value FROM metadata WHERE key='last_scan'").get()?.value;
@@ -248,6 +334,7 @@ async function inspectCopy(source: string, directory: string, maxBytes: number):
     }
     return {
       ok: true,
+      ...(digest ? { source_sha256: digest.digest('hex') } : {}),
       schema_version: sourceVersion,
       verified_schema_version: SCHEMA_VERSION,
       bytes,
@@ -270,7 +357,12 @@ if (
   process.argv[2] === '--verify-copy'
 ) {
   // Let module initialization finish before the restore imports Store, which uses the policy types above.
-  void inspectCopy(process.argv[3]!, process.argv[4]!, Number(process.argv[5])).then(
+  void inspectCopy(
+    process.argv[3]!,
+    process.argv[4]!,
+    Number(process.argv[5]),
+    process.argv[6] === '--private',
+  ).then(
     (result) => {
       process.stdout.write(JSON.stringify(result));
     },

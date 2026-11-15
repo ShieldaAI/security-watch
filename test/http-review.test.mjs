@@ -134,7 +134,8 @@ test('response bytes, request bytes, timeout and redirect loops are bounded', as
     );
     await assert.rejects(safeHttp(`${target.url}/loop`, { allowPrivate: true }), /REDIRECT_DENIED/);
     await assert.rejects(
-      safeHttp(`${target.url}/slow`, { allowPrivate: true, timeoutMs: 25 }),
+      // The response never ends; the limit is long enough that connecting under load fits in it.
+      safeHttp(`${target.url}/slow`, { allowPrivate: true, timeoutMs: 750 }),
       /REQUEST_TIMEOUT|RESPONSE_FAILED/,
     );
     await assert.rejects(
@@ -363,7 +364,8 @@ test('AI context remains usable for a single finding in a realistic large depend
   const analyzer = new ModelAnalyzer(configuration(), state(), async (_url, options) => {
     calls++;
     const input = JSON.parse(JSON.parse(options.body).messages[1].content);
-    assert(input.system.components.some((component) => component.id === 'alpha'));
+    const target = input.system.components.find((component) => component.id === input.target.component_id);
+    assert.deepEqual(target, { id: 'c0', ecosystem: 'npm', name: 'alpha', version: '1.0.0' });
     assert(input.system.components.length < 10, 'Only relevant components should leave the machine');
     return modelResponse();
   });
@@ -408,7 +410,9 @@ test('news analysis includes the installed component that matched article text a
     );
   }).analyze(newsAssessment, largeSystem, [newsEvidence]);
   assert.equal(result.ai.status, 'complete', result.reasons.join('; '));
-  assert.deepEqual(sent.system.components, system.components);
+  assert.deepEqual(sent.system.components, [{ id: 'c0', ecosystem: 'npm', name: 'alpha', version: '1.0.0' }]);
+  assert.equal(sent.target.component_id, null, 'A keyword-only news candidate has no exact target');
+  assert.equal(sent.target.installed_version_known, false);
   assert.equal(result.relevance, 'unknown');
   assert.equal(result.news_analysis.classification, 'unknown');
   assert.equal(result.news_analysis.impact, 'unknown');

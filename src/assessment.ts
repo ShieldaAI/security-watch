@@ -1,7 +1,9 @@
-import { satisfies, validRange } from 'semver';
+import { satisfies, valid } from 'semver';
+import { pythonRangeStatus } from './python-version.js';
 import type {
   Applicability,
   Assessment,
+  Component,
   Config,
   Decision,
   Evidence,
@@ -11,13 +13,14 @@ import type {
   System,
 } from './types.js';
 import { hash, highest, severityRank, timestamp } from './util.js';
-import { exactLibraryVersion, normalizeEcosystem, samePackage } from './ecosystems.js';
+import { exactLibraryVersion, normalizeEcosystem, packageKey } from './ecosystems.js';
+import { mentions, packageMentioned } from './matching.js';
 
-function identity(id: string): string {
+export function normalizeEventId(id: string): string {
   return /^(?:CVE-|GHSA-)/i.test(id) ? id.toUpperCase() : id;
 }
 function identifiers(evidence: Evidence): string[] {
-  return [...new Set([evidence.id, ...evidence.aliases].map(identity))];
+  return [...new Set([evidence.id, ...evidence.aliases].map(normalizeEventId))];
 }
 function advisoryIdentifier(value: string): boolean {
   return /^(?:CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$/i.test(value);
@@ -42,6 +45,8 @@ function newestEvidence(evidence: Evidence[]): Evidence[] {
 interface Group {
   event: string;
   evidence: Evidence[];
+  /** Identifiers of this event that earlier findings were reported under, the preferred first. */
+  reported?: string[];
 }
 function eventId(ids: string[]): string {
   return [...ids].sort((a, b) => {
@@ -51,7 +56,7 @@ function eventId(ids: string[]): string {
 }
 
 /** Only advisory alias claims merge events. A multi-CVE news story must not merge its subjects. */
-function groupEvidence(input: Evidence[]): Group[] {
+function groupEvidence(input: Evidence[], knownEvents: ReadonlySet<string> = new Set()): Group[] {
   const evidence = newestEvidence(input);
   const parents = new Map<string, string>();
   const find = (value: string): string => {
@@ -73,14 +78,22 @@ function groupEvidence(input: Evidence[]): Group[] {
   }
   const groups = new Map<string, Group>();
   for (const item of advisory) {
-    const root = find(identity(item.id));
+    const root = find(normalizeEventId(item.id));
     if (!groups.has(root)) groups.set(root, { event: '', evidence: [] });
     groups.get(root)!.evidence.push(item);
   }
   const aliasGroups = new Map<string, Group>();
   for (const group of groups.values()) {
     const ids = [...new Set(group.evidence.flatMap(identifiers))];
-    group.event = eventId(ids);
+    // An event already reported under one of its identifiers keeps it: a record that gains a GHSA
+    // alias, or is re-filed under another identifier, is the same vulnerability and must not be
+    // retired and raised again as a new finding.
+    const known = ids.filter((id) => knownEvents.has(id));
+    group.event = eventId(known.length ? known : ids);
+    if (known.length > 1)
+      group.reported = [...known].sort((a, b) =>
+        a === group.event ? -1 : b === group.event ? 1 : a.localeCompare(b),
+      );
     for (const id of ids) aliasGroups.set(id, group);
   }
   const news = new Map<string, Group>();
@@ -102,14 +115,10 @@ function groupEvidence(input: Evidence[]): Group[] {
       }
     }
   }
+  // Known exploitation applies to a cited CVE whether or not an advisory record has arrived yet.
+  for (const item of evidence.filter((item) => item.kind === 'kev'))
+    for (const event of new Set(identifiers(item))) news.get(event)?.evidence.push(item);
   return [...groups.values(), ...news.values()];
-}
-
-/** Word/identifier boundaries prevent "express" matching "expressions" or another npm scope. */
-function mentions(text: string, needle: string): boolean {
-  if (needle.trim().length < 3) return false;
-  const escaped = needle.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}_@/\\-])${escaped}(?![\\p{L}\\p{N}_@/\\-])`, 'iu').test(text);
 }
 
 function stale(system: System, config: Config, now: number): boolean {
@@ -121,6 +130,42 @@ function stale(system: System, config: Config, now: number): boolean {
   );
 }
 
+/**
+ * Advisory sources publish plain comparator sets. The wider npm grammar (carets, tildes, hyphen and
+ * x-ranges) is not theirs, and npm reads `> 1.2` as `>= 1.3.0` where a source means `> 1.2.0`.
+ * Anything outside the comparator subset is unsupported and must not produce an exclusion.
+ */
+function comparatorRange(input: string): string | undefined {
+  const alternatives: string[] = [];
+  for (const alternative of input.split('||')) {
+    // GitHub renders intersections with commas and a space after the operator; semver uses spaces.
+    const tokens = alternative
+      .replace(/,/g, ' ')
+      .replace(/(<=|>=|<|>|=)\s+/g, '$1')
+      .trim()
+      .split(/\s+/);
+    // OSV collection renders an unbounded range as a lone `*`.
+    if (tokens.length === 1 && tokens[0] === '*') {
+      alternatives.push('*');
+      continue;
+    }
+    const comparators: string[] = [];
+    for (const token of tokens) {
+      const match = /^(<=|>=|<|>|=)?(\d\S*)$/.exec(token);
+      if (!match) return undefined;
+      const operator = match[1] ?? '=';
+      const version = match[2]!;
+      if (valid(version) === version) comparators.push(`${operator}${version}`);
+      // `>= 1.2` and `< 1.2` mean the same bound in both readings; other partial forms do not.
+      else if (/^\d+(?:\.\d+)?$/.test(version) && (operator === '>=' || operator === '<'))
+        comparators.push(`${operator}${[...version.split('.'), '0', '0'].slice(0, 3).join('.')}`);
+      else return undefined;
+    }
+    alternatives.push(comparators.join(' '));
+  }
+  return alternatives.join(' || ');
+}
+
 function claimStatus(claim: PackageClaim, version: string | undefined): Applicability {
   if (!version) return 'unknown';
   const ecosystem = normalizeEcosystem(claim.ecosystem);
@@ -130,13 +175,13 @@ function claimStatus(claim: PackageClaim, version: string | undefined): Applicab
     return 'unknown';
   }
   if (claim.matched_versions?.includes(version) || claim.versions?.includes(version)) return 'affected';
+  if (ecosystem === 'PyPI') return pythonRangeStatus(version, claim.range);
   // Other registries have their own ordering, epochs and prerelease rules.
   // Exact positive queries/listed versions are evidence; a missing match is not an exclusion.
   if (ecosystem !== 'npm') return 'unknown';
   if (!claim.range) return 'unknown';
-  // GitHub renders some npm range intersections with commas; semver uses spaces.
-  const range = claim.range.replace(/,\s*/g, ' ');
-  if (!range.trim() || !validRange(range)) return 'unknown';
+  const range = comparatorRange(claim.range);
+  if (!range) return 'unknown';
   const matches = satisfies(version, range);
   // npm semver deliberately excludes most prereleases: that is not evidence of safety.
   if (version.includes('-') && !matches) return 'unknown';
@@ -163,24 +208,31 @@ function base(
   now: number,
   category: Assessment['category'],
   component?: string,
+  knownFindings: ReadonlySet<string> = new Set(),
 ): Assessment {
+  // Two events reported separately can turn out to be one (a GHSA that lists both CVEs). Each
+  // finding keeps the identifier it was reported under, so neither is retired and raised again.
+  const event =
+    group.reported?.find((id) => knownFindings.has(hash([id, system.id, component ?? null]))) ?? group.event;
   const sourceSeverity = highest(
     ...group.evidence.filter((item) => !item.withdrawn).map((item) => item.severity),
   );
   const exploited = group.evidence.some((item) => item.exploited || item.kind === 'kev');
+  // A KEV entry adds an exploitation fact; it does not turn a news report into an advisory.
+  const reports = group.evidence.filter((item) => item.kind !== 'kev');
   const title =
     group.evidence.find((item) => item.kind === 'advisory' && !item.withdrawn)?.title ??
-    group.evidence[0]!.title;
+    (reports[0] ?? group.evidence[0]!).title;
   return {
-    id: hash([group.event, system.id, component ?? null]),
-    event_id: group.event,
+    id: hash([event, system.id, component ?? null]),
+    event_id: event,
     system_id: system.id,
     ...(component ? { component_id: component } : {}),
     category,
-    news_only: group.evidence.every((item) => item.kind === 'news'),
+    news_only: reports.every((item) => item.kind === 'news'),
     news_candidate:
-      group.evidence.every((item) => item.kind === 'news') ||
-      (category === 'product' && group.evidence.some((item) => item.kind === 'news')),
+      reports.every((item) => item.kind === 'news') ||
+      (category === 'product' && reports.some((item) => item.kind === 'news')),
     applicability: 'unknown',
     source_severity: sourceSeverity,
     priority: contextualPriority(sourceSeverity, system, exploited),
@@ -200,9 +252,30 @@ export function assess(
   evidence: Evidence[],
   config: Config,
   now = Date.now(),
+  /**
+   * The time against which the age of advisory evidence is judged; `now` unless given. A scan that
+   * reconciles stored evidence before refreshing it passes the time of the last collection, so
+   * evidence does not count as stale merely because the refresh has not happened yet.
+   */
+  evidenceAsOf = now,
+  /** Event identifiers of findings already reported; an event keeps the one it was reported under. */
+  knownEvents: ReadonlySet<string> = new Set(),
+  /** Identifiers of findings already reported, for an event that merges two reported ones. */
+  knownFindings: ReadonlySet<string> = new Set(),
 ): Assessment[] {
   const output: Assessment[] = [];
-  for (const group of groupEvidence(evidence)) {
+  const index = new Map<System, Map<string, Component[]>>();
+  for (const system of inventory.systems) {
+    const byKey = new Map<string, Component[]>();
+    for (const component of system.components) {
+      const key = packageKey(component);
+      if (!key) continue;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(component);
+    }
+    index.set(system, byKey);
+  }
+  for (const group of groupEvidence(evidence, knownEvents)) {
     const advisories = group.evidence.filter((item) => item.kind === 'advisory');
     const isNews = advisories.length === 0;
     const identifiedNews =
@@ -211,21 +284,51 @@ export function assess(
       .filter((item) => item.kind !== 'kev')
       .map((item) => `${item.title}\n${item.description}`)
       .join('\n');
+    const newsText = group.evidence
+      .filter((item) => item.kind === 'news')
+      .map((item) => `${item.title}\n${item.description}`)
+      .join('\n');
+    // An advisory record without a usable package claim identifies the event but says nothing about
+    // which inventory packages it concerns, so it must not retire a candidate the linked news already
+    // raised. A claim for an ecosystem or a name this application cannot match is no claim at all.
+    const unclaimedNews =
+      !isNews &&
+      newsText.length > 0 &&
+      advisories.every((item) => item.packages.every((claim) => packageKey(claim) === undefined));
+    // Index the group's claims once; a scan compares every group with every component.
+    const claimed = new Map<string, { item: Evidence; claims: PackageClaim[] }[]>();
+    for (const item of advisories) {
+      const byKey = new Map<string, PackageClaim[]>();
+      for (const claim of item.packages) {
+        const key = packageKey(claim);
+        if (!key) continue;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push(claim);
+      }
+      for (const [key, claims] of byKey) {
+        if (!claimed.has(key)) claimed.set(key, []);
+        claimed.get(key)!.push({ item, claims });
+      }
+    }
+    const hasCandidates = identifiedNews || unclaimedNews;
     for (const system of inventory.systems) {
       let componentMatched = false;
-      for (const component of system.components) {
-        const matching = advisories
-          .map((item) => ({
-            item,
-            claims: item.packages.filter((claim) => samePackage(claim, component)),
-          }))
-          .filter((item) => item.claims.length);
+      // Without news candidates only components named by a claim can produce a finding.
+      const components = hasCandidates
+        ? system.components
+        : [...claimed.keys()].flatMap((key) => index.get(system)!.get(key) ?? []);
+      for (const component of components) {
+        const key = claimed.size ? packageKey(component) : undefined;
+        const matching = (key && claimed.get(key)) || [];
         if (!matching.length) {
-          if (identifiedNews && mentions(text, component.name)) {
+          if (hasCandidates && packageMentioned(newsText, component)) {
             componentMatched = true;
-            const result = base(group, system, now, 'library', component.id);
+            const result = base(group, system, now, 'library', component.id, knownFindings);
+            result.news_candidate = true;
             result.reasons.push(
-              `News identifies an advisory and mentions the ${component.ecosystem} package name ${component.name}; no structured affected-version evidence is available yet.`,
+              unclaimedNews
+                ? `News about this advisory mentions the ${component.ecosystem} package name ${component.name}; the advisory record carries no structured package evidence.`
+                : `News identifies an advisory and mentions the ${component.ecosystem} package name ${component.name}; no structured affected-version evidence is available yet.`,
             );
             if (stale(system, config, now))
               result.reasons.push(
@@ -247,6 +350,7 @@ export function assess(
           now,
           matching.some((match) => match.item.malware) ? 'malware' : 'library',
           component.id,
+          knownFindings,
         );
         const active = matching.filter((match) => !match.item.withdrawn);
         const states = active.map((match) => recordStatus(match.claims, component.version));
@@ -282,6 +386,23 @@ export function assess(
             'Inventory is stale or has an invalid/future timestamp; confirm the currently installed version before relying on this assessment.',
           );
         }
+        const staleEvidence = active.some(({ item }) => {
+          const fetched = Date.parse(item.fetched_at);
+          return (
+            !Number.isFinite(fetched) ||
+            fetched > now + 300_000 ||
+            evidenceAsOf - fetched > Math.max(120_000, config.poll_interval_minutes * 120_000)
+          );
+        });
+        if (staleEvidence) {
+          if (result.applicability === 'not_affected') {
+            result.applicability = 'unknown';
+            result.stale_exclusion = true;
+          }
+          result.reasons.push(
+            'Advisory evidence is stale; retained positive matches are historical and cannot prove current exclusion.',
+          );
+        }
         const fixes = [
           ...new Set(
             active.flatMap((match) =>
@@ -295,7 +416,7 @@ export function assess(
       }
 
       // Apply the component's policy to linked news as well as the advisory itself.
-      if (componentMatched && !isNews) continue;
+      if (componentMatched && !isNews && !unclaimedNews) continue;
       let productMatched = false;
       for (const product of system.products) {
         if (![product.name, ...product.keywords].some((keyword) => mentions(text, keyword))) continue;
@@ -306,6 +427,7 @@ export function assess(
           now,
           isNews ? 'news' : 'product',
           `product:${product.name.toLowerCase()}`,
+          knownFindings,
         );
         result.applicability = isNews ? 'relevant' : 'unknown';
         result.withdrawn = !isNews && advisories.every((item) => item.withdrawn);
@@ -321,10 +443,14 @@ export function assess(
         result.summary = `${product.name}${product.version ? ` ${product.version}` : ''} in ${system.name}: ${result.applicability}.`;
         output.push(result);
       }
-      if (componentMatched || productMatched || !isNews) continue;
-      const keywords = [...system.keywords, ...system.components.map((component) => component.name)];
-      if (!keywords.some((keyword) => mentions(text, keyword))) continue;
+      if (componentMatched || productMatched || (!isNews && !unclaimedNews)) continue;
+      if (
+        !system.keywords.some((keyword) => mentions(newsText, keyword)) &&
+        !system.components.some((component) => packageMentioned(newsText, component))
+      )
+        continue;
       const result = base(group, system, now, 'news');
+      result.news_candidate = true;
       result.applicability = stale(system, config, now) ? 'unknown' : 'relevant';
       result.reasons.push(
         'An explicit system keyword or installed package name matches this news; relevance does not establish vulnerability applicability.',
@@ -339,6 +465,7 @@ export function assess(
 /** The source severity is always a floor; AI-proposed priority reductions cannot suppress it. */
 export function decide(assessment: Assessment, config: Config): Decision {
   const policy = config.policy;
+  const reviewAi = policy.review_before_news_suppression ?? policy.ai_dismissals !== 'record';
   if (assessment.category === 'health')
     return {
       action: policy.health_channels.length ? 'notify' : 'record',
@@ -347,6 +474,8 @@ export function decide(assessment: Assessment, config: Config): Decision {
     };
   const rule = policy[assessment.category === 'malware' ? 'library' : assessment.category];
   const channels = [...new Set(rule.channels)];
+  if (assessment.active === false)
+    return { action: 'record', channels: [], reason: 'Finding is no longer active.' };
   if (assessment.withdrawn)
     return {
       action: 'record',
@@ -364,8 +493,30 @@ export function decide(assessment: Assessment, config: Config): Decision {
     rule.basis === 'source_severity'
       ? assessment.source_severity
       : highest(assessment.source_severity, assessment.priority);
-  if (!channels.length)
+  const quietAi =
+    reviewAi &&
+    assessment.ai?.status === 'complete' &&
+    assessment.source_severity !== 'critical' &&
+    !(assessment.exploited && policy.exploited_override) &&
+    (((assessment.news_candidate || assessment.news_only) &&
+      (assessment.news_analysis?.impact === 'not_affected' ||
+        (assessment.news_analysis?.classification === 'general_news' &&
+          assessment.news_analysis.impact === 'not_applicable'))) ||
+      (assessment.category === 'news' && assessment.relevance === 'irrelevant'));
+  if (!channels.length && !quietAi)
     return { action: 'record', channels: [], reason: 'This category has no configured delivery channels.' };
+  // Every supported range excludes the installed version; only the age of the evidence is in
+  // question. That is a source outage, which the source's health finding reports on its own
+  // channels: an urgent alert for every exclusion would repeat it on every outage. As for a current
+  // exclusion, no override applies: an exploited or malicious advisory for other versions is not
+  // about the installed one.
+  if (assessment.stale_exclusion)
+    return {
+      action: 'digest',
+      channels,
+      reason:
+        'The advisory ranges exclude this installed version, but the advisory evidence is out of date (see the source health finding); included in the review digest.',
+    };
   if (assessment.category === 'malware' && policy.malware_override)
     return {
       action: 'notify',
@@ -377,35 +528,56 @@ export function decide(assessment: Assessment, config: Config): Decision {
   if ((assessment.news_candidate || assessment.news_only) && assessment.source_severity !== 'critical') {
     const news = assessment.news_analysis;
     if (assessment.ai?.status === 'complete' && news) {
-      if (news.classification === 'general_news' && news.impact === 'not_applicable')
+      if (news.classification === 'general_news' && news.impact === 'not_applicable') {
+        if (reviewAi)
+          return {
+            action: 'digest',
+            channels,
+            review: 'ai_general_news',
+            reason: 'AI classifies this as general news; policy requires operator review before dismissal.',
+          };
         return {
           action: 'record',
           channels: [],
           reason:
             'AI reviewed this as general system news, with no newly reported vulnerability or actionable vulnerability update.',
         };
-      if (news.impact === 'not_affected')
+      }
+      if (news.impact === 'not_affected') {
+        if (reviewAi)
+          return {
+            action: 'digest',
+            channels,
+            review: 'ai_not_affected',
+            reason:
+              'AI reports no deployment impact; policy requires operator review before suppressing this news finding.',
+          };
         return {
           action: 'record',
           channels: [],
           reason:
             'AI found that the reported news does not affect this deployment; this is a news assessment, not a verified safety conclusion.',
         };
+      }
       if (
         news.impact === 'affected' &&
         ['new_vulnerability', 'known_vulnerability_update'].includes(news.classification)
-      )
-        return rule.levels.includes(severity)
+      ) {
+        // News carries no source severity, so the validated priority is the only level available.
+        // A positive impact claim must never be quieter than an uncertain or unclassified one.
+        const level = highest(severity, assessment.priority);
+        return rule.levels.includes(level) || (policy.urgent_unknown && level === 'critical')
           ? {
               action: 'notify',
               channels,
-              reason: `AI reports an impacted system in ${news.classification}; matched ${assessment.category} rule at ${severity}. Verify the cited versions and prerequisites.`,
+              reason: `AI reports an impacted system in ${news.classification}; matched ${assessment.category} rule at ${level}. Verify the cited versions and prerequisites.`,
             }
           : {
-              action: 'record',
-              channels: [],
-              reason: `${severity} does not match the configured ${assessment.category} severity levels.`,
+              action: 'digest',
+              channels,
+              reason: `AI reports an impacted system in ${news.classification}; ${level} is below the configured ${assessment.category} severity levels, so it is included in the review digest.`,
             };
+      }
     }
     if (config.models.enabled && !assessment.ai)
       return {
@@ -429,12 +601,23 @@ export function decide(assessment: Assessment, config: Config): Decision {
     assessment.category === 'news' &&
     assessment.relevance === 'irrelevant' &&
     assessment.source_severity !== 'critical'
-  )
+  ) {
+    if (reviewAi && assessment.ai?.status === 'complete')
+      return {
+        action: 'digest',
+        channels,
+        review: 'ai_irrelevant',
+        reason:
+          'AI reports no relevant deployment context; policy requires operator review before dismissal.',
+      };
     return {
       action: 'record',
       channels: [],
       reason: 'Evidence-backed news relevance assessment found no relevant deployment context.',
     };
+  }
+  if (!channels.length)
+    return { action: 'record', channels: [], reason: 'This category has no configured delivery channels.' };
   if (uncertain) {
     if (
       policy.urgent_unknown &&

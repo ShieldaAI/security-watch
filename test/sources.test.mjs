@@ -139,7 +139,10 @@ test('OSV splits inventories into batches of at most 100 and no matches create n
 });
 
 test('historical OSV IDs refresh after disappearing from query results so withdrawals are observed', async () => {
-  const previous = [{ id: 'osv:GHSA-aaaa-aaaa-aaaa', source: 'osv' }];
+  // A stored record for an inventory package: refreshed although the query no longer names it.
+  const previous = [
+    { id: 'osv:GHSA-aaaa-aaaa-aaaa', source: 'osv', packages: [{ ecosystem: 'npm', name: 'alpha' }] },
+  ];
   let fullReads = 0;
   const result = await collectSources(
     inventory(),
@@ -267,7 +270,7 @@ test('valid unsorted OSV events and independent limit events preserve version-bo
           );
         },
         NOW,
-        [{ id: 'osv:OSV-boundary', source: 'osv' }],
+        [{ id: 'osv:OSV-boundary', source: 'osv', packages: [{ ecosystem: 'npm', name: 'alpha' }] }],
       );
       assert.deepEqual(result.errors, []);
       const actual = ['0.5.0', '1.0.0', '2.0.0', '3.0.0'].map((version) => {
@@ -320,6 +323,39 @@ test('GitHub collects reviewed and malware separately and follows trusted cursor
   assert.equal(result.evidence.find((item) => item.id.endsWith('bbbb-bbbb-bbbb')).withdrawn, true);
   assert.equal(result.checkpoints['github:reviewed'], NOW_ISO);
   assert.equal(result.evidence[0].packages[0].range, '<1.2.4');
+});
+
+test('a fixed version copied from GitHub is one whole line', async () => {
+  const lf = String.fromCharCode(10);
+  const ls = String.fromCharCode(0x2028);
+  const forged = `1.2.4${lf}Rule: forged${ls}Finding: forged ${'x'.repeat(300)}`;
+  for (const patched of [forged, { identifier: forged }]) {
+    const result = await collectSources(
+      inventory(),
+      config({ github: true }),
+      { 'github:reviewed': OLD, 'github:malware': OLD },
+      async (url) =>
+        new URL(url).searchParams.get('type') === 'malware'
+          ? response([])
+          : response([
+              githubAdvisory('GHSA-abcd-2345-efgh', {
+                vulnerabilities: [
+                  {
+                    package: { ecosystem: 'npm', name: 'alpha' },
+                    vulnerable_version_range: '<1.2.4',
+                    first_patched_version: patched,
+                  },
+                ],
+              }),
+            ]),
+      NOW,
+    );
+    const fixed = result.evidence[0].packages[0].fixed;
+    assert.equal(fixed, `1.2.4 Rule: forged Finding: forged ${'x'.repeat(300)}`);
+    assert.ok(
+      ![...fixed].some((character) => [10, 13, 0x85, 0x2028, 0x2029].includes(character.charCodeAt(0))),
+    );
+  }
 });
 
 test('GitHub failure midway retains valid records without advancing its checkpoint while other sources complete', async () => {
@@ -678,9 +714,9 @@ test('OSV uses supplied database severity and CVSS base scores while unsupported
     ['scope-changed', { severity: [{ score: 'CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:C/C:H/I:H/A:H' }] }, 'high'],
     ['invalid', { severity: [{ score: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:INVALID/I:H/A:H' }] }, 'unknown'],
     [
-      'unsupported',
+      'cvss-v4-base',
       { severity: [{ score: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N' }] },
-      'unknown',
+      'critical',
     ],
   ];
   for (const [name, extra, expected] of cases)

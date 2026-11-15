@@ -1,37 +1,64 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import http, { createServer } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import { performance } from 'node:perf_hooks';
 import { safeHttp } from '../dist/http.js';
 
 async function server(t, handler) {
   const instance = createServer(handler);
   await new Promise((resolve) => instance.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve) => instance.close(resolve)));
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        instance.close(resolve);
+        instance.closeAllConnections();
+      }),
+  );
   return `http://127.0.0.1:${instance.address().port}`;
 }
 
-test('HTTP origin pacing spaces concurrent starts without serializing response completion', async (t) => {
-  const starts = [];
-  let active = 0;
-  let maximumActive = 0;
-  const origin = await server(t, (_request, response) => {
-    starts.push(performance.now());
-    maximumActive = Math.max(maximumActive, ++active);
-    setTimeout(() => {
-      active--;
-      response.end('ok');
-    }, 200);
-  });
-  const results = await Promise.all(
-    Array.from({ length: 4 }, () => safeHttp(origin, { allowPrivate: true, minIntervalMs: 80 })),
-  );
-  assert(results.every((result) => result.status === 200));
-  assert.equal(starts.length, 4);
-  for (let index = 1; index < starts.length; index++)
-    assert(starts[index] - starts[index - 1] >= 60, 'Requests must not start in a burst');
-  assert(maximumActive >= 2, 'A slow response need not hold the origin admission queue');
-});
+test(
+  'HTTP origin pacing spaces concurrent starts without serializing response completion',
+  { timeout: 10_000 },
+  async (t) => {
+    const starts = [];
+    const pendingResponses = [];
+    const origin = await server(t, (_request, response) => {
+      pendingResponses.push(response);
+      // Completion waits for all four real requests. A scheduler that serializes
+      // responses instead of admission cannot satisfy this gate.
+      if (pendingResponses.length === 4) for (const pending of pendingResponses) pending.end('ok');
+    });
+    const originalRequest = http.request;
+    const request = t.mock.method(http, 'request', function (...args) {
+      starts.push(performance.now());
+      return Reflect.apply(originalRequest, this, args);
+    });
+    // safeHttp imports the named builtin export. Synchronize it with this
+    // process-local spy, which still dispatches every request to the real server.
+    syncBuiltinESMExports();
+    t.after(() => {
+      request.mock.restore();
+      syncBuiltinESMExports();
+    });
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        safeHttp(origin, { allowPrivate: true, minIntervalMs: 80, timeoutMs: 5000 }),
+      ),
+    );
+    assert(results.every((result) => result.status === 200));
+    assert.equal(starts.length, 4);
+    for (let index = 1; index < starts.length; index++)
+      // Measured from the first start: each is admitted no earlier than its slot (80 ms apart, less
+      // a margin for a timer that fires on time after one that fired late). A burst starts all at once.
+      assert(
+        starts[index] - starts[0] >= index * 80 - 40,
+        'Client request admission must not start in a burst',
+      );
+    assert.equal(pendingResponses.length, 4, 'Outstanding responses do not hold the origin admission queue');
+  },
+);
 
 test('queued HTTP requests cancel promptly and consume their timeout before reaching the server', async (t) => {
   let calls = 0;
@@ -61,11 +88,12 @@ test('Retry-After on 403 and 429 delays already queued requests without retrying
         starts.push(performance.now());
         paths.push(request.url);
         if (request.url === '/first') {
-          response.writeHead(status, { 'Retry-After': '1' });
+          response.writeHead(status, { 'Retry-After': '3' });
           response.end('limited');
         } else response.end('ok');
       });
-      const options = { allowPrivate: true, minIntervalMs: 40, timeoutMs: 2500 };
+      // The first answer must arrive before the second request is due, also on a busy machine.
+      const options = { allowPrivate: true, minIntervalMs: 600, timeoutMs: 8000 };
       const [first, second] = await Promise.all([
         safeHttp(`${origin}/first`, options),
         safeHttp(`${origin}/second`, options),
@@ -73,7 +101,7 @@ test('Retry-After on 403 and 429 delays already queued requests without retrying
       assert.equal(first.status, status);
       assert.equal(second.status, 200);
       assert.deepEqual(paths, ['/first', '/second']);
-      assert(starts[1] - starts[0] >= 900, 'Retry-After must extend an existing queue wait');
+      assert(starts[1] - starts[0] >= 2700, 'Retry-After must extend an existing queue wait');
     });
 });
 

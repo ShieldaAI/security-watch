@@ -129,7 +129,7 @@ test('a feed HTML-limit failure is isolated to its item', async () => {
   assert.equal(result.errors.length, 1);
 });
 
-test('GitHub keeps valid later items and another advisory category while a bad row remains incomplete', async () => {
+test('GitHub keeps valid later items and another advisory category, and reports a bad row without stopping', async () => {
   let broken = true;
   const http = async (url) => {
     if (new URL(url).searchParams.get('type') === 'malware') return response([]);
@@ -141,7 +141,10 @@ test('GitHub keeps valid later items and another advisory category while a bad r
   const cfg = config({ github: true });
   const first = await collectSources(inventory, cfg, { 'github:reviewed': OLD }, http, NOW);
   assert.equal(first.evidence.length, 1);
-  assert.equal(first.checkpoints['github:reviewed'], OLD);
+  // A row that cannot be read and gives no identifier is reported; holding the checkpoint for it
+  // would stop GitHub for good, so it moves on.
+  assert.equal(first.checkpoints['github:reviewed'], DATE);
+  assert.match(first.errors[0].message, /give no identifier/);
   assert.equal(first.checkpoints['github:malware'], DATE);
   assert.doesNotMatch(JSON.stringify(first.errors), /not-for-diagnostics/);
   broken = false;
@@ -151,7 +154,7 @@ test('GitHub keeps valid later items and another advisory category while a bad r
   assert.equal(second.checkpoints['github:reviewed'], new Date(NOW + 60_000).toISOString());
 });
 
-test('future records cannot poison valid partial records or advance a checkpoint', async () => {
+test('future records cannot poison valid partial records and are asked for again by identifier', async () => {
   const result = await collectSources(
     inventory,
     config({ github: true }),
@@ -172,7 +175,13 @@ test('future records cannot poison valid partial records or advance a checkpoint
     result.evidence.map((item) => item.id),
     ['github:GHSA-aaaa-aaaa-aaaa'],
   );
-  assert.equal(result.checkpoints['github:reviewed'], OLD);
+  // The future-dated record is remembered by identifier, so the checkpoint can move on.
+  assert.equal(result.checkpoints['github:reviewed'], DATE);
+  assert.deepEqual(
+    JSON.parse(result.checkpoints['github:reviewed:unreadable']).map(([id]) => id),
+    // Kept as GitHub wrote it, so that the request by identifier uses GitHub's own spelling.
+    ['GHSA-bbbb-bbbb-bbbb'],
+  );
   assert.equal(result.errors.length, 1);
 });
 
@@ -197,7 +206,8 @@ test('a future GitHub duplicate cannot replace a valid record of the same adviso
       assert.equal(result.evidence.length, 1);
       assert.equal(result.evidence[0].title, 'A valid newer revision');
       assert.equal(result.evidence[0].modified_at, DATE);
-      assert.equal(result.checkpoints['github:reviewed'], OLD);
+      // The future revision is reported; the checkpoint moves on.
+      assert.equal(result.checkpoints['github:reviewed'], DATE);
       assert.equal(result.errors.length, 1);
     });
 });
@@ -226,7 +236,7 @@ test('cve.now skips an invalid listing item and collects following valid details
   let broken = true;
   const cfg = config({ cve_now: true });
   const http = async (url) =>
-    url.endsWith('/entries')
+    url.endsWith('/entries?limit=100')
       ? response({
           entries: [
             broken ? { id: 'bad', publishedAt: 'invalid' } : cve('CVE-2026-12346'),
@@ -266,8 +276,12 @@ test('cve.now retains a valid exact package match after an invalid record in the
   assert.equal(result.evidence.length, 1);
   assert.equal(result.evidence[0].id, 'cve_now:CVE-2026-12345');
   assert.deepEqual(result.evidence[0].packages[0].matched_versions, ['1.2.3']);
-  assert.equal(result.checkpoints.cve_now, OLD);
+  // The package lookup is repeated in full on every poll, so a bad item in it is reported but does
+  // not hold the listing checkpoint: holding it would make every later poll re-read a growing list.
+  assert.equal(result.checkpoints.cve_now, new Date(NOW).toISOString());
   assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0].message, /1 invalid item\(s\) were skipped/);
+  assert.equal(result.coverage[0].status, 'partial');
 });
 
 test('OSV continues after a malformed query item and isolated bad detail, then recovers', async () => {
@@ -358,7 +372,7 @@ test('cancellation stops source collection and does not become a recoverable ite
           async (url) => {
             calls.push(url);
             if (stage === 'article' && url.includes('feedburner')) return response(rss([rssItem('good')]));
-            if (stage === 'cve-detail' && url.endsWith('/entries'))
+            if (stage === 'cve-detail' && url.endsWith('/entries?limit=100'))
               return response({ entries: [cve('CVE-2026-12345')] });
             if (stage === 'osv-detail' && url.endsWith('/querybatch'))
               return response({ results: [{ vulns: [{ id: 'OSV-2026-1' }] }] });

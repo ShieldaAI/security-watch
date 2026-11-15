@@ -1,13 +1,24 @@
 import { readFileSync, statSync } from 'node:fs';
 import { z } from 'zod';
+import { cvssV4BaseScore } from './cvss4.js';
 import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
+import { attachLocation, attachRemediation, compareInventories } from './inventory-evidence.js';
 import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
 import { safeHttp } from './http.js';
 import { missingCredentials } from './config.js';
-import { hash, severityRank, timestamp } from './util.js';
-import type { Assessment, Config, Decision, Evidence, HttpClient, Inventory } from './types.js';
+import { canonicalHash, hash, severityRank, timestamp } from './util.js';
+import type {
+  Assessment,
+  Config,
+  Decision,
+  Evidence,
+  HttpClient,
+  Inventory,
+  CoverageReceipt,
+  InventoryDrift,
+} from './types.js';
 
 export interface ScanReport {
   at: string;
@@ -16,9 +27,13 @@ export interface ScanReport {
   decisions: Record<string, Decision>;
   degraded: boolean;
   errors: { source: string; message: string }[];
+  /** Information about how the monitor is set up. A notice is not a fault and does not degrade a scan. */
+  notices: string[];
   evidence_count: number;
+  coverage: CoverageReceipt[];
+  inventory_drift: InventoryDrift[];
 }
-const evidenceSchema = z
+export const evidenceSchema = z
   .object({
     id: z.string().min(1),
     source: z.string().min(1),
@@ -28,6 +43,34 @@ const evidenceSchema = z
     description: z.string(),
     aliases: z.array(z.string()),
     severity: z.enum(['unknown', 'low', 'medium', 'high', 'critical']),
+    cvss_v4: z
+      .strictObject({
+        base_scores: z
+          .array(
+            z
+              .strictObject({
+                vector: z.string().max(1024),
+                base_vector: z.string().max(1024),
+                score: z.number().min(0).max(10),
+                context_removed: z.boolean(),
+              })
+              .refine((item) => {
+                const actual = cvssV4BaseScore(item.vector);
+                return (
+                  actual?.score === item.score &&
+                  actual.base_vector === item.base_vector &&
+                  actual.context_removed === item.context_removed
+                );
+              }, 'Invalid CVSS v4 base projection'),
+          )
+          .max(32),
+        unsupported_vectors: z.number().int().min(0).max(32),
+      })
+      .refine(
+        (value) => value.base_scores.length + value.unsupported_vectors <= 32,
+        'CVSS v4 candidate limit exceeded',
+      )
+      .optional(),
     modified_at: z.iso.datetime(),
     fetched_at: z.iso.datetime(),
     published_at: z.iso.datetime().optional(),
@@ -99,6 +142,26 @@ function generalNews(assessment: Assessment | undefined): boolean {
   );
 }
 
+// An exclusion rests on the version ranges of its own advisory records. While they were read
+// within the last two poll intervals it holds, whatever else a source missed; after that the
+// assessment treats them as stale evidence and the finding becomes `unknown` (assessment.ts).
+
+/** When stored evidence was last collected: the start of the last scan, or its newest fetch time. */
+function lastCollection(store: Store, cached: Evidence[]): number {
+  try {
+    const started = Date.parse(
+      (JSON.parse(store.getMeta('last_scan') ?? '{}') as { started_at?: string }).started_at ?? '',
+    );
+    if (Number.isFinite(started)) return started;
+  } catch {
+    /* An unreadable record falls back to the evidence itself. */
+  }
+  return cached.reduce((latest, item) => {
+    const fetched = Date.parse(item.fetched_at);
+    return Number.isFinite(fetched) && fetched > latest ? fetched : latest;
+  }, 0);
+}
+
 export async function runScan(options: {
   config: Config;
   inventory: Inventory;
@@ -117,12 +180,43 @@ export async function runScan(options: {
     checkCancellation(signal);
     return transport(url, { ...request, ...(signal ? { signal } : {}) });
   };
+  const priorInventory = store.getMeta('inventory:baseline');
+  const drift = compareInventories(
+    priorInventory ? (JSON.parse(priorInventory) as Inventory) : undefined,
+    inventory,
+  );
   const previousById = new Map(store.findings().map((a) => [a.id, a]));
+  // Events of findings still reported keep their identifier when a record gains an alias.
+  const knownEvents = new Set(
+    [...previousById.values()]
+      .filter((finding) => finding.active !== false && finding.category !== 'health')
+      .map((finding) => finding.event_id),
+  );
+  const knownFindings = new Set(
+    [...previousById.values()].filter((finding) => finding.active !== false).map((finding) => finding.id),
+  );
   const decisions: Record<string, Decision> = {};
+  let remediationEvidence = store.evidence();
   const persist = (assessment: Assessment) => {
+    assessment = attachLocation(
+      attachRemediation(assessment, inventory, remediationEvidence, config, now),
+      inventory,
+    );
     const decision = decide(assessment, config);
     decisions[assessment.id] = decision;
-    store.saveAssessment(assessment, decision, now, config.digest_interval_hours * 3_600_000);
+    store.saveAssessment(
+      assessment,
+      decision,
+      now,
+      config.digest_interval_hours * 3_600_000,
+      decision.review
+        ? canonicalHash({
+            system: reviewSystemHashes.get(assessment.system_id),
+            models: config.models,
+            policy: config.policy.ai_dismissals ?? config.policy.review_before_news_suppression ?? 'review',
+          })
+        : undefined,
+    );
   };
   const retire = (assessment: Assessment) => {
     store.saveAssessment(
@@ -143,13 +237,21 @@ export async function runScan(options: {
       now,
     );
   };
-  const systemHashes = new Map(
-    inventory.systems.map((system) => {
-      const { updated_at: _updated, ...context } = system;
-      return [system.id, hash(context)];
-    }),
+  // Notes and the owner say where to look. They are shown in notifications and never reach a model,
+  // so they are left out of everything that decides analysis reuse, reviews, revisions or alerts.
+  const context = (system: Inventory['systems'][number]) => {
+    const { updated_at: _updated, note: _note, owner: _owner, ...rest } = system;
+    return {
+      ...rest,
+      components: system.components.map(({ note: _componentNote, ...component }) => component),
+      products: system.products.map(({ note: _productNote, ...product }) => product),
+    };
+  };
+  const systemHashes = new Map(inventory.systems.map((system) => [system.id, hash(context(system))]));
+  const reviewSystemHashes = new Map(
+    inventory.systems.map((system) => [system.id, canonicalHash(context(system))]),
   );
-  const basis = (finding: Assessment, evidenceById: Map<string, Evidence>): string => {
+  const basis = (finding: Assessment, evidenceById: Map<string, Evidence>, evidenceAsOf = now): string => {
     const { updated_at: _updated, ...assessment } = finding;
     return hash({
       assessment,
@@ -171,7 +273,7 @@ export async function runScan(options: {
             generalNews(previousById.get(finding.id)) ||
             (Number.isFinite(fetched) &&
               fetched <= now + 300_000 &&
-              now - fetched <= Math.max(120_000, config.poll_interval_minutes * 120_000)),
+              evidenceAsOf - fetched <= Math.max(120_000, config.poll_interval_minutes * 120_000)),
         };
       }),
     });
@@ -199,24 +301,41 @@ export async function runScan(options: {
   if (!options.fixture && previousById.size) {
     // Apply known inventory changes before yielding to network I/O. The worker can deliver concurrently.
     const cachedById = new Map(cached.map((e) => [e.id, e]));
-    const current = assess(inventory, cached, config, now);
+    // This pass applies inventory changes to evidence that is about to be refreshed. Judge the age
+    // of that evidence as of the last collection: time that passed while the monitor was stopped
+    // must not turn an exclusion into an urgent "unknown" that the refresh then takes back.
+    const collectedAt = Math.min(now, lastCollection(store, cached));
+    const current = assess(inventory, cached, config, now, collectedAt, knownEvents, knownFindings);
     const ids = new Set(current.map((a) => a.id));
     for (const finding of current)
-      if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById)));
+      if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById, collectedAt)));
     for (const previous of previousById.values())
       if (previous.category !== 'health' && previous.active !== false && !ids.has(previous.id))
         retire(previous);
   }
   const result = options.fixture
-    ? { evidence: options.fixture, errors: [], checkpoints: {} }
-    : await collectSources(inventory, config, store.checkpoints(), http, now, cached);
+    ? { evidence: options.fixture, errors: [], checkpoints: {}, coverage: [] as CoverageReceipt[] }
+    : await collectSources(
+        inventory,
+        config,
+        store.checkpoints(),
+        http,
+        now,
+        cached,
+        JSON.parse(store.getMeta('source:coverage') ?? '[]') as CoverageReceipt[],
+      );
   checkCancellation(signal);
   store.saveEvidence(result.evidence, result.checkpoints);
   const evidence = store.evidence();
+  remediationEvidence = evidence;
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
-  const findings = assess(inventory, evidence, config, now);
+  const findings = assess(inventory, evidence, config, now, now, knownEvents, knownFindings);
   const bases = new Map(findings.map((a) => [a.id, basis(a, evidenceById)]));
-  const errors = [...result.errors];
+  const errors = [
+    ...result.errors,
+    ...(inventory.import_warnings ?? []).map((message) => ({ source: 'inventory:sbom', message })),
+  ];
+  const notices: string[] = [...(inventory.name_notices ?? [])];
   if (!options.fixture && missingCredentials(config).length)
     errors.push({
       source: 'credentials',
@@ -235,19 +354,19 @@ export async function runScan(options: {
     !config.sources.github &&
     !config.sources.kev &&
     !config.sources.feeds.length &&
+    !config.sources.vendor_feeds?.length &&
     !options.fixture
   )
     errors.push({ source: 'sources', message: 'All sources are disabled.' });
   if (
     !options.fixture &&
-    (config.sources.hacker_news || config.sources.feeds.length) &&
+    (config.sources.hacker_news || config.sources.feeds.length || config.sources.vendor_feeds?.length) &&
     !config.models.enabled
   )
-    errors.push({
-      source: 'models',
-      message:
-        'AI is disabled. System news receives candidate matching only; enable an analysis model to distinguish vulnerability impact from general system coverage.',
-    });
+    // Running without a model is a supported setup, not a fault: say what it means and carry on.
+    notices.push(
+      'AI is disabled. System news receives candidate matching only; enable an analysis model to distinguish vulnerability impact from general system coverage.',
+    );
   for (const system of inventory.systems) {
     const updated = Date.parse(system.updated_at);
     if (
@@ -322,6 +441,7 @@ export async function runScan(options: {
       if (!errors.some((e) => e.source === 'models' && e.message === code))
         errors.push({ source: 'models', message: code });
     }
+    enriched = attachRemediation(enriched, inventory, evidence, config, now);
     analyzed.push(enriched);
     persist(enriched);
     store.setMeta(`assessment-basis:${finding.id}`, bases.get(finding.id)!);
@@ -343,8 +463,14 @@ export async function runScan(options: {
     decisions,
     degraded: errors.length > 0,
     errors,
+    notices,
     evidence_count: evidence.length,
+    coverage: result.coverage,
+    inventory_drift: drift,
   };
+  store.setMeta('inventory:baseline', JSON.stringify(inventory));
+  store.setMeta('inventory:last_drift', JSON.stringify(drift));
+  store.setMeta('source:coverage', JSON.stringify(result.coverage));
   store.setMeta(
     'last_scan',
     JSON.stringify({
@@ -354,6 +480,8 @@ export async function runScan(options: {
       degraded: report.degraded,
       errors: report.errors,
       findings: report.findings.length,
+      coverage: report.coverage,
+      inventory_drift: report.inventory_drift,
     }),
   );
   return report;

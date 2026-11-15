@@ -2,7 +2,9 @@ import { readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
-import type { Config } from './types.js';
+import type { Config, ModelSpec } from './types.js';
+import { isIP } from 'node:net';
+import { privateAddress } from './http.js';
 import {
   PROVIDER_IDS,
   providerDefinition,
@@ -10,6 +12,68 @@ import {
   modelOutputFormat,
   modelEndpoint,
 } from './providers.js';
+
+/**
+ * A host that is plainly on this machine or a private network; cleartext HTTP is allowed only there.
+ * An address is judged by its range. A name cannot be resolved here, so it is accepted when it has
+ * no public form: a single label (a container or service name), a special-use or private suffix, or
+ * a last label that cannot be a public top-level domain (`ollama.ml-tools`). The request itself is
+ * refused if such a name turns out to resolve to a public address.
+ */
+function localHost(hostname: string): boolean {
+  const host = hostname
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
+    .replace(/\.$/, '');
+  if (isIP(host)) return privateAddress(host);
+  if (!host || /^[0-9.]+$/.test(host)) return false;
+  const last = host.slice(host.lastIndexOf('.') + 1);
+  return (
+    host === 'localhost' ||
+    !host.includes('.') ||
+    /\.(?:localhost|local|internal|intranet|private|corp|lan|home|home\.arpa|test|svc|cluster\.local|ts\.net)$/.test(
+      host,
+    ) ||
+    // Public top-level domains are letters only, or punycode.
+    (/[0-9_-]/.test(last) && !last.startsWith('xn--'))
+  );
+}
+
+/** Two model settings that reach the same model at the same address, however each is written. */
+function sameModel(first: ModelSpec, second: ModelSpec): boolean {
+  const address = (spec: ModelSpec): string => {
+    try {
+      const url = new URL(modelEndpoint(spec));
+      let path = url.pathname;
+      try {
+        path = decodeURIComponent(path);
+      } catch {
+        // Keep the path as written.
+      }
+      // A trailing dot on the host, doubled or trailing slashes, percent-encoding and letter case
+      // are different spellings of one address.
+      let host = url.hostname.toLowerCase().replace(/\.$/, '');
+      // Every name for this machine is one address.
+      if (
+        ['localhost', '[::1]', '0.0.0.0', '[::]'].includes(host) ||
+        host.endsWith('.localhost') ||
+        /^127\.\d+\.\d+\.\d+$/.test(host) ||
+        /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host)
+      )
+        host = 'localhost';
+      return `${url.protocol}//${host}:${url.port}${path.replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()}`;
+    } catch {
+      return (spec.endpoint ?? '').trim().toLowerCase();
+    }
+  };
+  // "models/gemini-x" and "gemini-x", or "library/llama3", "llama3" and "llama3:latest", are one model.
+  const name = (spec: ModelSpec) =>
+    spec.model
+      .toLowerCase()
+      .replace(/^(?:models|library)\//, '')
+      .replace(/:latest$/, '');
+  return name(first) === name(second) && address(first) === address(second);
+}
 
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
 const severity = z.enum(['unknown', 'low', 'medium', 'high', 'critical']);
@@ -21,6 +85,7 @@ const retentionDays = z.number().int().min(1).max(3650).optional();
 const model = z
   .object({
     provider: z.enum(PROVIDER_IDS),
+    disclosure_profile: z.enum(['minimal', 'deployment-context']).default('minimal'),
     output_format: z.enum(['auto', 'json_schema', 'json_object', 'prompt']).default('auto'),
     model: z.string().min(1).max(200),
     api_key_env: envName.optional(),
@@ -82,7 +147,7 @@ export const configSchema = z
         analysis: model.optional(),
         verification: model.optional(),
         daily_request_limit: z.number().int().min(1).max(10000).default(100),
-        daily_token_limit: z.number().int().min(100).max(10_000_000).default(100_000),
+        daily_token_limit: z.number().int().min(100).max(10_000_000).default(1_000_000),
         daily_budget_usd: z.number().positive().max(10000).optional(),
         max_input_chars: z.number().int().min(1000).max(100_000).default(12_000),
         max_output_tokens: z.number().int().min(128).max(8192).default(1500),
@@ -92,7 +157,7 @@ export const configSchema = z
       .default({
         enabled: false,
         daily_request_limit: 100,
-        daily_token_limit: 100000,
+        daily_token_limit: 1_000_000,
         max_input_chars: 12000,
         max_output_tokens: 1500,
         timeout_seconds: 45,
@@ -105,6 +170,8 @@ export const configSchema = z
         urgent_unknown: z.boolean().default(true),
         exploited_override: z.boolean().default(true),
         malware_override: z.boolean().default(true),
+        ai_dismissals: z.enum(['review', 'record']).optional(),
+        review_before_news_suppression: z.boolean().optional(),
         health_channels: channels.default([]),
       })
       .strict()
@@ -115,8 +182,25 @@ export const configSchema = z
         urgent_unknown: true,
         exploited_override: true,
         malware_override: true,
+        ai_dismissals: 'review',
         health_channels: [],
-      }),
+      })
+      .superRefine((policy, ctx) => {
+        if (
+          policy.ai_dismissals !== undefined &&
+          policy.review_before_news_suppression !== undefined &&
+          policy.ai_dismissals !== (policy.review_before_news_suppression ? 'review' : 'record')
+        )
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Conflicting AI dismissal policies; use ai_dismissals only.',
+          });
+      })
+      .transform(({ review_before_news_suppression, ...policy }) => ({
+        ...policy,
+        ai_dismissals:
+          policy.ai_dismissals ?? (review_before_news_suppression === false ? 'record' : 'review'),
+      })),
     notifications: z
       .object({
         slack: z.object({ webhook_url_env: envName }).strict().optional(),
@@ -179,6 +263,14 @@ export const configSchema = z
   })
   .strict()
   .superRefine((config, ctx) => {
+    const { analysis, verification } = config.models;
+    if (analysis && verification && sameModel(analysis, verification))
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'The verification model must differ from the analysis model; an identical model only repeats the first answer. Remove models.verification or choose another model.',
+        path: ['models', 'verification'],
+      });
     if (config.models.enabled && !config.models.analysis)
       ctx.addIssue({
         code: 'custom',
@@ -225,13 +317,13 @@ export const configSchema = z
           url.password ||
           url.search ||
           url.hash ||
-          (!spec.allow_private_endpoint && url.protocol !== 'https:') ||
+          (url.protocol !== 'https:' && !(spec.allow_private_endpoint && localHost(url.hostname))) ||
           !['https:', 'http:'].includes(url.protocol)
         )
           ctx.addIssue({
             code: 'custom',
             message:
-              'Endpoint must be HTTPS, with no credentials/query/fragment; explicit private endpoints may use HTTP',
+              'Endpoint must be HTTPS, with no credentials/query/fragment; only an explicit private or local endpoint may use HTTP',
             path: ['models', name, 'endpoint'],
           });
       }

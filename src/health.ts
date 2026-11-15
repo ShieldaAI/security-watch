@@ -1,6 +1,11 @@
 import type { Config } from './types.js';
 import { Store } from './store.js';
 
+/** How long a running worker may take over its first scan before health reports none. */
+const FIRST_SCAN_GRACE = 3_600_000;
+/** How long a worker that died may have run after its last heartbeat (written every 15 seconds). */
+const CRASH_MARGIN = 60_000;
+
 export interface HealthReport {
   ok: boolean;
   status: 'healthy' | 'starting' | 'degraded';
@@ -24,6 +29,40 @@ function object(value: string | undefined): Record<string, unknown> | undefined 
 function time(value: unknown): number {
   return typeof value === 'string' ? Date.parse(value) : NaN;
 }
+/**
+ * Since when a worker starting at `startedAt` has been catching up without recording a scan. It is
+ * kept across restarts until a scan is recorded, so a worker killed during every scan cannot renew
+ * its startup grace by restarting; a restart after a recorded scan starts afresh. The time between
+ * the previous worker's last sign of life and this start does not count.
+ */
+export function catchingUpFrom(store: Store, startedAt: string): string {
+  try {
+    const previous = JSON.parse(store.getMeta('worker') ?? 'null') as {
+      status?: string;
+      catching_up_since?: string;
+      started_at?: string;
+      heartbeat_at?: string;
+    } | null;
+    const scan = JSON.parse(store.getMeta('last_scan') ?? 'null') as { at?: string } | null;
+    const since = time(previous?.catching_up_since);
+    const scanned = time(scan?.at);
+    const seen = Math.max(
+      ...[time(previous?.heartbeat_at), time(previous?.started_at)].filter(Number.isFinite),
+    );
+    const start = Date.parse(startedAt);
+    if (!Number.isFinite(since) || since > start || scanned >= since) return startedAt;
+    // Only running time counts: the time the worker was stopped moves the start forward. A clean stop
+    // records its last moment. A worker that died may have run up to a heartbeat interval past its
+    // last heartbeat, so that much more of the gap counts as running: a crash loop, down for seconds,
+    // cannot renew the grace however soon it dies.
+    const gap = Number.isFinite(seen) && seen >= since && seen <= start ? start - seen : 0;
+    const down = previous?.status === 'stopped' ? gap : Math.max(0, gap - CRASH_MARGIN);
+    return new Date(since + down).toISOString();
+  } catch {
+    return startedAt;
+  }
+}
+
 /** Read-only monitoring health check; does not assess system security or make network requests. */
 export function checkHealth(
   store: Store,
@@ -37,8 +76,24 @@ export function checkHealth(
   const started = time(worker?.started_at);
   const scanned = time(scan?.at);
   const issues: string[] = [];
+  const staleAfter = Math.max(120_000, config.poll_interval_minutes * 120_000);
+  // The first scan reads a day of advisories and every package lookup at about a request a second:
+  // it can take well over the two minutes later scans need, so a running worker that has not
+  // finished one yet is healthy for up to an hour.
+  // Measured from when the worker began catching up, which survives restarts until a scan is
+  // recorded: a worker killed during every scan does not renew its grace by restarting.
+  const catchingUpSince = time(worker?.catching_up_since);
+  const graceFrom =
+    Number.isFinite(catchingUpSince) && catchingUpSince <= started ? catchingUpSince : started;
   const startupGrace =
-    worker?.status === 'running' && Number.isFinite(started) && now >= started && now - started <= 120_000;
+    worker?.status === 'running' &&
+    Number.isFinite(started) &&
+    now >= started &&
+    (Number.isFinite(scanned) && scanned >= started
+      ? now - started <= 120_000
+      : now - graceFrom <= FIRST_SCAN_GRACE);
+  /** Whether this check passes only because a worker is still catching up. */
+  let catchingUp = false;
   if (
     requireWorker &&
     (worker?.status !== 'running' ||
@@ -50,7 +105,9 @@ export function checkHealth(
   if (!Number.isFinite(scanned)) {
     if (!startupGrace || !requireWorker) issues.push('No completed scan is recorded.');
   } else {
-    if (scanned > now + 5000 || now - scanned > Math.max(120_000, config.poll_interval_minutes * 120_000))
+    const stale = now - scanned > staleAfter;
+    if (stale && startupGrace && requireWorker && scanned < started) catchingUp = true;
+    else if (scanned > now + 5000 || stale)
       issues.push('The last completed scan is stale or has an invalid future timestamp.');
     if (scan?.degraded !== false)
       issues.push('The last scan reported degraded monitoring; inspect status and findings.');
@@ -75,7 +132,9 @@ export function checkHealth(
   if (delivery.overdue_pending) issues.push('Current notifications are overdue by more than five minutes.');
   return {
     ok: issues.length === 0,
-    status: issues.length ? 'degraded' : Number.isFinite(scanned) ? 'healthy' : 'starting',
+    // While a worker catches up the check passes, but it is "starting": no success is reported to
+    // an external heartbeat until a scan completes.
+    status: issues.length ? 'degraded' : Number.isFinite(scanned) && !catchingUp ? 'healthy' : 'starting',
     checked_at: new Date(now).toISOString(),
     issues,
     last_scan_at: Number.isFinite(scanned) ? new Date(scanned).toISOString() : null,

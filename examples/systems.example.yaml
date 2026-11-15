@@ -4,6 +4,8 @@ systems:
     name: Payments API
     environment: production
     owner: payments-team
+    # A note says where to look. It is repeated in every alert about this system.
+    note: runs on cluster eu-1, namespace payments; on-call rota "payments"
     exposure: internet
     criticality: critical
     updated_at: '2026-10-23T00:00:00Z'
@@ -12,11 +14,13 @@ systems:
         ecosystem: npm
         name: example-parser
         version: 1.2.0
+        note: request parsing in services/payments-api, file package.json
     # lockfile: ../application/package-lock.json
     products:
       - name: Example Database
         version: '4.2'
         keywords: [Example Database Server]
+        note: managed instance "payments-prod", owned by the data team
     keywords: [Example Cloud]
   - id: payments-staging
     name: Payments staging

@@ -434,7 +434,7 @@ test('a later empty OSV version query cannot turn a prior non-npm match into an 
   );
 });
 
-test('GitHub package aliases normalize but non-npm ranges remain uncertain', async () => {
+test('GitHub package aliases normalize and supported PyPI final-release ranges establish exclusion', async () => {
   const component = parseLibraryList('python:Friendly_Bard@3.0')[0];
   const collected = await collectSources(
     { systems: [{ ...system, components: [component] }] },
@@ -482,7 +482,7 @@ test('GitHub package aliases normalize but non-npm ranges remain uncertain', asy
   assert.equal(
     assess({ systems: [{ ...system, components: [component] }] }, collected.evidence, config, now)[0]
       .applicability,
-    'unknown',
+    'not_affected',
   );
 });
 

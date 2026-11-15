@@ -41,7 +41,10 @@ test('monitoring health distinguishes startup, successful scans and a stopped or
 
 test('startup is bounded and stale, future, corrupt and degraded scan records fail monitoring health', (t) => {
   const store = storeFor(t);
+  // The first scan may take up to an hour (it reads a day of advisories); after that, none is a fault.
   running(store, { started_at: time(-121_000) });
+  assert.equal(checkHealth(store, config, NOW).ok, true);
+  running(store, { started_at: time(-61 * 60_000) });
   assert.equal(checkHealth(store, config, NOW).ok, false);
   for (const state of [{ at: time(-31 * 60_000) }, { at: time(6000) }, { degraded: true }]) {
     scanned(store, state);

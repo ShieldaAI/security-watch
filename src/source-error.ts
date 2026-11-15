@@ -24,6 +24,13 @@ export class PartialSourceError extends SourceError {
   constructor(
     message: string,
     public readonly evidence: Evidence[],
+    /** How far an ordered collection got. The source continues from here on its next run. */
+    public readonly resume?: string,
+    /**
+     * Set when everything the source knows about the inventory's own packages was read, and only
+     * other records are missing. Version exclusions drawn from the source then still hold.
+     */
+    public readonly packageResults?: 'complete',
   ) {
     super(message);
   }
@@ -54,10 +61,15 @@ export class SourceItemFailures {
     }
   }
 
-  message(source: string): string | undefined {
+  /** What was skipped, for a source that decides for itself how far its checkpoint moves. */
+  summary(source: string): string | undefined {
     return this.count
-      ? `${source}: ${this.count} invalid item(s) were skipped. ${this.first} Collection remains incomplete and its checkpoint was not advanced.`
+      ? `${source}: ${this.count} invalid item(s) were skipped. ${this.first} Collection remains incomplete.`
       : undefined;
+  }
+
+  message(source: string): string | undefined {
+    return this.summary(source)?.replace(/\.$/, ' and its checkpoint was not advanced.');
   }
 
   finish(source: string, evidence: Evidence[]): Evidence[] {

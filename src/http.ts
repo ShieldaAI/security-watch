@@ -109,7 +109,27 @@ function recordCooldown(origin: string, status: number, retryAfter: string | str
 export function isPublicAddress(address: string): boolean {
   try {
     const parsed = ipaddr.process(address);
+    // ::a.b.c.d, the deprecated IPv4-compatible form: a stack that still routes it reaches the
+    // embedded IPv4 address, which may be this machine. Written with a dotted quad the address is
+    // judged as that IPv4 address; written in hexadecimal it is no public destination.
+    if (parsed.kind() === 'ipv6' && (parsed as ipaddr.IPv6).parts.slice(0, 6).every((part) => part === 0))
+      return false;
     return parsed.range() === 'unicast';
+  } catch {
+    return false;
+  }
+}
+/**
+ * Whether an unencrypted connection to this address stays on this machine or a private network:
+ * loopback, RFC 1918, carrier-grade NAT (also used by overlay networks), link-local and IPv6
+ * unique-local addresses. Addresses that wrap a public IPv4 address (NAT64, 6to4, Teredo),
+ * multicast and reserved ranges are not private.
+ */
+export function privateAddress(address: string): boolean {
+  try {
+    return ['private', 'loopback', 'linkLocal', 'carrierGradeNat', 'uniqueLocal', 'unspecified'].includes(
+      ipaddr.process(address).range(),
+    );
   } catch {
     return false;
   }
@@ -128,11 +148,16 @@ export function validateDestination(value: string, allowPrivate = false): URL {
     !['https:', ...(allowPrivate ? ['http:'] : [])].includes(url.protocol)
   )
     throw new NetworkError('DESTINATION_DENIED');
-  const host = url.hostname.replace(/^\[|\]$/g, '');
+  // A trailing dot names the same host ("localhost.").
+  const host = url.hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '');
   if (
     !allowPrivate &&
     (host === 'localhost' || host.endsWith('.localhost') || (isIP(host) && !isPublicAddress(host)))
   )
+    throw new NetworkError('DESTINATION_DENIED');
+  // Permission to reach a private destination is not permission to send a request in the clear
+  // across the internet: plain HTTP is only for private and local addresses.
+  if (url.protocol === 'http:' && isIP(host) && !privateAddress(host))
     throw new NetworkError('DESTINATION_DENIED');
   return url;
 }
@@ -151,6 +176,11 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
         return;
       }
       if (!options.allowPrivate && addresses.some((a) => !isPublicAddress(a.address))) {
+        callback(new NetworkError('DESTINATION_DENIED'), '', 4);
+        return;
+      }
+      // A name that resolves to a public address must not receive a plain HTTP request.
+      if (url.protocol === 'http:' && addresses.some((a) => !privateAddress(a.address))) {
         callback(new NetworkError('DESTINATION_DENIED'), '', 4);
         return;
       }
@@ -175,7 +205,7 @@ export const safeHttp: HttpClient = async (value, options = {}) => {
           agent: false,
           signal: options.signal,
           headers: {
-            'user-agent': 'Shielda-Security-Watch/0.1',
+            'user-agent': 'Shielda-Security-Watch/1.0',
             'accept-encoding': 'identity',
             ...options.headers,
           },

@@ -290,8 +290,20 @@ test('all adapters reject partial output, refusals, invented citations and unsup
 test('dollar budgets include verification and cached requests consume no additional reservation', async (t) => {
   const store = memory(t);
   const priced = spec('openai-compatible', { input_usd_per_million: 10, output_usd_per_million: 20 });
+  // Measure what one request reserves, then allow one request and a half.
+  const probeStore = memory(t);
+  await new ModelAnalyzer(
+    config('openai-compatible', { models: { analysis: priced, daily_budget_usd: 100 } }),
+    probeStore,
+    async () => response('openai-compatible'),
+    () => NOW,
+  ).analyze(assessment, system, [evidence]);
   const cfg = config('openai-compatible', {
-    models: { analysis: priced, verification: { ...priced, model: 'reviewer' }, daily_budget_usd: 0.15 },
+    models: {
+      analysis: priced,
+      verification: { ...priced, model: 'reviewer' },
+      daily_budget_usd: probeStore.budgets()[0].usd * 1.5,
+    },
   });
   let calls = 0;
   const analyzer = new ModelAnalyzer(
@@ -359,6 +371,7 @@ test('a model outage must not downgrade a previous AI escalation and generate al
 test('inventory updates invalidate model context and a verified fixed version is not kept affected by previous AI escalation', async (t) => {
   const store = memory(t);
   const cfg = config();
+  cfg.models.analysis.disclosure_profile = 'deployment-context';
   const { state, client } = fixtureHttp();
   const options = { config: cfg, inventory: { systems: [system] }, store, http: client, now: NOW };
   await runScan(options);

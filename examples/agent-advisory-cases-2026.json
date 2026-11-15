@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "source_checked_at": "2026-10-28T16:44:48Z",
+  "note": "Synthetic deployment cases derived from the cited source snapshots. Supported final PyPI release ranges establish version applicability only; configuration-dependent remediation still requires review. Unsupported PEP 440 forms and product-only identity remain unknown.",
+  "cases": [
+    {
+      "id": "mcp-audience-vulnerable-1x",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "vulnerable-1x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.29.1"
+      },
+      "configuration": {
+        "validate_token_resource": false,
+        "token_verifier_checks_audience": false
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-audience-vulnerable-2x",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "vulnerable-2x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.1.1"
+      },
+      "configuration": {
+        "validate_token_resource": false,
+        "token_verifier_checks_audience": false
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-audience-fixed-release-misconfigured",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "fixed-release-misconfigured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0"
+      },
+      "configuration": {
+        "validate_token_resource": false,
+        "token_verifier_checks_audience": false
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-audience-fixed-release-configured",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "fixed-release-configured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.2.0"
+      },
+      "configuration": {
+        "validate_token_resource": true,
+        "resource_server_url_configured": true,
+        "access_token_resource_populated": true
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-audience-unlisted-pep440",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "unlisted-pep440",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0rc1"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-audience-missing-version",
+      "advisory_id": "GHSA-w4fh-qvv9-3v23",
+      "scenario": "missing-version",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-vulnerable-1x",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "vulnerable-1x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.29.1"
+      },
+      "configuration": {
+        "mcp_transport": "http",
+        "custom_http_client_used": true,
+        "follow_redirects": true,
+        "cross_origin_redirect_override": true
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-vulnerable-2x",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "vulnerable-2x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.1.1"
+      },
+      "configuration": {
+        "mcp_transport": "http",
+        "custom_http_client_used": true,
+        "follow_redirects": true,
+        "cross_origin_redirect_override": true
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-fixed-release-misconfigured",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "fixed-release-misconfigured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0"
+      },
+      "configuration": {
+        "mcp_transport": "http",
+        "custom_http_client_used": true,
+        "follow_redirects": true,
+        "cross_origin_redirect_override": true
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-fixed-release-configured",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "fixed-release-configured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.2.0"
+      },
+      "configuration": {
+        "mcp_transport": "http",
+        "cross_origin_redirect_override": false
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-unlisted-pep440",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "unlisted-pep440",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0rc1"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-redirect-missing-version",
+      "advisory_id": "GHSA-5h93-6whr-6q8j",
+      "scenario": "missing-version",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-vulnerable-1x",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "vulnerable-1x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.29.1"
+      },
+      "configuration": {
+        "mcp_role": "client",
+        "calls_untrusted_mcp_tools": true,
+        "external_schema_refs_blocked": false,
+        "schema_validation_network_access": true
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-vulnerable-2x",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "vulnerable-2x",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.1.1"
+      },
+      "configuration": {
+        "mcp_role": "client",
+        "calls_untrusted_mcp_tools": true,
+        "external_schema_refs_blocked": false,
+        "schema_validation_network_access": true
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-fixed-release-misconfigured",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "fixed-release-misconfigured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0"
+      },
+      "configuration": {
+        "mcp_role": "client",
+        "calls_untrusted_mcp_tools": true,
+        "external_schema_refs_blocked": false,
+        "schema_validation_network_access": true
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-fixed-release-configured",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "fixed-release-configured",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "2.2.0"
+      },
+      "configuration": {
+        "mcp_role": "client",
+        "external_schema_refs_blocked": true,
+        "schema_validation_network_access": false
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "not_affected",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-unlisted-pep440",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "unlisted-pep440",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp",
+        "version": "1.30.0rc1"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "mcp-schema-missing-version",
+      "advisory_id": "GHSA-rwrf-2pqf-9j8j",
+      "scenario": "missing-version",
+      "component": {
+        "id": "mcp",
+        "ecosystem": "PyPI",
+        "name": "mcp"
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "openhands-vulnerable-release-exposed",
+      "advisory_id": "CVE-2026-112346",
+      "scenario": "vulnerable-release-exposed",
+      "product": {
+        "name": "OpenHands Software Agent SDK",
+        "keywords": [],
+        "version": "1.51.0"
+      },
+      "configuration": {
+        "sandbox_workspace_backend": "DockerWorkspace",
+        "sandbox_bind_address": "0.0.0.0",
+        "sandbox_authentication_required": false,
+        "sandbox_session_keys_configured": false,
+        "sandbox_port_reachable_from_untrusted_network": true
+      },
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "openhands-fixed-release-misconfigured",
+      "advisory_id": "CVE-2026-112346",
+      "scenario": "fixed-release-misconfigured",
+      "product": {
+        "name": "OpenHands Software Agent SDK",
+        "keywords": [],
+        "version": "1.52.0"
+      },
+      "configuration": {
+        "sandbox_workspace_backend": "DockerWorkspace",
+        "sandbox_bind_address": "0.0.0.0",
+        "sandbox_authentication_required": false,
+        "sandbox_session_keys_configured": false,
+        "sandbox_port_reachable_from_untrusted_network": true
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "openhands-fixed-release-configured",
+      "advisory_id": "CVE-2026-112346",
+      "scenario": "fixed-release-configured",
+      "product": {
+        "name": "OpenHands Software Agent SDK",
+        "keywords": [],
+        "version": "1.52.0"
+      },
+      "configuration": {
+        "sandbox_workspace_backend": "DockerWorkspace",
+        "sandbox_bind_address": "127.0.0.1",
+        "sandbox_authentication_required": true,
+        "sandbox_session_keys_configured": true,
+        "sandbox_port_reachable_from_untrusted_network": false
+      },
+      "vendor_fixed_release": true,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    },
+    {
+      "id": "openhands-missing-version",
+      "advisory_id": "CVE-2026-112346",
+      "scenario": "missing-version",
+      "product": {
+        "name": "OpenHands Software Agent SDK",
+        "keywords": []
+      },
+      "configuration": {},
+      "vendor_fixed_release": false,
+      "expected_applicability": "unknown",
+      "expected_remediation": "review_required"
+    }
+  ]
+}

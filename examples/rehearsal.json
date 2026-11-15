@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "frames": [
+    {
+      "at": "2026-11-05T12:00:00.000Z",
+      "inventory": {
+        "systems": [
+          {
+            "id": "synthetic-rehearsal",
+            "name": "Synthetic rehearsal",
+            "environment": "test",
+            "exposure": "unknown",
+            "criticality": "low",
+            "updated_at": "2026-11-05T12:00:00.000Z",
+            "components": [
+              {
+                "id": "example-parser",
+                "ecosystem": "npm",
+                "name": "example-parser",
+                "version": "1.0.0"
+              }
+            ],
+            "products": [],
+            "keywords": []
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "id": "synthetic:rehearsal-parser",
+          "source": "synthetic",
+          "kind": "advisory",
+          "title": "Synthetic parser advisory",
+          "description": "Fictional deterministic staging input.",
+          "url": "https://example.invalid/rehearsal",
+          "aliases": ["CVE-2099-99901"],
+          "severity": "critical",
+          "modified_at": "2026-11-05T12:00:00.000Z",
+          "fetched_at": "2026-11-05T12:00:00.000Z",
+          "packages": [
+            {
+              "ecosystem": "npm",
+              "name": "example-parser",
+              "range": "<2.0.0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-11-05T12:01:00.000Z",
+      "evidence": [
+        {
+          "id": "synthetic:rehearsal-parser",
+          "source": "synthetic",
+          "kind": "advisory",
+          "title": "Synthetic parser advisory",
+          "description": "Fictional deterministic staging input.",
+          "url": "https://example.invalid/rehearsal",
+          "aliases": ["CVE-2099-99901"],
+          "severity": "critical",
+          "modified_at": "2026-11-05T12:00:00.000Z",
+          "fetched_at": "2026-11-05T12:00:00.000Z",
+          "packages": [
+            {
+              "ecosystem": "npm",
+              "name": "example-parser",
+              "range": "<2.0.0"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

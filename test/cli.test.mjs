@@ -289,7 +289,7 @@ test('explicit env files supply credentials as data without exposing values or e
   const marker = join(f.dir, 'must-not-exist');
   writeFileSync(
     envPath,
-    `WATCH_SETUP_KEY=${secret}\nWATCH_CLI_SLACK_TOKEN=synthetic-webhook\nIGNORED_SHELL=$(touch ${marker})\n`,
+    `WATCH_SETUP_KEY=${secret}\nWATCH_CLI_SLACK_TOKEN=https://hooks.slack.com/services/T000/B000/synthetic-webhook\nIGNORED_SHELL=$(touch ${marker})\n`,
     { mode: 0o600 },
   );
   const result = run(['doctor', '--credentials-file', envPath], f.dir, {
@@ -316,7 +316,7 @@ test('env file access rejects shared permissions and symlinks, and preserves exp
   writeFileSync(envPath, 'WATCH_SETUP_KEY=\nWATCH_CLI_SLACK_TOKEN=\n', { mode: 0o600 });
   const inherited = {
     WATCH_SETUP_KEY: 'synthetic-exported-key',
-    WATCH_CLI_SLACK_TOKEN: 'synthetic-exported-webhook',
+    WATCH_CLI_SLACK_TOKEN: 'https://hooks.slack.com/services/T000/B000/synthetic-exported-webhook',
   };
   assert.equal(run(['doctor', '--credentials-file', envPath], f.dir, inherited).code, 0);
   chmodSync(envPath, 0o644);
@@ -522,4 +522,51 @@ test('foreground worker continues with missing model credentials and disabled so
   const release = acquireLock(f.db);
   release();
   assert.equal(run(['unlock'], f.dir).code, 0);
+});
+
+test('start carries the running time of a worker stopped before a scan into its catch-up grace', async (t) => {
+  const f = fixture(t, { notifications: {}, policy: { health_channels: [] } });
+  mkdirSync(join(f.dir, 'state'), { recursive: true });
+  const workerMeta = () => {
+    const db = new DatabaseSync(f.db, { readOnly: true });
+    try {
+      return JSON.parse(db.prepare("SELECT value FROM metadata WHERE key = 'worker'").get().value);
+    } finally {
+      db.close();
+    }
+  };
+  const restart = async (lastSeenAgo) => {
+    // The previous worker started catching up half an hour before it was last seen.
+    const since = new Date(Date.now() - lastSeenAgo - 30 * 60_000).toISOString();
+    const seen = new Date(Date.now() - lastSeenAgo).toISOString();
+    const store = new Store(f.db);
+    store.setMeta(
+      'worker',
+      JSON.stringify({
+        pid: 1,
+        status: 'stopped',
+        started_at: since,
+        catching_up_since: since,
+        heartbeat_at: seen,
+      }),
+    );
+    store.setMeta('last_scan', 'null');
+    store.close();
+    const { child, logs } = worker(t, f);
+    await waitFor(() => logs.stdout.includes('running in the foreground')).catch((error) => {
+      t.diagnostic(JSON.stringify(logs));
+      throw error;
+    });
+    const meta = workerMeta();
+    child.kill('SIGTERM');
+    await waitFor(() => child.exitCode !== null || child.signalCode !== null);
+    return { since, meta };
+  };
+  // The previous worker caught up for thirty minutes. Whether it stopped seconds or hours ago, the
+  // new one has used those thirty minutes of its hour, and no more.
+  for (const lastSeenAgo of [5_000, 2 * 3_600_000]) {
+    const { meta } = await restart(lastSeenAgo);
+    const used = Date.parse(meta.started_at) - Date.parse(meta.catching_up_since);
+    assert.ok(Math.abs(used - 30 * 60_000) < 20_000, `${lastSeenAgo}: ${used}`);
+  }
 });

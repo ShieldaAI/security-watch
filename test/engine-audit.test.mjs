@@ -103,7 +103,7 @@ test('fixed, withdrawn and removed findings are canceled before an urgent delive
     });
 });
 
-test('inventory exclusions cancel queued alerts before source HTTP yields to the concurrent delivery loop', async (t) => {
+test('inventory exclusions cancel old queued alerts before HTTP, then failed coverage requires review', async (t) => {
   const store = memory(t);
   await runScan({ config, inventory: inventory(), store, fixture: [advisory()], now });
   let calls = 0;
@@ -111,7 +111,8 @@ test('inventory exclusions cancel queued alerts before source HTTP yields to the
     config: { ...config, sources: { ...config.sources, osv: true } },
     inventory: inventory('2.0.0'),
     store,
-    now: now + 1000,
+    // Past two poll intervals: the record behind the exclusion is no longer current.
+    now: now + 3 * 3_600_000,
     http: async () => {
       calls++;
       assert.equal(store.jobs().filter((j) => j.status === 'pending').length, 0);
@@ -119,7 +120,8 @@ test('inventory exclusions cancel queued alerts before source HTTP yields to the
     },
   });
   assert(calls > 0);
-  assert.equal(store.findings().find((f) => f.category === 'library').applicability, 'not_affected');
+  assert.equal(store.findings().find((f) => f.category === 'library').applicability, 'unknown');
+  assert.equal(JSON.parse(store.getMeta('source:coverage'))[0].status, 'failed');
 });
 
 test('cancellation before or during collection performs no new analysis or successful scan checkpoint', async (t) => {

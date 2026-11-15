@@ -70,17 +70,37 @@ const reviewed = (classification, impact, overrides = {}) => ({
   ...overrides,
 });
 
-test('news classification records general mentions and excluded versions, and routes actual impacts by severity', () => {
-  assert.equal(decide(reviewed('general_news', 'not_applicable'), config).action, 'record');
-  assert.equal(decide(reviewed('new_vulnerability', 'not_affected'), config).action, 'record');
+test('news classification reviews general mentions and excluded versions, and routes actual impacts by severity', () => {
+  assert.equal(decide(reviewed('general_news', 'not_applicable'), config).action, 'digest');
+  assert.equal(decide(reviewed('new_vulnerability', 'not_affected'), config).action, 'digest');
   for (const classification of ['new_vulnerability', 'known_vulnerability_update']) {
     assert.equal(decide(reviewed(classification, 'affected'), config).action, 'notify');
-    assert.equal(decide(reviewed(classification, 'affected', { priority: 'low' }), config).action, 'record');
+    // A positive impact claim below the rule's levels is reviewed, never quieter than an uncertain one.
+    assert.equal(decide(reviewed(classification, 'affected', { priority: 'low' }), config).action, 'digest');
     assert.equal(decide(reviewed(classification, 'unknown'), config).action, 'digest');
   }
   const pending = assess(inventory, [story], config, now)[0];
   assert.equal(decide(pending, config).action, 'record');
   assert.equal(decide(pending, { ...config, models: { ...config.models, enabled: false } }).action, 'digest');
+});
+
+test('explicit record mode retains the legacy opt-out while review preserves authoritative gates', () => {
+  assert.equal(config.policy.ai_dismissals, 'review');
+  const reviewedConfig = config;
+  const recordConfig = { ...config, policy: { ...config.policy, ai_dismissals: 'record' } };
+  for (const classification of ['new_vulnerability', 'known_vulnerability_update']) {
+    const finding = reviewed(classification, 'not_affected');
+    assert.equal(decide(finding, recordConfig).action, 'record');
+    const decision = decide(finding, reviewedConfig);
+    assert.equal(decision.action, 'digest');
+    assert.deepEqual(decision.channels, ['slack']);
+    assert.match(decision.reason, /requires operator review/);
+    assert.equal(decide({ ...finding, applicability: 'not_affected' }, reviewedConfig).action, 'record');
+    assert.equal(decide({ ...finding, source_severity: 'critical' }, reviewedConfig).action, 'notify');
+    assert.equal(decide({ ...finding, exploited: true }, reviewedConfig).action, 'notify');
+  }
+  assert.equal(decide(reviewed('general_news', 'not_applicable'), reviewedConfig).action, 'digest');
+  assert.equal(decide(reviewed('general_news', 'not_applicable'), recordConfig).action, 'record');
 });
 
 test('AI news claims cannot suppress authoritative criticality or configured exploitation', () => {
@@ -126,7 +146,8 @@ test('generic products retain AI news filtering when a cited CVE is also collect
     ai: reviewed().ai,
     news_analysis: analysis('new_vulnerability', 'not_affected'),
   };
-  assert.equal(decide(analyzed, rules).action, 'record');
+  assert.equal(decide(analyzed, rules).action, 'digest');
+  assert.equal(decide(analyzed, rules).review, 'ai_not_affected');
   assert.equal(
     decide({ ...analyzed, news_analysis: analysis('new_vulnerability', 'affected') }, rules).action,
     'notify',
@@ -136,15 +157,14 @@ test('generic products retain AI news filtering when a cited CVE is also collect
 test('multi-product news keeps each configured product even when a package is mentioned', () => {
   const configured = structuredClone(inventory);
   configured.systems[0].components = [
-    { id: 'parser', ecosystem: 'npm', name: 'example-parser', version: '1.0.0' },
+    { id: 'parser', ecosystem: 'npm', name: 'xlsx-parser', version: '1.0.0' },
   ];
   const findings = assess(
     configured,
     [
       {
         ...story,
-        description:
-          'CVE-2026-10001 affects example-parser. Example Database also has a newly disclosed flaw.',
+        description: 'CVE-2026-10001 affects xlsx-parser. Example Database also has a newly disclosed flaw.',
         aliases: ['CVE-2026-10001'],
       },
     ],
@@ -186,12 +206,18 @@ test('general system news is classified before delivery and does not flap into n
     };
   };
   const beforeDelivery = async () =>
-    assert.equal(store.jobs().filter((j) => j.status === 'pending').length, 0);
+    assert.ok(
+      store
+        .jobs()
+        .filter((j) => j.status === 'pending')
+        .every((j) => JSON.parse(j.payload).mode === 'digest'),
+    );
   const report = await runScan({ config, inventory, store, http, now, onUrgent: beforeDelivery });
   const finding = report.findings.find((f) => f.category === 'news');
   assert.equal(finding.news_analysis.classification, 'general_news');
   assert.equal(finding.applicability, 'relevant', 'AI news conclusions do not claim verified safety');
-  assert.equal(report.decisions[finding.id].action, 'record');
+  assert.equal(report.decisions[finding.id].action, 'digest');
+  assert.equal(store.reviews().length, 1);
   const revisions = store.history(finding.id).length;
   await runScan({ config, inventory, store, http, now: now + 1000, onUrgent: beforeDelivery });
   const historical = await runScan({
@@ -204,12 +230,13 @@ test('general system news is classified before delivery and does not flap into n
   });
   assert.equal(
     historical.decisions[finding.id].action,
-    'record',
+    'digest',
     'An unchanged general article does not become a vulnerability when RSS rotates',
   );
   assert.equal(requests, 1, 'Unchanged evidence uses the model cache');
   assert.equal(store.history(finding.id).length, revisions);
-  assert.equal(store.jobs().length, 0);
+  assert.equal(store.jobs().length, 1);
+  assert.equal(store.reviews().length, 1);
 });
 
 test('classification and impact are material revisions and notification text makes AI provenance explicit', (t) => {
