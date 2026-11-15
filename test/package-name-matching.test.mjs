@@ -532,3 +532,49 @@ test('sentence ends, next-sentence registries and remaining list entries', () =>
   yes('The Express PyPI package was cloned.', 'express');
   yes('The Express libraries leak data.', 'express');
 });
+
+test('hyphens after a cue word and versions near CVSS', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), true, text);
+  const no = (text, name = 'nest') => assert.equal(packageMentioned(text, component(name)), false, text);
+  const n = 'The Nest security team fixed it';
+  for (const suffix of [
+    'based',
+    'hosted',
+    'published',
+    'level',
+    'lock',
+    'managed',
+    'installed',
+    'pinned',
+    'wide',
+    'scoped',
+    'only',
+  ])
+    yes(`${n} in the plugin-${suffix} setup.`);
+  for (const word of [
+    'package-delivery scams',
+    'package-tracking links',
+    'package-theft ring',
+    'module-sized device',
+    'npm-inspired lures',
+    'npm-themed lure',
+    'package-style box',
+  ])
+    no(`${n} in ${word}.`);
+  // A library version with its rating counts; a CVSS version number near "CVSS" does not.
+  yes('The Express security team fixed it in v5.0.1 (CVSS 9.8).', 'express');
+  yes('The Express security team released v5.0.1, which fixes a CVSS 9.8 flaw.', 'express');
+  yes('The Express security team fixed it in version 5.1 (CVSS v3.1 score 7.5).', 'express');
+  no(`${n}, rated 9.8 (v3.1) on the CVSS scale.`);
+  no(`${n}, rated 9.8 under version 3.1 of CVSS.`);
+  yes(`${n} in v3.1, and the advisory also gives a CVSS rating.`);
+  yes(`${n} in v5.1; CVSS rates it 9.8.`);
+  no(`${n} in v3.1; CVSS rates it 9.8.`);
+  no(`${n}, giving it a CVSS score of 8.1 (version 3.1).`);
+  no(`${n}, rated 8.1 in CVSS 3.1 and 8.7 in v4.0.`);
+  yes(`${n} in v5.1, giving it a CVSS score of 8.1.`);
+  // The slash forms after "CVSS".
+  for (const form of ['CVSS v3.1/v4.0', 'CVSS v3/v4.0', 'CVSS 3.1 / v4.0', 'CVSS v3.1 / v4.0'])
+    no(`${n} rated ${form} 8.1.`);
+});

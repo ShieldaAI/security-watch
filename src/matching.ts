@@ -402,19 +402,27 @@ const SOFTWARE_NOUN =
 const SHARED_NOUN =
   '(?:devs|community|components?|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
-/** A word joined to a cue word that makes it something else ("npm-themed lure", "package-style"). */
-const NOT_LIBRARY_SUFFIX = '-(?:themed|style|like|branded|lures?|related|shaped)';
+/**
+ * After a cue word, a hyphen keeps it a cue only before one of these ("plugin-based", "npm-hosted",
+ * "package-lock.json"); any other ("npm-themed lure", "package-delivery scam") makes it something
+ * else.
+ */
+const NOT_LIBRARY_SUFFIX =
+  '-(?!(?:based|hosted|published|level|lock|managed|installed|pinned|wide|scoped|only)(?![\\p{L}]))';
 /**
  * Not a software version: one that follows "CVSS" ("CVSS v3.1", "CVSS: v3.1", "CVSS (v3.1)",
  * "CVSS version 3.1", "CVSS-version 3.1", the second of "CVSS v3.1/v4.0"), or one that "CVSS" follows
- * closely ("9.8 (v3.1) on the CVSS scale").
+ * closely: only a CVSS version number (2.0, 2.1, 3.0, 3.1, 4.0, 4.1) is refused there ("9.8 (v3.1) on
+ * the CVSS scale"), so a library version with its rating ("fixed in v5.0.1 (CVSS 9.8)") still counts.
  */
 const NOT_CVSS = '(?<!cvss[:\\s(-]*(?:version[\\s-]*)?(?:v?\\d+(?:\\.\\d+)*\\s*/\\s*)?)';
 const NOT_BEFORE_CVSS = '(?![^.]{0,24}cvss)';
+/** A CVSS version number closely after "CVSS" in the same sentence ("a CVSS score of 8.1 (version 3.1)"). */
+const NOT_AFTER_CVSS = '(?<!cvss[^!?]{0,40})';
 /** A version written as one, not followed by another digit group. */
 const WRITTEN_VERSION =
-  `(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}v\\d+(?:\\.\\d+)+(?!\\.?\\d)${NOT_BEFORE_CVSS}` +
-  `|(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}version \\d+(?:\\.\\d+)+(?!\\.?\\d)${NOT_BEFORE_CVSS}` +
+  `(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}v(?:\\d+(?:\\.\\d+)+(?!\\.?\\d)(?<!v[234]\\.[01])|[234]\\.[01](?!\\.?\\d)${NOT_BEFORE_CVSS}${NOT_AFTER_CVSS})` +
+  `|(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}version (?:\\d+(?:\\.\\d+)+(?!\\.?\\d)(?<!version [234]\\.[01])|[234]\\.[01](?!\\.?\\d)${NOT_BEFORE_CVSS}${NOT_AFTER_CVSS})` +
   '|@\\d+(?:\\.\\d+)+(?!\\.?\\d)' +
   // Three or more parts, but not an IP address and not a date with a four-digit year.
   '|(?:^|[^\\p{L}\\p{N}.])(?!\\d{1,2}\\.\\d{1,2}\\.(?:19|20)\\d\\d(?!\\.?\\d))(?!(?:19|20)\\d\\d\\.\\d{1,2}\\.\\d{1,2}(?!\\.?\\d))\\d+\\.\\d+\\.\\d+(?!\\.?\\d)';

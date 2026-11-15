@@ -1969,3 +1969,40 @@ test('a hold over more than 50 rows keeps its time when the same rows, or one mo
     assert.equal(JSON.parse(third.checkpoints['github:reviewed:unconfirmed']).alpha[0], at);
   }
 });
+
+test('rows listed out of order: a hold keeps every time listed in the run', async () => {
+  const bare = (list) => () =>
+    list.map((at, index) => {
+      const row = advisory(`GHSA-zzzz-${String(index).padStart(4, '0')}-zzzz`, 'alpha', at);
+      delete row.ghsa_id;
+      return row;
+    });
+  const times = Array.from({ length: 52 }, (_, index) => NOW + (index + 1) * 1000);
+  const store = new Store(':memory:');
+  store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0410', 2 * HOUR)], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+  });
+  const shuffled = [...times.slice(26), ...times.slice(0, 26)];
+  const first = await poll(store, github(bare(shuffled)).http, NOW + 30 * MINUTE);
+  // github() sorts the listing by update; the rows are given out of order and come back sorted, so
+  // listing the newest half again first (as a late listing would) must still keep the hold.
+  const second = await collectSources(
+    inventory(NOW + 45 * MINUTE),
+    config,
+    { ...store.checkpoints(), ...first.checkpoints },
+    async (url) => {
+      const response = await github(bare(times)).http(NOW + 45 * MINUTE)(url);
+      if (new URL(url).pathname !== '/advisories' || new URL(url).searchParams.get('type') === 'malware')
+        return response;
+      const rows = JSON.parse(response.body);
+      return { ...response, body: JSON.stringify([...rows.slice(26), ...rows.slice(0, 26)]) };
+    },
+    NOW + 45 * MINUTE,
+    store.evidence(),
+  );
+  assert.equal(
+    JSON.parse(second.checkpoints['github:reviewed:unconfirmed']).alpha[0],
+    JSON.parse(first.checkpoints['github:reviewed:unconfirmed']).alpha[0],
+  );
+});
