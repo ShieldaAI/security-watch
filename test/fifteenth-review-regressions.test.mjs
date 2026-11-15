@@ -554,3 +554,68 @@ test('a fixture scan that saves its results does not mark the inventory as curre
       report.findings.some((finding) => finding.reasons.some((reason) => /Inventory is stale/.test(reason))),
     );
 });
+
+test('reading the evidence twice changes nothing: invisible marks before combining marks do not shift positions', () => {
+  // A full-width letter or an invisible mark between a base letter and a combining mark composes
+  // only once the mark is gone.
+  for (const unit of ['e​́', 'Ａ́', 'a­̈', 'o⁠̂']) {
+    const prefix = unit.repeat(40);
+    const outside = `${prefix} The report covers several items in this cycle. Struts 2.5.32 is affected now.`;
+    assert.equal(
+      accepts(outside, ['The report covers several items in this cycle.'], {
+        products: ['Struts'],
+        versions: ['2.5.32'],
+      }),
+      false,
+      'a claim after the quote',
+    );
+    const inside = `${prefix} The report covers Struts 2.5.32 in this cycle. End of the report text.`;
+    assert.equal(
+      accepts(inside, ['The report covers Struts 2.5.32 in this cycle.'], {
+        products: ['Struts'],
+        versions: ['2.5.32'],
+      }),
+      true,
+      'a claim inside the quote',
+    );
+  }
+});
+
+test('quotes that meet in the evidence form one stretch, and a claim across them is inside', () => {
+  const text = 'The advisory says Example Server 2.4.1 is affected in this release cycle.';
+  const cut = text.indexOf('Server') + 3;
+  assert.equal(
+    accepts(text, [text.slice(0, cut), text.slice(cut)], {
+      products: ['Example Server'],
+      versions: ['2.4.1'],
+    }),
+    true,
+  );
+  assert.equal(accepts(text, [text.slice(0, cut)], { products: ['Example Server'] }), false);
+});
+
+test('more label languages, left-side joiners, apostrophes, brackets and a tilde after a version', () => {
+  const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
+  for (const body of ['Versionen:2.5.32', 'Versão:2.5.32', 'Версия:2.5.32', 'Versiones:2.5.32'])
+    assert.equal(accepts(sentence(body), [sentence(body)], { versions: ['2.5.32'] }), true, body);
+  for (const [body, product] of [
+    ['evil:express', 'express'],
+    ['x~express', 'express'],
+    ["express'forms", 'express'],
+    ['express(forms)', 'express'],
+    ['express…forms', 'express'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), false, body);
+  assert.equal(accepts(sentence("Notepad's"), [sentence("Notepad's")], { products: ['Notepad'] }), true);
+  assert.equal(accepts(sentence('2.4.1~1'), [sentence('2.4.1~1')], { versions: ['2.4.1'] }), false);
+  assert.equal(accepts(sentence('2.0.0~2.4.1'), [sentence('2.0.0~2.4.1')], { versions: ['2.0.0'] }), true);
+});
+
+test('product claims and claims before the quote are checked against the quote too', () => {
+  const text = 'Struts is mentioned first. The report covers several items in this cycle today.';
+  assert.equal(
+    accepts(text, ['The report covers several items in this cycle today.'], { products: ['Struts'] }),
+    false,
+  );
+  assert.equal(accepts(text, ['Struts is mentioned first. The report'], { products: ['Struts'] }), true);
+});

@@ -251,7 +251,12 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
     // A claim is checked in the evidence itself, and must lie inside one of the quotes. A quote the
     // model writes may begin or end inside a word ("2.4.1" out of "12.4.1", "45" out of "45%"): the
     // characters around the claim are the evidence's, not the quote's edges.
-    const quoted = news.quotes.map((q) => inQuote(known.get(q.evidence_id) ?? '', q.quote));
+    const quoted = [...new Set(news.quotes.map((q) => q.evidence_id))].map((id) =>
+      inQuote(
+        known.get(id) ?? '',
+        news.quotes.filter((q) => q.evidence_id === id).map((q) => q.quote),
+      ),
+    );
     if (
       [...news.affected_products, ...news.prerequisites].some(
         (value) => !quoted.some(({ text, within }) => quotesPhrase(text, value, within)),
@@ -307,7 +312,7 @@ function quotesPhrase(
     const b1 = before.at(-1) ?? '';
     const b2 = before.at(-2) ?? '';
     const rest = quote.slice(at + wanted.length);
-    const [a1 = '', a2 = ''] = [...rest.slice(0, 4)];
+    const [a1 = '', a2 = '', a3 = ''] = [...rest.slice(0, 6)];
     const mark = (character: string) => !/[\p{L}\p{N}\p{M}_]/u.test(character);
     // A version straight after a hyphen, "@" or "/" is the name's own version ("node-18",
     // "lodash@4.17.20", "Apache/2.4.58"); "vue-3d-model" and "express@4evil" are other names.
@@ -323,7 +328,11 @@ function quotesPhrase(
     // (".NET" in "ASP.NET").
     const joinedBefore = mark(first)
       ? joins(b1, b1)
-      : joins(first, b1) || b1 === '+' || b1 === '@' || b1 === '/' || (/[-.#]/u.test(b1) && joins(first, b2));
+      : joins(first, b1) ||
+        b1 === '+' ||
+        b1 === '@' ||
+        b1 === '/' ||
+        (/[-.#:~]/u.test(b1) && joins(first, b2));
     // "Notepad" in "Notepad++", "C" in "C#", "express" in "express-forms", "Apache" in
     // "apache/struts".
     const joinedAfter = mark(last)
@@ -336,7 +345,11 @@ function quotesPhrase(
         (/[:~]/u.test(a1) && !(a1 === ':' && ownVersion) && joins(last, a2)) ||
         // Any other mark or symbol written straight between the name and more of a word ("Notepad➕x",
         // "struts∖x"), except the punctuation of a sentence.
-        (attached(a1) && joins(last, a2));
+        (attached(a1) && joins(last, a2)) ||
+        // A bracket or an ellipsis with no space on either side joins too ("express(forms)").
+        (/[(…]/u.test(a1) && joins(last, a2)) ||
+        // An apostrophe joins too, except in a possessive ("Notepad's").
+        (/['’]/u.test(a1) && joins(last, a2) && !(a2 === 's' && !joins('s', a3)));
     if (joinedBefore || joinedAfter || (!mark(first) && attached(b1) && joins(first, b2))) continue;
     return true;
   }
@@ -349,15 +362,26 @@ function quotesPhrase(
  */
 function inQuote(
   evidence: string,
-  quote: string,
+  quotes: string[],
 ): { text: string; within: (start: number, end: number) => boolean } {
   const text = quoteText(evidence).toLowerCase();
-  const wanted = quoteText(quote).toLowerCase().trim();
   const spans: [number, number][] = [];
-  if (wanted)
-    for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1))
-      spans.push([at, at + wanted.length]);
-  return { text, within: (start, end) => spans.some(([from, to]) => start >= from && end <= to) };
+  for (const quote of quotes) {
+    const wanted = quoteText(quote).toLowerCase().trim();
+    if (wanted)
+      for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1))
+        spans.push([at, at + wanted.length]);
+  }
+  // Quotes that overlap or meet in the evidence are one stretch of it: a name split across two
+  // cited excerpts (cut in the middle of unspaced text) is still inside the quotes.
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const [from, to] of spans) {
+    const last = merged.at(-1);
+    if (last && from <= last[1]) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  return { text, within: (start, end) => merged.some(([from, to]) => start >= from && end <= to) };
 }
 /**
  * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
@@ -383,6 +407,9 @@ function quoteText(text: string): string {
       .replace(/[\u00b7\u2024\u2027\u2043]/g, '.')
       .replace(/\ufe6b/g, '@')
       .replace(/\s+/g, ' ')
+      // Removing an invisible mark can bring a base letter and a combining mark together: compose
+      // them, so that reading the text again changes nothing and positions in it stay valid.
+      .normalize('NFC')
   );
 }
 /** Scripts written without spaces between words. Korean is written with spaces. */
@@ -451,7 +478,7 @@ function citesVersion(
     // A label ("Version:2.5.32", "Affected versions: 2.5.32") or the end of a range written with a
     // tilde ("2.0.0~2.5.32") is a citation.
     const labelled =
-      /(?:(?:^|[^\p{L}\p{N}\-])(?:versions?|releases?|affected|fixed(?: in)?|patched|vulnerable|ver|versión)|版本|バージョン|버전) ?:$/iu.test(
+      /(?:(?:^|[^\p{L}\p{N}\-])(?:versions?|releases?|affected|fixed(?: in)?|patched|vulnerable|ver|versión|versiones|versionen|versão|versões|версия|версии)|版本|バージョン|버전) ?:$/iu.test(
         before,
       );
     // An image and its tag ("nginx:1.25.3"): a name with a letter, then a version of three parts or
@@ -487,7 +514,7 @@ function citesVersion(
       // A plus sign joined to more is build metadata ("2.4.1+build.5"); alone it means "and later"
       // ("3.0+ are affected").
       // Units written as one symbol ("8.0.3㎳", "2㎝") are amounts too.
-      /^(?: ?[%‰٪\p{Sc}°×\u3380-\u33ff]|[_·∶]|~(?!\d)|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(
+      /^(?: ?[%‰٪\p{Sc}°×\u3380-\u33ff]|[_·∶]|~(?!\d+\.\d)|\+[\p{L}\p{N}]|[:'’]\d|-\p{L}|-$|\/(?:tcp|udp|sctp)\b)/iu.test(
         after,
       ) ||
       // A qualifier that makes it another release ("2.4.1.RELEASE", "5.3.20.Final", "1.0.M2").
