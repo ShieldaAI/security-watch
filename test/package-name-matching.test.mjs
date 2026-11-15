@@ -339,7 +339,7 @@ test('word lists of the second-word rule, entry by entry', () => {
   ]) {
     no(`The Express ${word} came under scrutiny this week.`);
     yes(`The Express ${word} came under scrutiny in the npm package.`);
-    yes(`The Express ${word} came under scrutiny this week. Upgrade to 4.21.2 now.`);
+    yes(`The Express ${word} came under scrutiny this week. Install it with npm install express.`);
     no(`The Express ${word} came under scrutiny this week. A courier package was lost.`);
   }
   // Cue words and forms in the same sentence.
@@ -400,4 +400,80 @@ test('word lists of the second-word rule, entry by entry', () => {
   // Words before the name.
   for (const before of ['The', 'A', 'New', 'Critical', 'Severe', 'Latest', 'Its'])
     yes(`${before} Express flaw lets attackers in.`);
+});
+
+test('library cue: versions as written, CVSS forms and dates, sentence ends, strong cues and singular forms', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  const yes = (text) => assert.equal(packageMentioned(text, component('nest')), true, text);
+  const no = (text) => assert.equal(packageMentioned(text, component('nest')), false, text);
+  const n = 'The Nest security team fixed it';
+  for (const v of [
+    'in v1.2.3',
+    'in V10.0.4',
+    'in v1.2.3-beta',
+    '(v1.2.3)',
+    'for v4.2',
+    'in version 4.2',
+    'in version 4.2.1',
+    'in core@4.2.1',
+    'in 4.21.2',
+  ])
+    yes(`${n} ${v}.`);
+  // A version in the next sentence does not count: device and firmware news write them the same way.
+  no(`${n}. Upgrade to v5.4.1 now.`);
+  no(`${n}. Firmware 4.21.3 fixes it.`);
+  for (const v of [
+    'for v3',
+    'in version 4',
+    'rated CVSS v3.1',
+    'rated CVSS: v3.1',
+    'rated CVSS version 3.1',
+    'on 15.11.2026',
+    'on 2026.11.15',
+    'from 192.168.1.10',
+    'from 10.0.0.1:8080',
+  ])
+    no(`${n} ${v}.`);
+  // Strong cues from the next sentence; never from the previous one.
+  for (const strong of [
+    'It is on RubyGems.',
+    'Run gem install nest.',
+    'Run cargo install nest.',
+    'Run pip install nest.',
+    'It is on Maven.',
+    'It is on NuGet.',
+  ])
+    yes(`${n}. ${strong}`);
+  no(`It is on PyPI. ${n}.`);
+  // After initials a sentence ends, so a weak cue there does not count.
+  no('The Nest security team flagged a phishing wave across the U.S. Package delivery scams rose sharply.');
+  no('The Nest components, e.g. the loader and the npm-themed lure, were analysed.');
+  no(`${n}. The library of stolen files grew.`);
+  // A sentence ends before a capital or a digit, not after an abbreviation or a single letter.
+  for (const abbreviation of [
+    'e.g.',
+    'i.e.',
+    'incl.',
+    'vs.',
+    'etc.',
+    'approx.',
+    'cf.',
+    'al.',
+    'ca.',
+    'no.',
+    'nr.',
+    'ver.',
+    'v.',
+  ])
+    yes(`${n}, ${abbreviation} Version 4.2 of it.`);
+  no(
+    `${n}. Version 4.2 of the doorbell. Ours too.`.replace(
+      'Version 4.2 of the doorbell. ',
+      'Ours. Version 4.2. ',
+    ),
+  );
+  // Singular forms of the shared words and the cue words.
+  yes('The Nest component leaks state in the library.');
+  yes('The Nest issue lets pages run code in the npm package.');
+  yes('The Nest community fixed it in its libraries.');
 });

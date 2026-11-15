@@ -1858,3 +1858,39 @@ test('a hold is renewed by an older row not seen before, and a copy older than e
   await poll(store, http, NOW + 30 * MINUTE);
   assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0370']);
 });
+
+test('the saved hold keeps every update time listed in the run, beyond 50', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([waitingCopy('GHSA-aaaa-bbbb-0380', 2 * HOUR)], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+  });
+  const times = Array.from({ length: 53 }, (_, index) => NOW + (index + 1) * 1000);
+  const { http } = github(() =>
+    times.map((at, index) => {
+      const row = advisory(`GHSA-uuuu-${String(index).padStart(4, '0')}-uuuu`, 'alpha', at);
+      delete row.ghsa_id;
+      return row;
+    }),
+  );
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  const [at, ...versions] = JSON.parse(result.checkpoints['github:reviewed:unconfirmed']).alpha;
+  assert.equal(at, NOW + 30 * MINUTE);
+  assert.deepEqual(versions, times);
+  // Three of them listed again in the next run: nothing new.
+  const again = await collectSources(
+    inventory(NOW + 45 * MINUTE),
+    config,
+    { ...store.checkpoints(), ...result.checkpoints },
+    github(() =>
+      times.slice(-3).map((t, index) => {
+        const row = advisory(`GHSA-vvvv-${index}000-vvvv`, 'alpha', t);
+        delete row.ghsa_id;
+        return row;
+      }),
+    ).http(NOW + 45 * MINUTE),
+    NOW + 45 * MINUTE,
+    store.evidence(),
+  );
+  assert.equal(JSON.parse(again.checkpoints['github:reviewed:unconfirmed']).alpha[0], NOW + 30 * MINUTE);
+});

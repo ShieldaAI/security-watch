@@ -805,12 +805,15 @@ async function github(
    */
   let unidentifiedHold = Infinity;
   /**
-   * By package: when a row without an identifier naming it was first seen (`at`), and the latest
-   * update among such rows (`updated`; unknown is Infinity). Saved as `at`, or `[at, updated]`.
+   * By package: when a row without an identifier naming it was first seen (`at`), the exact update
+   * times of such rows seen (`versions`, the latest ROW_VERSIONS) and the latest of them (`updated`;
+   * Infinity when a row had none). Saved as `at` (no times) or `[at, ...versions]`.
    */
   const blocked = new Map<string, { at: number; updated: number; versions: number[] }>();
   /** Packages named by such rows in this run: kept while their rows are still listed. */
   const seenNow = new Set<string>();
+  /** The update times of such rows listed in this run, by package: never trimmed away. */
+  const listedNow = new Map<string, Set<number>>();
   try {
     const saved: unknown = JSON.parse(unreadable.unconfirmed || '{}');
     if (typeof saved === 'object' && saved !== null && !Array.isArray(saved))
@@ -828,6 +831,19 @@ async function github(
   } catch {
     // An unreadable list only means those records are confirmed as before.
   }
+  /**
+   * The update times kept for a package: every one listed in this run, then the latest others, up to
+   * ROW_VERSIONS (more when more were listed), without repeats. A time listed now is never evicted,
+   * or its row would look new on every run.
+   */
+  const trimVersions = (name: string, all: number[]) => {
+    const unique = [...new Set(all)];
+    const listed = listedNow.get(name) ?? new Set<number>();
+    const others = unique.filter((v) => !listed.has(v));
+    const room = Math.max(0, ROW_VERSIONS - unique.filter((v) => listed.has(v)).length);
+    const keep = new Set([...unique.filter((v) => listed.has(v)), ...others.slice(-room)]);
+    return unique.filter((v) => keep.has(v));
+  };
   /**
    * Whether a stored record may have been replaced by such a row: read before the row was first
    * seen, and not already at the row's version (its own update is earlier than the row's).
@@ -891,11 +907,14 @@ async function github(
         unidentifiedHold = Math.min(unidentifiedHold, updated);
       }
       // Held back from when the row is first seen, not from its update: GitHub may list a row late,
-      // after a stored record was confirmed. A row seen before (its package's time is not earlier
-      // than the row's update) keeps that time, so listing it again does not make records read
+      // after a stored record was confirmed. A row seen before (its exact update time is among those
+      // remembered for the package) keeps that time, so listing it again does not make records read
       // since wait again.
       const named = githubPackageNames(item);
       const version = Number.isFinite(updated) ? updated : Infinity;
+      if (Number.isFinite(version))
+        for (const name of named.length ? named : ['*'])
+          listedNow.set(name, (listedNow.get(name) ?? new Set()).add(version));
       for (const name of named.length ? named : ['*']) {
         seenNow.add(name);
         const entry = blocked.get(name);
@@ -904,10 +923,9 @@ async function github(
         blocked.set(name, {
           at: entry && seen ? entry.at : now,
           updated: Math.max(entry?.updated ?? -Infinity, version),
-          versions:
-            Number.isFinite(version) && !seen
-              ? [...(entry?.versions ?? []), version].slice(-ROW_VERSIONS)
-              : (entry?.versions ?? []),
+          versions: Number.isFinite(version)
+            ? trimVersions(name, [...(entry?.versions ?? []), version])
+            : (entry?.versions ?? []),
         });
       }
     }

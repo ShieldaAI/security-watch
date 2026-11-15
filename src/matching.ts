@@ -402,36 +402,42 @@ const SOFTWARE_NOUN =
 const SHARED_NOUN =
   '(?:devs|community|components?|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
+/** Not a software version: one that follows "CVSS" ("CVSS v3.1", "CVSS: v3.1", "CVSS version 3.1"). */
+const NOT_CVSS = '(?<!cvss[:\\s]*(?:version\\s*)?)';
+/** A version written as one, not followed by another digit group. */
+const WRITTEN_VERSION =
+  `(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}v\\d+(?:\\.\\d+)+(?!\\.?\\d)` +
+  `|(?:^|[^\\p{L}\\p{N}.])${NOT_CVSS}version \\d+(?:\\.\\d+)+(?!\\.?\\d)` +
+  '|@\\d+(?:\\.\\d+)+(?!\\.?\\d)' +
+  // Three or more parts, but not an IP address and not a date with a four-digit year.
+  '|(?:^|[^\\p{L}\\p{N}.])(?!\\d{1,2}\\.\\d{1,2}\\.(?:19|20)\\d\\d(?!\\.?\\d))(?!(?:19|20)\\d\\d\\.\\d{1,2}\\.\\d{1,2}(?!\\.?\\d))\\d+\\.\\d+\\.\\d+(?!\\.?\\d)';
 /**
  * A sign that a sentence is about a software library: a registry or an install command, a kind of
  * package, or a version written as one ("v1.2", "version 1.2", "@1.2", "1.2.3"). Not a bare decimal
  * ("a CVSS score of 9.8", "1.5 million"), a CVSS version ("CVSS v3.1"), an IP address or a date
- * ("15.11.2026").
+ * ("15.11.2026", "2026.11.15"). A date with a two-digit year ("15.11.26") cannot be told from
+ * a version and counts.
  */
 const LIBRARY_CUE = new RegExp(
   '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|gems?|crates?|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install|' +
-    'packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\\p{L}])' +
-    '|(?:^|[^\\p{L}\\p{N}.])(?<!cvss[: ]?)v\\d+\\.\\d+(?!\\.?\\d)' +
-    '|(?:^|[^\\p{L}\\p{N}.])version \\d+\\.\\d+' +
-    '|@\\d+\\.\\d+' +
-    '|(?:^|[^\\p{L}\\p{N}.])(?!\\d{1,2}\\.\\d{1,2}\\.(?:19|20)\\d\\d(?!\\.?\\d))\\d+\\.\\d+\\.\\d+(?!\\.?\\d)',
+    'packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|maintainers?)(?![\\p{L}-])|' +
+    WRITTEN_VERSION,
   'iu',
 );
 /**
- * A strong sign, which also counts from the next sentence: a registry, an install command or a
- * version written as one. Not "package", which a courier story uses too.
+ * A strong sign, which also counts from the next sentence: a registry or an install command. Not a
+ * version there, which app, firmware and device news write the same way ("Firmware 4.21.3 fixes
+ * it."), and not "package", which a courier story uses too.
  */
-const STRONG_LIBRARY_CUE = new RegExp(
-  '(?:^|[^\\p{L}])(?:npm|pypi|rubygems|crates\\.io|maven|nuget|(?:pip|gem|cargo|npm) install)(?![\\p{L}])' +
-    LIBRARY_CUE.source.slice(LIBRARY_CUE.source.indexOf('|(?:^|[^\\p{L}\\p{N}.])(?<!cvss')),
-  'iu',
-);
+const STRONG_LIBRARY_CUE =
+  /(?:^|[^\p{L}])(?:npm|pypi|rubygems|crates\.io|maven|nuget|(?:pip|gem|cargo|npm) install)(?![\p{L}-])/iu;
 /**
  * Where a sentence ends: after ".", "!" or "?" and before a capital letter or a digit, but not after
- * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.", "etc.") or a single letter.
+ * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.", "etc.") or a single lower-case letter. After
+ * initials ("the U.S. Package scams") it does end.
  */
 const SENTENCE_END =
-  /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|etc|approx|cf|al|ca|no|nr|ver|v|[\p{L}])\.)\s+(?=[\p{Lu}\p{N}])/u;
+  /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|etc|approx|cf|al|ca|no|nr|ver|v|\p{Ll})\.)\s+(?=[\p{Lu}\p{N}])/u;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
