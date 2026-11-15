@@ -398,7 +398,8 @@ const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
 const FLAW_KIND =
   '(?:remote|code|command|execution|sandbox|deserialization|sql|path|traversal|prototype|pollution|' +
-  'denial-of-service|request|smuggling|cross-site|scripting|xss|ssrf|csrf|xxe|authentication|auth|' +
+  'denial-of-service|denial|of|service|request|smuggling|cross-site|scripting|xss|XSS|ssrf|SSRF|csrf|CSRF|' +
+  'xxe|XXE|SQL|RCE|rce|DoS|dos|ReDoS|TLS|SSL|authentication|auth|' +
   'authorization|privilege|escalation|buffer|overflow|memory|corruption|use-after-free|arbitrary|file|' +
   'upload|read|write|information|disclosure|open|redirect|header|cache|poisoning|type|confusion|' +
   'integer|timing|template|server-side|critical|severe|zero-day|regex|redos|security|input|validation|' +

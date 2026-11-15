@@ -1706,3 +1706,29 @@ test('while a stored record waiting to be read again keeps a turn, given-up reco
   // One turn for the given-up records: the next in order, not the one with a stored copy.
   assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0321', 'GHSA-aaaa-bbbb-0320']);
 });
+
+test('a newer revision of a row without an identifier holds its package back again', async () => {
+  const store = new Store(':memory:');
+  const copy = waitingCopy('GHSA-aaaa-bbbb-0330', HOUR);
+  store.saveEvidence([copy], { 'github:reviewed': iso(NOW), 'github:malware': iso(NOW) });
+  let revision = NOW + 10 * MINUTE;
+  const { http, log } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0331', 'alpha', revision);
+    delete row.ghsa_id;
+    return [
+      row,
+      advisory('GHSA-aaaa-bbbb-0330', 'alpha', NOW - DAY),
+      advisory('GHSA-aaaa-bbbb-0332', 'zeta', NOW + 5 * MINUTE),
+    ];
+  });
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0330']);
+  // Listed again unchanged: the record read since does not wait again.
+  await poll(store, http, NOW + 45 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0330']);
+  // A newer revision of the row, after the record was read: it may have replaced it again.
+  revision = NOW + 50 * MINUTE;
+  const third = await poll(store, http, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0330', 'GHSA-aaaa-bbbb-0330']);
+  assert.ok(third.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 60 * MINUTE)));
+});

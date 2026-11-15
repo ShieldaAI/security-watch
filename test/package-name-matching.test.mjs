@@ -196,3 +196,24 @@ test('second-word rule: software words, capitalised kinds, up to three words nam
   ])
     assert.equal(packageMentioned(text, component(name)), false, text);
 });
+
+test('second-word rule: acronyms of flaw kinds as written, and each group of software words', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const [name, text] of [
+    ['express', 'The Express SQL injection flaw lets attackers read data.'],
+    ['express', 'The Express XSS bug lets pages run scripts.'],
+    ['express', 'New Express SSRF flaw reaches internal hosts.'],
+    ['react', 'Critical React XSS flaw disclosed.'],
+    ['express', 'The Express denial of service flaw stops servers.'],
+    ['jackson', 'The Jackson deserialization flaw lets attackers run code.'],
+    ['express', 'The Express path traversal vulnerability exposes files.'],
+    ['react', 'The React components leak state across requests.'],
+    ['rails', 'Critical Rails security update released.'],
+    ['rails', 'The Rails security advisory lists two flaws.'],
+    ['express', 'The Express web applications were exposed.'],
+    ['express', 'The Express web app leaks sessions.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), true, text);
+  assert.equal(packageMentioned('The Express applications were exposed.', component('express')), false);
+  assert.equal(packageMentioned('The Express app leaks sessions.', component('express')), false);
+});
