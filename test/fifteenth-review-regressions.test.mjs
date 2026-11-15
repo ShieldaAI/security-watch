@@ -216,7 +216,7 @@ test('a fixture preview treats its records as read now, whatever date the file c
       cli,
       'scan',
       '--config',
-      `${examples}security-watch.example.yaml`,
+      `${examples}preview.yaml`,
       '--fixture',
       `${examples}advisories.json`,
       '--dry-run',
@@ -269,4 +269,44 @@ test('a version after a label colon or at either end of a tilde range is cited',
     'It listens on example.com:443 in this cycle.',
   ])
     assert.equal(accepts(text, [text], { versions: [text.includes('CVSS') ? '3.1' : '443'] }), false, text);
+});
+
+test('a product cut from the end of a longer word is refused', () => {
+  const text = 'The advisory says MyExpress 4.0 is affected in this release cycle.';
+  assert.equal(
+    accepts(text, ['Express 4.0 is affected in this release cycle.'], { products: ['Express'] }),
+    false,
+  );
+  const whole = 'The advisory says Express 4.0 is affected in this release cycle.';
+  assert.equal(
+    accepts(whole, ['Express 4.0 is affected in this release cycle.'], { products: ['Express'] }),
+    true,
+  );
+});
+
+test('a restarted worker catching up after downtime has the startup grace until it records a scan', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const config = parseConfig({ version: 1 });
+  store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - 3 * 3_600_000), degraded: false, errors: [] }));
+  store.setMeta(
+    'worker',
+    JSON.stringify({ status: 'running', started_at: iso(NOW - 10 * 60_000), heartbeat_at: iso(NOW) }),
+  );
+  assert.equal(checkHealth(store, config, NOW).ok, true, 'catching up');
+  store.setMeta(
+    'worker',
+    JSON.stringify({ status: 'running', started_at: iso(NOW - 61 * 60_000), heartbeat_at: iso(NOW) }),
+  );
+  assert.equal(checkHealth(store, config, NOW).ok, false, 'an hour without a scan');
+});
+
+test('the demo shows one affected and one excluded system whatever date its files carry', () => {
+  const demo = fileURLToPath(new URL('../scripts/demo.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [demo], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stderr);
+  const applicability = JSON.parse(result.stdout)
+    .findings.map((finding) => finding.applicability)
+    .sort();
+  assert.deepEqual(applicability, ['affected', 'not_affected']);
 });

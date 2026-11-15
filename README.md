@@ -193,10 +193,10 @@ Overlapping scans deduplicate findings. After downtime, the worker catches up fr
 npm run demo
 ```
 
-The demo refreshes synthetic inventory timestamps and uses in-memory state, with no network, models or messages. The underlying files are [example configuration](examples/security-watch.example.yaml), [example inventory](examples/systems.example.yaml) and [synthetic evidence](examples/advisories.json). You can also run:
+The demo refreshes synthetic inventory timestamps and uses in-memory state, with no network, models or messages. The underlying files are [example configuration](examples/security-watch.example.yaml) (the preview command below uses [a preview configuration](examples/preview.yaml) that lets the fixed-date example inventory count as current), [example inventory](examples/systems.example.yaml) and [synthetic evidence](examples/advisories.json). You can also run:
 
 ```sh
-security-watch scan --config examples/security-watch.example.yaml --fixture examples/advisories.json --dry-run
+security-watch scan --config examples/preview.yaml --fixture examples/advisories.json --dry-run
 ```
 
 Fixture mode makes no source or AI requests. Do not combine a fixture with `--notify` unless you intend to send its synthetic findings. To test model analysis, run `security-watch scan --config ./watch/security-watch.yaml --credentials-file ./watch/.env` without `--dry-run` or `--notify`. This saves findings and budget reservations and may incur provider charges; it does not deliver notifications. The checkout also includes an opt-in [synthetic provider check](CONTRIBUTING.md#live-provider-checks).

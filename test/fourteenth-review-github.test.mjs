@@ -222,7 +222,7 @@ test('a record is not given up on after one or two failed reads, however long it
   );
   const third = await poll(store, http, NOW + 60 * MINUTE);
   assert.deepEqual(remembered(third), []);
-  assert.deepEqual(JSON.parse(third.checkpoints['github:reviewed:skipped']), ['GHSA-AAAA-BBBB-0020']);
+  assert.deepEqual(JSON.parse(third.checkpoints['github:reviewed:skipped']), ['GHSA-aaaa-bbbb-0020']);
 });
 
 test('a rate limit on a request by identifier ends those requests and is reported', async () => {
@@ -302,7 +302,7 @@ test('beyond the cap of 10,000 remembered records, those whose day has passed ar
   });
   const result = await poll(store, http, NOW + 30 * MINUTE);
   assert.equal(remembered(result).length, 10_000);
-  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:skipped']), ['GHSA-OLD1-0000-OLD1']);
+  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:skipped']), ['GHSA-old1-0000-old1']);
   assert.equal(result.checkpoints['github:reviewed'], iso(NOW + 30 * MINUTE), 'the checkpoint moves');
 });
 
@@ -350,7 +350,7 @@ test('a record given up on keeps its place while its stored copy exists', async 
   const { http } = github(() => [advisory('GHSA-dddd-0001-dddd', 'omega', NOW + 5 * MINUTE)]);
   const result = await poll(store, http, NOW + 30 * MINUTE);
   const kept = JSON.parse(result.checkpoints['github:reviewed:skipped']);
-  assert.ok(kept.includes(skipped[0].toUpperCase()), 'the one with a stored copy is kept');
+  assert.ok(kept.includes(skipped[0]), 'the one with a stored copy is kept');
   assert.ok(!result.evidence.some((item) => item.id === stored.id), 'its stored copy is not confirmed');
 });
 
@@ -612,4 +612,45 @@ test('a record read again by identifier keeps the update time it was listed with
   assert.equal(entries['GHSA-aaaa-bbbb-0070'][3], NOW - 3 * HOUR, 'kept through a failed read by identifier');
   // A time ahead of the clock is not kept.
   assert.equal(entries['GHSA-aaaa-bbbb-0071'].length, 3);
+});
+
+test('a record given up on is asked for again with room to spare, and found once GitHub serves it readably', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0080', 'GHSA-aaaa-bbbb-0081']),
+  });
+  let readable = false;
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0080', 'alpha', NOW - DAY, readable),
+    advisory('GHSA-aaaa-bbbb-0081', 'alpha', NOW - DAY, readable),
+  ]);
+  const first = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0080'], 'one per run');
+  assert.deepEqual(first.errors, [], 'no new report while it still cannot be read');
+  await poll(store, http, NOW + 60 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0080', 'GHSA-aaaa-bbbb-0081'], 'the next one in turn');
+  readable = true;
+  const found = await poll(store, http, NOW + 90 * MINUTE);
+  assert.ok(found.evidence.some((item) => item.id === 'github:GHSA-aaaa-bbbb-0080'));
+  assert.deepEqual(JSON.parse(found.checkpoints['github:reviewed:skipped']), ['GHSA-aaaa-bbbb-0081']);
+});
+
+test("GitHub's primary rate limit (403) also ends the requests by identifier", async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0090', NOW - 2 * HOUR, 1],
+      ['GHSA-aaaa-bbbb-0091', NOW - HOUR, 1],
+    ]),
+  });
+  const { http, log } = github(() => [advisory('GHSA-aaaa-bbbb-0090', 'zeta', NOW - DAY)], {
+    byId: () => ({ status: 403, headers: {}, body: '' }),
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0090']);
+  assert.match(result.errors[0].message, /rate limit/);
 });

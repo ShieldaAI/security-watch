@@ -200,7 +200,7 @@ test('a GitHub record that cannot be read is remembered by identifier and given 
   const passed = await run(NOW + 25 * HOUR, () => [other(NOW + 25 * HOUR - MINUTE)]);
   assert.match(passed.errors.map((error) => error.message).join(' '), /were given up on/);
   assert.deepEqual(pending(passed), []);
-  assert.ok(JSON.parse(passed.checkpoints['github:reviewed:skipped']).includes(id.toUpperCase()));
+  assert.ok(JSON.parse(passed.checkpoints['github:reviewed:skipped']).includes(id));
   const after = await run(NOW + 26 * HOUR, () => []);
   assert.ok(!after.evidence.some((item) => item.id === `github:${id}`));
   // Once GitHub serves it readably again, it is read and confirmed as usual.

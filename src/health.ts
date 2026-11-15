@@ -47,7 +47,9 @@ export function checkHealth(
     worker?.status === 'running' &&
     Number.isFinite(started) &&
     now >= started &&
-    now - started <= (Number.isFinite(scanned) ? 120_000 : FIRST_SCAN_GRACE);
+    // A restart after downtime finds an old scan and catches up the same way: until it records a
+    // scan of its own, it has the same grace.
+    now - started <= (Number.isFinite(scanned) && scanned >= started ? 120_000 : FIRST_SCAN_GRACE);
   if (
     requireWorker &&
     (worker?.status !== 'running' ||
@@ -59,7 +61,11 @@ export function checkHealth(
   if (!Number.isFinite(scanned)) {
     if (!startupGrace || !requireWorker) issues.push('No completed scan is recorded.');
   } else {
-    if (scanned > now + 5000 || now - scanned > Math.max(120_000, config.poll_interval_minutes * 120_000))
+    if (
+      scanned > now + 5000 ||
+      (now - scanned > Math.max(120_000, config.poll_interval_minutes * 120_000) &&
+        !(startupGrace && requireWorker && scanned < started))
+    )
       issues.push('The last completed scan is stale or has an invalid future timestamp.');
     if (scan?.degraded !== false)
       issues.push('The last scan reported degraded monitoring; inspect status and findings.');

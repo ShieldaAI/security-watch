@@ -715,7 +715,8 @@ async function github(
   const key = (id: string) => id.toUpperCase();
   type Remembered = { id: string; firstMet: number; attempts: number; updated: number };
   const pending = new Map<string, Remembered>();
-  const skipped = new Set<string>();
+  /** Records given up on, by key, with the identifier as GitHub wrote it. */
+  const skipped = new Map<string, string>();
   try {
     for (const entry of JSON.parse(unreadable.pending ?? '[]') as unknown[])
       if (
@@ -731,7 +732,7 @@ async function github(
           updated: typeof entry[3] === 'number' && entry[3] <= now ? entry[3] : NaN,
         });
     for (const id of JSON.parse(unreadable.skipped ?? '[]') as unknown[])
-      if (typeof id === 'string') skipped.add(key(id));
+      if (typeof id === 'string') skipped.set(key(id), id);
   } catch {
     // An unreadable list only means those records are found again when GitHub next updates them.
   }
@@ -802,7 +803,7 @@ async function github(
       const attempts = before.attempts + (readSomething ? 1 : 0);
       if (attempts >= OWED_GITHUB_ATTEMPTS && now - before.firstMet > UNREADABLE_HOLD_HOURS * HOUR) {
         nextPending.delete(k);
-        skipped.add(k);
+        skipped.set(k, before.id);
         passed++;
       } else
         nextPending.set(k, {
@@ -824,8 +825,8 @@ async function github(
     const byPriority = [...ordered].sort(
       (a, b) => Number(overdue(a[1])) - Number(overdue(b[1])) || a[1].firstMet - b[1].firstMet,
     );
-    for (const [k] of byPriority.slice(MAX_UNREADABLE)) {
-      skipped.add(k);
+    for (const [k, entry] of byPriority.slice(MAX_UNREADABLE)) {
+      skipped.set(k, entry.id);
       passed++;
     }
     const keptKeys = new Set(byPriority.slice(0, MAX_UNREADABLE).map(([k]) => k));
@@ -850,10 +851,10 @@ async function github(
     );
     const list = [...skipped];
     const keep = [
-      ...list.filter((id) => !withCopy.has(id)).slice(-MAX_UNREADABLE),
-      ...list.filter((id) => withCopy.has(id)),
+      ...list.filter(([k]) => !withCopy.has(k)).slice(-MAX_UNREADABLE),
+      ...list.filter(([k]) => withCopy.has(k)),
     ];
-    unreadable.nextSkipped = JSON.stringify(keep);
+    unreadable.nextSkipped = JSON.stringify(keep.map(([, id]) => id));
     return rewind !== undefined && Number.isFinite(rewind) ? rewind : undefined;
   };
   const problems = (rewind: number | undefined) => {
@@ -924,7 +925,20 @@ async function github(
       .filter((entry) => !unreadableNow.has(key(entry.id)) && !evidence.has(`github:${entry.id}`))
       .sort((a, b) => a.firstMet - b.firstMet)
       .slice(0, token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN);
-    for (const entry of asked) {
+    // With room left, one record given up on is asked for again per run, the one asked longest ago
+    // first: a record lost to a long partial format change is found again once GitHub serves it
+    // readably.
+    const budget = token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN;
+    const retry = [...skipped].find(([k]) => !unreadableNow.has(k));
+    const again: Remembered[] =
+      asked.length < budget && retry ? [{ id: retry[1], firstMet: now, attempts: 0, updated: NaN }] : [];
+    if (retry && again.length) {
+      // To the back of the queue, so the next run asks another.
+      skipped.delete(retry[0]);
+      skipped.set(retry[0], retry[1]);
+    }
+    for (const entry of [...asked, ...again]) {
+      const givenUp = again.includes(entry);
       try {
         const response = await http(`${GITHUB}/${encodeURIComponent(entry.id)}`, {
           headers,
@@ -934,12 +948,15 @@ async function github(
         // GitHub answers that it has no such record, or serves it in a form that cannot be read: a
         // failed read. A refusal for this client ends the requests; any other failure says nothing
         // about the record.
-        if (response.status === 404) unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
-        else if (response.status === 403 || response.status === 429) {
+        // A record given up on that still cannot be read stays given up on, without a new report.
+        if (response.status === 404) {
+          if (!givenUp) unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
+        } else if (response.status === 403 || response.status === 429) {
           refused = true;
           break;
         } else if (response.status !== 200) throw new SourceError(`Source returned HTTP ${response.status}.`);
         else if (read(JSON.parse(response.body) as unknown)) recovered++;
+        else if (givenUp) unreadableNow.delete(key(entry.id));
         else unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
       } catch (error) {
         if (sourceCanceled(error)) throw error;
@@ -958,7 +975,7 @@ async function github(
         system.components.map((component) => component.name.toLowerCase()),
       ),
     );
-    const unconfirmed = new Set([...unreadableNow.keys(), ...pending.keys(), ...skipped]);
+    const unconfirmed = new Set([...unreadableNow.keys(), ...pending.keys(), ...skipped.keys()]);
     // A record that could not be read and has no identifier may be the new version of any stored one.
     if (!unidentified)
       for (const item of stored)

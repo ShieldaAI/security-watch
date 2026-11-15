@@ -1,0 +1,11 @@
+# For the offline preview only: `security-watch scan --config examples/preview.yaml
+# --fixture examples/advisories.json --dry-run`. The example inventory carries fixed dates, so this
+# file lets it count as current for a year longer. Do not copy it as a production configuration: use
+# security-watch.example.yaml, which keeps the default of 7 days.
+version: 1
+inventory: ./systems.example.yaml
+database: ./data/preview.db
+inventory_stale_days: 365
+sources:
+  cve_now: false
+  hacker_news: false

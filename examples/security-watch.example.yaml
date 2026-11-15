@@ -3,8 +3,7 @@ inventory: ./systems.example.yaml
 database: ./data/watch.db
 poll_interval_minutes: 30
 news_lookback_minutes: 40
-# The example inventory carries fixed dates; keep the default of 7 for your own, and refresh it.
-inventory_stale_days: 365
+inventory_stale_days: 7
 digest_interval_hours: 24
 
 sources:
