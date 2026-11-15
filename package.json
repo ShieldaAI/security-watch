@@ -1,6 +1,6 @@
 {
   "name": "@shieldaai/security-watch",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "description": "Know quickly which new vulnerabilities and security news affect your stack. Self-hosted advisory monitoring with Slack or email alerts.",
   "type": "module",
   "license": "Apache-2.0",
@@ -63,7 +63,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "tag": "next"
+    "tag": "latest"
   },
   "repository": {
     "type": "git",

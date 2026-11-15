@@ -2,9 +2,9 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
-## 1.0.0-rc.1
+## 1.0.0
 
-Release candidate, published under the `next` tag. Not yet published at the time of writing.
+First stable release, published under the default `latest` tag. Not yet published at the time of writing.
 
 ### Upgrading from 0.1.0-alpha.0
 
@@ -156,11 +156,11 @@ Behaviour that changes for an existing installation:
 - Types are exported by name instead of `export *`.
 - Dependency: `fast-xml-parser` 5.12.1 (GHSA-474x-hrwr-fgx4).
 
-### Not verified in this release candidate
+### Not verified in this release
 
 - No human-labelled evaluation: the prepared 120-case pilot has not been reviewed.
 - No representative deployment period, and no real Slack or email message has been sent.
-- Hosted CI has not run on this commit; tests ran on macOS with Node 26.12.0. Windows is untested.
+- Hosted CI passed on 4e4e063 (pull request #13: Ubuntu with Node 24 and 26, macOS with Node 26, the packed consumer on Node 24.10.0, dependency review and CodeQL). Windows is untested.
 - Only OpenAI and Anthropic were ever checked against live APIs, on 2026-10-24; the other provider profiles are covered by simulated responses.
 - The cve.now listing order (publication date, newest first) and its `limit` parameter were checked against the live service on 2026-11-14 with a handful of requests. How often the service ingests a record more than a week after its publication date is not known.
 - `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 5991ab5 (tag `next`, 110 files, 576 kB packed, nothing uploaded); the commit that records it changes only this changelog. A real publish has not been run.
