@@ -776,8 +776,9 @@ async function github(
   let passed = 0;
   /** Records asked for by identifier and read in this run. */
   let recovered = 0;
-  /** By-identifier requests refused for this client (rate limit). */
+  /** By-identifier requests refused for this client (rate limit), and requests that failed. */
   let refused = false;
+  let requestsFailed = 0;
   /**
    * Settles the remembered records for the next run, and says where the next run must start when
    * the listing has to be read again: during a format outage, for remembered records beyond the cap,
@@ -852,6 +853,10 @@ async function github(
       );
     if (refused)
       parts.push('GitHub refused requests for single records (rate limit); they are asked for again later.');
+    if (requestsFailed)
+      parts.push(
+        `GitHub: ${requestsFailed} request(s) for single records failed; they are asked for again later.`,
+      );
     if (rewind !== undefined)
       parts.push('The next run lists the records since the oldest that could not be read again.');
     return parts.join(' ');
@@ -919,7 +924,8 @@ async function github(
         else unreadableNow.set(key(entry.id), { id: entry.id, updated: NaN });
       } catch (error) {
         if (sourceCanceled(error)) throw error;
-        // A failed request says nothing about the record: it is asked for again next run.
+        // A failed request says nothing about the record: it is reported and asked for again.
+        requestsFailed++;
       }
     }
     const rewind = settle(!outage());

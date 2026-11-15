@@ -967,7 +967,16 @@ async function main(): Promise<void> {
         config,
         inventory,
         store,
-        ...(values.fixture ? { fixture: readFixture(resolve(values.fixture)) } : {}),
+        // A fixture stands for what the sources answer now: its records count as read now, so that a
+        // preview does not turn into "unknown" as the file ages.
+        ...(values.fixture
+          ? {
+              fixture: readFixture(resolve(values.fixture)).map((item) => ({
+                ...item,
+                fetched_at: new Date().toISOString(),
+              })),
+            }
+          : {}),
         ...(values.notify ? { onUrgent: deliver } : {}),
       });
       output(report);

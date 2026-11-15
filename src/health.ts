@@ -1,6 +1,9 @@
 import type { Config } from './types.js';
 import { Store } from './store.js';
 
+/** How long a running worker may take over its first scan before health reports none. */
+const FIRST_SCAN_GRACE = 3_600_000;
+
 export interface HealthReport {
   ok: boolean;
   status: 'healthy' | 'starting' | 'degraded';
@@ -37,8 +40,14 @@ export function checkHealth(
   const started = time(worker?.started_at);
   const scanned = time(scan?.at);
   const issues: string[] = [];
+  // The first scan reads a day of advisories and every package lookup at about a request a second:
+  // it can take well over the two minutes later scans need, so a running worker that has not
+  // finished one yet is healthy for up to an hour.
   const startupGrace =
-    worker?.status === 'running' && Number.isFinite(started) && now >= started && now - started <= 120_000;
+    worker?.status === 'running' &&
+    Number.isFinite(started) &&
+    now >= started &&
+    now - started <= (Number.isFinite(scanned) ? 120_000 : FIRST_SCAN_GRACE);
   if (
     requireWorker &&
     (worker?.status !== 'running' ||

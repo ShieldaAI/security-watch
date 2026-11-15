@@ -9,7 +9,13 @@ try {
     config,
     inventory,
     store,
-    fixture: readFixture(fileURLToPath(new URL('../examples/advisories.json', import.meta.url))),
+    // Synthetic records count as read now, like the inventory timestamps above.
+    fixture: readFixture(fileURLToPath(new URL('../examples/advisories.json', import.meta.url))).map(
+      (item) => ({
+        ...item,
+        fetched_at: new Date().toISOString(),
+      }),
+    ),
   });
   console.log(
     JSON.stringify(

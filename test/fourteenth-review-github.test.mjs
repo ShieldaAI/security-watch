@@ -523,3 +523,25 @@ test('a job taken back while Slack answered with an unexpected success is marked
   );
   assert.equal(store.jobs()[0].status, 'unknown', 'not left pending, where it would be sent again');
 });
+
+test('a failed request for a single GitHub record is reported, not swallowed', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([['GHSA-aaaa-bbbb-0050', NOW - HOUR, 1]]),
+  });
+  const { http } = github(() => [advisory('GHSA-aaaa-bbbb-0050', 'zeta', NOW - DAY)], {
+    byId: () => ({ status: 503, headers: {}, body: '' }),
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.match(
+    result.errors.map((error) => error.message).join(' '),
+    /1 request\(s\) for single records failed/,
+  );
+  assert.deepEqual(
+    remembered(result).map(([, , attempts]) => attempts),
+    [1],
+    'not a failed read',
+  );
+});

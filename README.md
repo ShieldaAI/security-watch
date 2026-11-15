@@ -61,7 +61,7 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
        name: Web shop
        owner: Dana, platform team
        note: runs on cluster eu-1, namespace shop
-       updated_at: '2026-11-13T09:00:00Z'
+       updated_at: '2026-11-13T09:00:00Z' # when you last checked this list; older than 7 days counts as stale
        libraries:
          - 'npm:express@4.21.2   # checkout API, repository acme/checkout, file package.json'
          - 'python:requests==2.32.3   # billing worker, services/billing/requirements.txt'
@@ -90,7 +90,7 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
    security-watch start --config ./watch/security-watch.yaml --credentials-file ./watch/.env
    ```
 
-**What gets sent.** With the starter settings you get an immediate message for a critical finding in a library, a high or critical finding for a product or in the news, anything reported as actively exploited, a malicious package, and a possibly critical finding that still needs checking. Less urgent findings that need a look arrive together in one daily digest. Everything else is recorded and shown by `security-watch findings`. The `policy` section of the configuration file changes these thresholds.
+**What gets sent.** With the starter settings you get an immediate message for a critical finding in a library, anything reported as actively exploited, a malicious package, and a possibly critical finding that still needs checking (a critical product or news finding is one of these until it is confirmed). High findings for a product or in the news usually arrive in the daily digest: a product match cannot be confirmed from version ranges, and news is sent at once only when a configured model confirms that it affects you. Less urgent findings that need a look arrive together in one daily digest. Everything else is recorded and shown by `security-watch findings`. The `policy` section of the configuration file changes these thresholds.
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
