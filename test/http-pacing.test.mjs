@@ -50,8 +50,12 @@ test(
     assert(results.every((result) => result.status === 200));
     assert.equal(starts.length, 4);
     for (let index = 1; index < starts.length; index++)
-      // Half the interval: a burst starts all four at once, and timers under load fire late, not early.
-      assert(starts[index] - starts[index - 1] >= 40, 'Client request admission must not start in a burst');
+      // Measured from the first start: each is admitted no earlier than its slot (80 ms apart, less
+      // a margin for a timer that fires on time after one that fired late). A burst starts all at once.
+      assert(
+        starts[index] - starts[0] >= index * 80 - 40,
+        'Client request admission must not start in a burst',
+      );
     assert.equal(pendingResponses.length, 4, 'Outstanding responses do not hold the origin admission queue');
   },
 );

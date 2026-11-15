@@ -248,16 +248,16 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
       )
     )
       throw new Error('MODEL_UNSUPPORTED_NEWS_QUOTE');
-    // A quote the model writes itself may begin or end inside a word ("2.4.1" out of "12.4.1",
-    // "express" out of "expressive"): each is read with the rest of the words it cuts from the
-    // evidence, wherever it occurs there.
-    const quoted = news.quotes.flatMap((q) => widened(known.get(q.evidence_id) ?? '', q.quote));
+    // A claim is checked in the evidence itself, and must lie inside one of the quotes. A quote the
+    // model writes may begin or end inside a word ("2.4.1" out of "12.4.1", "45" out of "45%"): the
+    // characters around the claim are the evidence's, not the quote's edges.
+    const quoted = news.quotes.map((q) => inQuote(known.get(q.evidence_id) ?? '', q.quote));
     if (
       [...news.affected_products, ...news.prerequisites].some(
-        (value) => !quoted.some((quote) => quotesPhrase(quote, value)),
+        (value) => !quoted.some(({ text, within }) => quotesPhrase(text, value, within)),
       ) ||
       news.affected_versions.some(
-        (value) => !quoted.some((quote) => citesVersion(quote, value.toLowerCase())),
+        (value) => !quoted.some(({ text, within }) => citesVersion(text, value.toLowerCase(), within)),
       )
     )
       throw new Error('MODEL_UNSUPPORTED_NEWS_CLAIM');
@@ -286,13 +286,22 @@ export function validateAnalysis(value: unknown, evidence: Evidence[]): AiAnalys
  * "forms 4.17.1". A word joined to the phrase by a hyphen, dot, slash, "@" or "#", or a "+" after it
  * ("expressive-forms", "Node.js", "@angular/core", "Notepad++") makes one longer name.
  */
-function quotesPhrase(original: string, value: string): boolean {
+function quotesPhrase(
+  original: string,
+  value: string,
+  within: (start: number, end: number) => boolean = () => true,
+): boolean {
   const wanted = quoteText(value).toLowerCase().trim();
   if (!wanted) return false;
   const quote = quoteText(original).toLowerCase();
   const first = [...wanted][0]!;
   const last = [...wanted].at(-1)!;
+  const attached = (character: string) =>
+    /[\p{P}\p{S}]/u.test(character) &&
+    // Handled above, with their own exceptions, or the punctuation of a sentence.
+    !/[-@/:~+#._.,;!?'"’‘“”«»()[\]{}<>。、，；！？…—–]/u.test(character);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
+    if (!within(at, at + wanted.length)) continue;
     // Whole characters (code points) on either side, not halves of a surrogate pair.
     const before = [...quote.slice(Math.max(0, at - 4), at)];
     const b1 = before.at(-1) ?? '';
@@ -307,7 +316,7 @@ function quotesPhrase(original: string, value: string): boolean {
     // ("log4j-core-2.14.1.jar"); anything else joined to the number makes another name
     // ("vue-3d-model", "vue-3.model", "vue-3:d").
     const ownVersion =
-      /^[-@/](?:v?(?:\d+(?:\.\d+)+[a-z]?|\d+)(?:\.x)?)(?:-r\d+|-\d+(?:\.\d+)*(?:(?:ubuntu|deb|el|fc|build)[0-9.]*)?(?:[~+][a-z0-9.]+)?|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm))*(?![\p{L}\p{N}\p{M}_@/#:+-]|\.[\p{L}\p{N}])/iu.test(
+      /^[-@/:](?:v?(?:\d+(?:\.\d+)+(?:[a-z]|p\d+)?|\d+)(?:\.x)?)(?:-r\d+|-\d+(?:\.\d+)*(?:(?:ubuntu|deb|build)\d[0-9.]*)?(?:\.(?:el|fc)\d+(?:_\d+)*)?(?:[~+][a-z]*\d[a-z0-9.]*|~(?:jammy|focal|noble|bionic|xenial|bookworm|bullseye|buster|trixie))?|[-.](?:rc|beta|alpha|release|final|ga|preview|snapshot)\d*|\.(?:jar|war|tar|gz|tgz|zip|whl|gem|deb|rpm)|-alpine|-slim)*(?![\p{L}\p{N}\p{M}_@/#:+~-]|\.[\p{L}\p{N}])/iu.test(
         rest,
       );
     // A phrase that starts or ends with a mark (".NET", "C++") must still not continue a word
@@ -324,46 +333,31 @@ function quotesPhrase(original: string, value: string): boolean {
         a1 === '#' ||
         (a1 === '.' && joins(last, a2)) ||
         (/[-@/]/u.test(a1) && !ownVersion && (joins(last, a2) || a1 === '/')) ||
-        (/[:~]/u.test(a1) && joins(last, a2));
-    if (joinedBefore || joinedAfter) continue;
+        (/[:~]/u.test(a1) && !(a1 === ':' && ownVersion) && joins(last, a2)) ||
+        // Any other mark or symbol written straight between the name and more of a word ("Notepad➕x",
+        // "struts∖x"), except the punctuation of a sentence.
+        (attached(a1) && joins(last, a2));
+    if (joinedBefore || joinedAfter || (!mark(first) && attached(b1) && joins(first, b2))) continue;
     return true;
   }
   return false;
 }
 /**
- * Every occurrence of a quote in its evidence, extended to the whole words it begins and ends in. Both
- * are read as quoteText reads them first, so a look-alike or invisible joiner ("Confluence‑Cloud",
- * "2.4\u200b.1") joins as its plain form does, and characters are whole code points.
+ * The evidence as quotes and claims are read, and a test of whether a stretch of it lies inside an
+ * occurrence of the quote. quoteText is applied once more inside the checks; it changes nothing it
+ * has already read, so the positions stay valid.
  */
-function widened(evidence: string, quote: string): string[] {
-  const text = quoteText(evidence);
-  const wanted = quoteText(quote);
-  const part = /^[\p{L}\p{N}\p{M}_.\-@/#+:~]$/u;
-  const before = (at: number) => {
-    const low = text.charCodeAt(at - 1);
-    const size = (low & 0xfc00) === 0xdc00 && at >= 2 ? 2 : 1;
-    return text.slice(at - size, at);
-  };
-  const after = (at: number) => String.fromCodePoint(text.codePointAt(at) ?? 0x20);
-  const out: string[] = [];
-  if (!wanted) return out;
-  for (let at = text.indexOf(wanted); at !== -1 && out.length < 20; at = text.indexOf(wanted, at + 1)) {
-    let start = at;
-    let end = at + wanted.length;
-    // At most 64 characters on either side, which is longer than any name or version.
-    while (start > Math.max(0, at - 64) && part.test(before(start)) && part.test(after(start))) {
-      start -= before(start).length;
-    }
-    while (
-      end < Math.min(text.length, at + wanted.length + 64) &&
-      part.test(after(end)) &&
-      part.test(before(end))
-    ) {
-      end += after(end).length;
-    }
-    out.push(text.slice(start, end).toLowerCase());
-  }
-  return out;
+function inQuote(
+  evidence: string,
+  quote: string,
+): { text: string; within: (start: number, end: number) => boolean } {
+  const text = quoteText(evidence).toLowerCase();
+  const wanted = quoteText(quote).toLowerCase().trim();
+  const spans: [number, number][] = [];
+  if (wanted)
+    for (let at = text.indexOf(wanted); at !== -1; at = text.indexOf(wanted, at + 1))
+      spans.push([at, at + wanted.length]);
+  return { text, within: (start, end) => spans.some(([from, to]) => start >= from && end <= to) };
 }
 /**
  * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every
@@ -376,6 +370,12 @@ function quoteText(text: string): string {
     text
       .normalize('NFC')
       .replace(/[\uff01-\uff5e]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0xfee0))
+      // The small forms ("﹒", "﹢", "﹕", "﹨") are the characters they are small forms of.
+      .replace(/[\ufe50-\ufe6b]/g, (character) => character.normalize('NFKC'))
+      .replace(/[\u2795]/g, '+')
+      .replace(/[\u2216]/g, '\\')
+      .replace(/[\u2236]/g, ':')
+      .replace(/[\u2e31\u30fb]/g, '.')
       .replace(/[\p{Default_Ignorable_Code_Point}\p{Cf}]/gu, '')
       .replace(/[\u2010-\u2013\u2212\ufe58\ufe63\u2e17\u058a\u30a0\u1400]/g, '-')
       .replace(/[\u2215\u2044\u29f8\\]/g, '/')
@@ -420,7 +420,11 @@ function joins(edge: string, neighbour: string): boolean {
  * a citation ("2.0-2.4", "versions 12-16"), and so is a version in a list ("2.4.1, 2.4.2",
  * "2.4.1/2.4.2") or after a name joined by a hyphen ("exampledb2-2.4.52", "node-18").
  */
-function citesVersion(original: string, version: string): boolean {
+function citesVersion(
+  original: string,
+  version: string,
+  within: (start: number, end: number) => boolean = () => true,
+): boolean {
   // The quote and the version the model copied from it are read the same way: hyphens, en dashes
   // and minus signs are hyphens ("CVE‑2026‑40001", "2.0–2.4"), every kind and run of space is one
   // space ("45 %"), and characters that show as nothing are dropped ("2.4.1<zero-width>.1").
@@ -434,6 +438,7 @@ function citesVersion(original: string, version: string): boolean {
   // A short whole number, without a leading zero ("0100" is half of a telephone number).
   const integer = (token: string) => /^(?:0|[1-9]\d{0,3})$/u.test(token);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
+    if (!within(at, at + wanted.length)) continue;
     let before = quote.slice(Math.max(0, at - 64), at);
     const after = quote.slice(at + wanted.length, at + wanted.length + 64);
     // "v2.4.1", "v.2.4.1", "ver.2.4.1": the abbreviation belongs to the version, not to a word.
@@ -445,9 +450,10 @@ function citesVersion(original: string, version: string): boolean {
     if (joins([...wanted].at(-1)!, [...after][0] ?? '') || /^\.[\dx*]/iu.test(after)) continue;
     // A label ("Version:2.5.32", "Affected versions: 2.5.32") or the end of a range written with a
     // tilde ("2.0.0~2.5.32") is a citation.
-    const labelled = /(?:^|[^\p{L}])(?:versions?|releases?|affected|fixed|patched|vulnerable|ver):$/iu.test(
-      before,
-    );
+    const labelled =
+      /(?:(?:^|[^\p{L}\p{N}\-])(?:versions?|releases?|affected|fixed(?: in)?|patched|vulnerable|ver|versión)|版本|バージョン|버전) ?:$/iu.test(
+        before,
+      );
     const rangeEnd = /\d~$/u.test(before) && dotted(wanted) && dotted(/([\d.]+)~$/u.exec(before)![1]!);
     // An amount, a time, a port, a protocol version, or the tail or head of a longer version.
     if (

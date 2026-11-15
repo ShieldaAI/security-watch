@@ -17,7 +17,7 @@ For an offline synthetic demonstration:
 npm run demo
 ```
 
-The demo loads `examples/systems.example.yaml` and `examples/advisories.json`, refreshes the synthetic timestamps, and makes no network, model or notification requests. For the fixture CLI itself, use `node dist/cli.js scan --config examples/preview.yaml --fixture examples/advisories.json --dry-run` after building. Dry runs disable models; tests of actual provider calls must retain budget accounting.
+The demo loads `examples/systems.example.yaml` and `examples/advisories.json`, refreshes the synthetic timestamps, and makes no network, model or notification requests. For the fixture CLI itself, use `node dist/cli.js scan --config examples/security-watch.example.yaml --fixture examples/advisories.json --dry-run` after building. Dry runs disable models; tests of actual provider calls must retain budget accounting.
 
 Do not commit `node_modules`, `dist`, generated tarballs, local configuration, real inventories, credentials or SQLite files. The project ignores common local paths, but inspect your diff before committing.
 

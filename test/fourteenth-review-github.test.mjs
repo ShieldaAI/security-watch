@@ -654,3 +654,128 @@ test("GitHub's primary rate limit (403) also ends the requests by identifier", a
   assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0090']);
   assert.match(result.errors[0].message, /rate limit/);
 });
+
+test('given-up records with a stored copy are asked for again first, and the others take turns', async () => {
+  const store = new Store(':memory:');
+  const copy = {
+    id: 'github:GHSA-aaaa-bbbb-0100',
+    source: 'github:reviewed',
+    kind: 'advisory',
+    title: 'alpha flaw',
+    url: 'https://github.com/advisories/x',
+    description: '',
+    aliases: [],
+    severity: 'critical',
+    modified_at: iso(NOW - 2 * DAY),
+    fetched_at: iso(NOW - DAY),
+    packages: [{ ecosystem: 'npm', name: 'alpha', range: '<2.0.0' }],
+  };
+  store.saveEvidence([copy], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify([
+      'GHSA-aaaa-bbbb-0101',
+      'GHSA-aaaa-bbbb-0102',
+      'GHSA-aaaa-bbbb-0100',
+    ]),
+  });
+  const { http, log } = github(() => []);
+  for (let run = 1; run <= 3; run++) await poll(store, http, NOW + run * 30 * MINUTE);
+  // The one with a stored copy is asked every time it can be (here, every run).
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0100', 'GHSA-aaaa-bbbb-0100']);
+  // Without stored copies, they take turns and the order is kept from run to run.
+  const plain = new Store(':memory:');
+  plain.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify([
+      'GHSA-aaaa-bbbb-0101',
+      'GHSA-aaaa-bbbb-0102',
+      'GHSA-aaaa-bbbb-0103',
+    ]),
+  });
+  const turns = github(() => []);
+  for (let run = 1; run <= 4; run++) await poll(plain, turns.http, NOW + run * 30 * MINUTE);
+  assert.deepEqual(turns.log.byId, [
+    'GHSA-aaaa-bbbb-0101',
+    'GHSA-aaaa-bbbb-0102',
+    'GHSA-aaaa-bbbb-0103',
+    'GHSA-aaaa-bbbb-0101',
+  ]);
+});
+
+test('a given-up record asked for again that answers 404 is not reported or remembered again', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0110']),
+  });
+  const { http } = github(() => []);
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(remembered(result), []);
+  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:skipped']), ['GHSA-aaaa-bbbb-0110']);
+});
+
+test('the re-ask of a given-up record stays within the budget without a token', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0120', NOW - 3 * HOUR, 1],
+      ['GHSA-aaaa-bbbb-0121', NOW - 2 * HOUR, 1],
+    ]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0122']),
+  });
+  const { http, log } = github(() => [
+    advisory('GHSA-aaaa-bbbb-0120', 'zeta', NOW - DAY, false),
+    advisory('GHSA-aaaa-bbbb-0121', 'zeta', NOW - DAY, false),
+  ]);
+  await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(
+    log.byId,
+    ['GHSA-aaaa-bbbb-0120', 'GHSA-aaaa-bbbb-0121'],
+    'two remembered, no room for a re-ask',
+  );
+});
+
+test('records given up because of the cap are counted in the report', async () => {
+  const store = new Store(':memory:');
+  const remember = Array.from({ length: 10_002 }, (_, index) => [
+    `GHSA-hhhh-${String(index).padStart(4, '0')}-hhhh`,
+    NOW - HOUR + index,
+    1,
+  ]);
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify(remember),
+  });
+  const { http } = github(() => [advisory('GHSA-dddd-0002-dddd', 'omega', NOW + 5 * MINUTE)], {
+    byId: () => ({ status: 503, headers: {}, body: '' }),
+  });
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.match(
+    result.errors.map((error) => error.message).join(' '),
+    /GitHub: 2 record\(s\) could not be read three times/,
+  );
+});
+
+test('a window of unreadable records first met just under a day ago is an outage; just over is not', async () => {
+  for (const [age, held] of [
+    [23 * HOUR, true],
+    [25 * HOUR, false],
+  ]) {
+    const store = new Store(':memory:');
+    store.saveEvidence([], {
+      'github:reviewed': iso(NOW),
+      'github:malware': iso(NOW),
+      'github:reviewed:unreadable': JSON.stringify([['GHSA-aaaa-bbbb-0130', NOW + 30 * MINUTE - age, 1]]),
+    });
+    const { http } = github(() => [advisory('GHSA-aaaa-bbbb-0130', 'zeta', NOW + 5 * MINUTE, false)]);
+    const result = await poll(store, http, NOW + 30 * MINUTE);
+    assert.equal(result.checkpoints['github:reviewed'] === iso(NOW), held, `${age / HOUR} h`);
+  }
+});

@@ -40,6 +40,7 @@ export function checkHealth(
   const started = time(worker?.started_at);
   const scanned = time(scan?.at);
   const issues: string[] = [];
+  const staleAfter = Math.max(120_000, config.poll_interval_minutes * 120_000);
   // The first scan reads a day of advisories and every package lookup at about a request a second:
   // it can take well over the two minutes later scans need, so a running worker that has not
   // finished one yet is healthy for up to an hour.
@@ -48,8 +49,13 @@ export function checkHealth(
     Number.isFinite(started) &&
     now >= started &&
     // A restart after downtime finds an old scan and catches up the same way: until it records a
-    // scan of its own, it has the same grace.
-    now - started <= (Number.isFinite(scanned) && scanned >= started ? 120_000 : FIRST_SCAN_GRACE);
+    // scan of its own, it has the same grace, but only while that scan is no older than a missed
+    // scan plus the grace. A worker restarted again and again (killed during every scan) would
+    // otherwise never be reported.
+    now - started <= (Number.isFinite(scanned) && scanned >= started ? 120_000 : FIRST_SCAN_GRACE) &&
+    (!Number.isFinite(scanned) || scanned >= started || now - scanned <= staleAfter + FIRST_SCAN_GRACE);
+  /** Whether this check passes only because a worker is still catching up. */
+  let catchingUp = false;
   if (
     requireWorker &&
     (worker?.status !== 'running' ||
@@ -61,11 +67,9 @@ export function checkHealth(
   if (!Number.isFinite(scanned)) {
     if (!startupGrace || !requireWorker) issues.push('No completed scan is recorded.');
   } else {
-    if (
-      scanned > now + 5000 ||
-      (now - scanned > Math.max(120_000, config.poll_interval_minutes * 120_000) &&
-        !(startupGrace && requireWorker && scanned < started))
-    )
+    const stale = now - scanned > staleAfter;
+    if (stale && startupGrace && requireWorker && scanned < started) catchingUp = true;
+    else if (scanned > now + 5000 || stale)
       issues.push('The last completed scan is stale or has an invalid future timestamp.');
     if (scan?.degraded !== false)
       issues.push('The last scan reported degraded monitoring; inspect status and findings.');
@@ -90,7 +94,9 @@ export function checkHealth(
   if (delivery.overdue_pending) issues.push('Current notifications are overdue by more than five minutes.');
   return {
     ok: issues.length === 0,
-    status: issues.length ? 'degraded' : Number.isFinite(scanned) ? 'healthy' : 'starting',
+    // While a worker catches up the check passes, but it is "starting": no success is reported to
+    // an external heartbeat until a scan completes.
+    status: issues.length ? 'degraded' : Number.isFinite(scanned) && !catchingUp ? 'healthy' : 'starting',
     checked_at: new Date(now).toISOString(),
     issues,
     last_scan_at: Number.isFinite(scanned) ? new Date(scanned).toISOString() : null,

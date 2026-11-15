@@ -715,6 +715,10 @@ async function github(
   const key = (id: string) => id.toUpperCase();
   type Remembered = { id: string; firstMet: number; attempts: number; updated: number };
   const pending = new Map<string, Remembered>();
+  /** Records stored from this type, by key: a given-up record with a stored copy matters most. */
+  const withCopy = new Set(
+    stored.filter((item) => item.source === `github:${type}`).map((item) => key(item.id.slice(7))),
+  );
   /** Records given up on, by key, with the identifier as GitHub wrote it. */
   const skipped = new Map<string, string>();
   try {
@@ -845,15 +849,11 @@ async function github(
       ]),
     );
     // A record given up on that still has a stored copy is never forgotten, or that copy would be
-    // confirmed again.
-    const withCopy = new Set(
-      stored.filter((item) => item.source === `github:${type}`).map((item) => key(item.id.slice(7))),
-    );
+    // confirmed again. Beyond the cap, the oldest without one are dropped; the order, which is the
+    // order of turns for asking again, is kept.
     const list = [...skipped];
-    const keep = [
-      ...list.filter(([k]) => !withCopy.has(k)).slice(-MAX_UNREADABLE),
-      ...list.filter(([k]) => withCopy.has(k)),
-    ];
+    let excess = list.filter(([k]) => !withCopy.has(k)).length - MAX_UNREADABLE;
+    const keep = list.filter(([k]) => withCopy.has(k) || excess-- <= 0);
     unreadable.nextSkipped = JSON.stringify(keep.map(([, id]) => id));
     return rewind !== undefined && Number.isFinite(rewind) ? rewind : undefined;
   };
@@ -929,7 +929,10 @@ async function github(
     // first: a record lost to a long partial format change is found again once GitHub serves it
     // readably.
     const budget = token ? REFETCH_PER_RUN : REFETCH_WITHOUT_TOKEN;
-    const retry = [...skipped].find(([k]) => !unreadableNow.has(k));
+    // Records with a stored copy come first: their copies are never confirmed until they are read.
+    const retry =
+      [...skipped].find(([k]) => withCopy.has(k) && !unreadableNow.has(k)) ??
+      [...skipped].find(([k]) => !unreadableNow.has(k));
     const again: Remembered[] =
       asked.length < budget && retry ? [{ id: retry[1], firstMet: now, attempts: 0, updated: NaN }] : [];
     if (retry && again.length) {

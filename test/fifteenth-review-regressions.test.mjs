@@ -128,6 +128,19 @@ test('property: a claim a cut quote supports is supported by the whole text too'
     '1',
     '１',
     '.1',
+    '%',
+    ' %',
+    '\u00b0',
+    '\u20ac',
+    '\u00b1',
+    '\u2019',
+    '\u2236',
+    '\u33b3',
+    '\u2116',
+    '\ufe52',
+    '\ufe62',
+    '\u2795',
+    '\u2216',
   ];
   let checked = 0;
   for (let index = 0; index < 4000; index++) {
@@ -216,7 +229,7 @@ test('a fixture preview treats its records as read now, whatever date the file c
       cli,
       'scan',
       '--config',
-      `${examples}preview.yaml`,
+      `${examples}security-watch.example.yaml`,
       '--fixture',
       `${examples}advisories.json`,
       '--dry-run',
@@ -284,23 +297,30 @@ test('a product cut from the end of a longer word is refused', () => {
   );
 });
 
-test('a restarted worker catching up after downtime has the startup grace until it records a scan', (t) => {
+test('a restarted worker catching up has a bounded grace, reported as starting, and a crash loop is not healthy', (t) => {
   const store = new Store(':memory:');
   t.after(() => store.close());
   const config = parseConfig({ version: 1 });
-  store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - 3 * 3_600_000), degraded: false, errors: [] }));
-  store.setMeta(
-    'worker',
-    JSON.stringify({ status: 'running', started_at: iso(NOW - 10 * 60_000), heartbeat_at: iso(NOW) }),
-  );
-  assert.equal(checkHealth(store, config, NOW).ok, true, 'catching up');
-  store.setMeta(
-    'worker',
-    JSON.stringify({ status: 'running', started_at: iso(NOW - 61 * 60_000), heartbeat_at: iso(NOW) }),
-  );
-  assert.equal(checkHealth(store, config, NOW).ok, false, 'an hour without a scan');
+  const worker = (startedAgo) =>
+    store.setMeta(
+      'worker',
+      JSON.stringify({ status: 'running', started_at: iso(NOW - startedAgo), heartbeat_at: iso(NOW) }),
+    );
+  const scan = (ago) =>
+    store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - ago), degraded: false, errors: [] }));
+  // Restarted ten minutes ago after a short outage: catching up, not reported as healthy.
+  scan(50 * 60_000);
+  worker(10 * 60_000);
+  const catching = checkHealth(store, config, NOW);
+  assert.equal(catching.ok, true);
+  assert.equal(catching.status, 'starting', 'no success ping while catching up');
+  // The last scan is three days old and the worker restarted ten minutes ago: a crash loop.
+  scan(3 * 24 * 3_600_000);
+  assert.equal(checkHealth(store, config, NOW).ok, false);
+  // Without a worker check (--scan-only), no grace applies.
+  scan(50 * 60_000);
+  assert.equal(checkHealth(store, config, NOW, false).ok, false);
 });
-
 test('the demo shows one affected and one excluded system whatever date its files carry', () => {
   const demo = fileURLToPath(new URL('../scripts/demo.mjs', import.meta.url));
   const result = spawnSync(process.execPath, [demo], { encoding: 'utf8', timeout: 30_000 });
@@ -309,4 +329,132 @@ test('the demo shows one affected and one excluded system whatever date its file
     .findings.map((finding) => finding.applicability)
     .sort();
   assert.deepEqual(applicability, ['affected', 'not_affected']);
+});
+
+test('a claim is checked in the evidence: amounts and units around a cut quote count', () => {
+  for (const [text, version] of [
+    ['The update cut memory use by 45% in this release cycle.', '45'],
+    ['The update cut memory use by 45 % in this release cycle.', '45'],
+    ['The sensor reads 20° in this release cycle.', '20'],
+    ['The fee was €5 in this release cycle.', '5'],
+    ['Over 4’200 users are affected in this cycle.', '200'],
+    ['Latency is 8.0.3㎳ in this release cycle.', '8.0.3'],
+  ]) {
+    const at = text.indexOf(version, text.search(/\d/));
+    for (const quote of [text.slice(0, at + version.length), text.slice(at)].filter((q) => q.length >= 20))
+      assert.equal(
+        accepts(text, [quote], { versions: [version] }),
+        false,
+        `${version} from ${JSON.stringify(quote)}`,
+      );
+  }
+});
+
+test('a claim outside every quote is not supported, even next to one', () => {
+  const text = 'Upgrade the package lodash@4.17.20 now. Affected Version 2.5.32 here.';
+  assert.equal(accepts(text, ['Upgrade the package lodash'], { versions: ['4.17.20'] }), false);
+  assert.equal(accepts(text, ['Upgrade the package lodash@4.17.20 now.'], { versions: ['4.17.20'] }), true);
+});
+
+test('small forms and other look-alike marks join a name or a version', () => {
+  const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
+  for (const [body, product] of [
+    ['Notepad﹢﹢', 'Notepad'],
+    ['Notepad➕➕', 'Notepad'],
+    ['apache﹨struts', 'struts'],
+    ['apache∖struts', 'struts'],
+    ['Node﹒js', 'Node'],
+    ['Node⸱js', 'Node'],
+    ['Struts∶evil', 'Struts'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), false, body);
+  for (const [body, version] of [
+    ['2.4﹒1', '2.4'],
+    ['2.4・1', '2.4'],
+    ['2.4.1﹢build5', '2.4.1'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { versions: [version] }), false, body);
+});
+
+test('labels in other languages, Docker tags and RHEL or Fedora revisions', () => {
+  const sentence = (body) => `The advisory says ${body} is affected in this release cycle.`;
+  for (const body of [
+    '版本:2.5.32',
+    'バージョン：2.5.32',
+    '버전:2.5.32',
+    'Versión:2.5.32',
+    'fixed in:2.5.32',
+    'ver:2.5.32',
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { versions: ['2.5.32'] }), true, body);
+  for (const body of ['x-affected:2.5.32', 'subversion:2.5.32'])
+    assert.equal(accepts(sentence(body), [sentence(body)], { versions: ['2.5.32'] }), false, body);
+  for (const [body, product] of [
+    ['nginx:1.25.3', 'nginx'],
+    ['node:18-alpine', 'node'],
+    ['openssl-1.1.1k-12.el8_9', 'openssl'],
+    ['nginx-1.24.0-2.fc39', 'nginx'],
+    ['openssh-8.7p1-34.el9', 'openssh'],
+    ['nginx-1.25.3-1+deb12u5', 'nginx'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), true, body);
+  for (const [body, product] of [
+    ['express-4-1+evil.example', 'express'],
+    ['express-4-1~evil', 'express'],
+    ['express-4-1build', 'express'],
+    ['express-4-1deb', 'express'],
+  ])
+    assert.equal(accepts(sentence(body), [sentence(body)], { products: [product] }), false, body);
+  // A tilde range needs a dotted version on both sides.
+  assert.equal(accepts(sentence('2~5'), [sentence('2~5')], { versions: ['5'] }), false);
+});
+
+test('a news quote is checked against the evidence on its own, and every occurrence of a quote counts', () => {
+  const text = 'A general report about the conference schedule and the new venue.';
+  const evidence = [
+    {
+      id: 'n1',
+      kind: 'news',
+      title: 'News',
+      description: text,
+      aliases: [],
+      source: 'feed:x',
+      url: 'https://example.com',
+      severity: 'unknown',
+      modified_at: iso(NOW),
+      fetched_at: iso(NOW),
+      packages: [],
+    },
+  ];
+  assert.throws(
+    () =>
+      validateAnalysis(
+        {
+          relevance: 'irrelevant',
+          priority: 'low',
+          summary: 'Checked.',
+          evidence_ids: ['n1'],
+          quotes: [{ evidence_id: 'n1', quote: text }],
+          news_analysis: {
+            classification: 'general_news',
+            impact: 'not_applicable',
+            rationale: 'Checked.',
+            quotes: [{ evidence_id: 'n1', quote: 'An invented quote that the article never says.' }],
+            affected_products: [],
+            affected_versions: [],
+            prerequisites: [],
+          },
+        },
+        evidence,
+      ),
+    /MODEL_UNSUPPORTED_NEWS_QUOTE/,
+  );
+  // The quote occurs twice; only its second occurrence holds the whole version.
+  const twice = 'Example 12.4.1 is affected by it. Example 2.4.1 is affected by it.';
+  assert.equal(accepts(twice, ['2.4.1 is affected by it.'], { versions: ['2.4.1'] }), true);
+});
+
+test('a CJK label straight after other CJK text still labels the version', () => {
+  const text = '受影响版本:2.5.32 存在远程代码执行漏洞。';
+  assert.equal(accepts(text, [text], { versions: ['2.5.32'] }), true);
 });

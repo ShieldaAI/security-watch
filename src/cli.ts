@@ -954,6 +954,10 @@ async function main(): Promise<void> {
     }
     if (command === 'scan') {
       const inventory = loadInventory(config.inventory);
+      // A fixture preview shows how findings are matched, not how fresh the inventory is: like the
+      // demo, it counts the inventory as current, so the fixed-date examples keep working.
+      if (values.fixture)
+        for (const system of inventory.systems) system.updated_at = new Date().toISOString();
       if (values.notify) store.recoverSending();
       const delivery = { accepted: 0, failed: 0, unknown: 0 };
       const deliver = async () => {
