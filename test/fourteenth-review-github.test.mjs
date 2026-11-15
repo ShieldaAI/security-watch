@@ -1732,3 +1732,36 @@ test('a newer revision of a row without an identifier holds its package back aga
   assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0330', 'GHSA-aaaa-bbbb-0330']);
   assert.ok(third.evidence.some((item) => item.id === copy.id && item.fetched_at === iso(NOW + 60 * MINUTE)));
 });
+
+test('a stored record already at the version of a row without an identifier is not held back', async () => {
+  const store = new Store(':memory:');
+  const version = NOW + 10 * MINUTE;
+  const current = {
+    ...waitingCopy('GHSA-aaaa-bbbb-0340', 0),
+    modified_at: iso(version),
+    fetched_at: iso(NOW + 15 * MINUTE),
+  };
+  const older = { ...waitingCopy('GHSA-aaaa-bbbb-0341', HOUR), modified_at: iso(NOW - DAY) };
+  store.saveEvidence([current, older], {
+    'github:reviewed': iso(NOW + 15 * MINUTE),
+    'github:malware': iso(NOW),
+  });
+  const { http, log } = github(() => {
+    const row = advisory('GHSA-aaaa-bbbb-0342', 'alpha', version);
+    delete row.ghsa_id;
+    return [
+      row,
+      advisory('GHSA-aaaa-bbbb-0341', 'alpha', NOW - DAY),
+      advisory('GHSA-aaaa-bbbb-0343', 'zeta', NOW + 20 * MINUTE),
+    ];
+  });
+  const result = await poll(store, http, NOW + 45 * MINUTE);
+  assert.deepEqual(log.byId, ['GHSA-aaaa-bbbb-0341'], 'only the older record is read again');
+  assert.ok(
+    result.evidence.some((item) => item.id === current.id && item.fetched_at === iso(NOW + 45 * MINUTE)),
+  );
+  assert.deepEqual(JSON.parse(result.checkpoints['github:reviewed:unconfirmed']).alpha, [
+    NOW + 45 * MINUTE,
+    version,
+  ]);
+});

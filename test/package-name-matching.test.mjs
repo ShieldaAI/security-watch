@@ -175,11 +175,11 @@ test('second-word rule: software words, capitalised kinds, up to three words nam
     ['puma', 'The Puma HTTP server fixes request smuggling.'],
     ['express', 'The Express JavaScript framework fixed it.'],
     ['rails', 'The Rails core team released a fix.'],
-    ['react', 'The React community reacted to the bug.'],
-    ['express', 'The Express security team responded.'],
+    ['react', 'The React community reacted to the bug in the library.'],
+    ['express', 'The Express security team responded for 4.21.2.'],
     ['express', 'The Express advisory lists two flaws.'],
-    ['react', 'Critical React issue lets pages run code.'],
-    ['react', 'The React devs shipped a patch.'],
+    ['react', 'Critical React issue lets pages run code, the maintainers said.'],
+    ['react', 'The React devs shipped a patch to npm.'],
     ['struts', 'Critical Struts remote code execution flaw disclosed.'],
   ])
     assert.equal(packageMentioned(text, component(name)), true, text);
@@ -207,13 +207,35 @@ test('second-word rule: acronyms of flaw kinds as written, and each group of sof
     ['express', 'The Express denial of service flaw stops servers.'],
     ['jackson', 'The Jackson deserialization flaw lets attackers run code.'],
     ['express', 'The Express path traversal vulnerability exposes files.'],
-    ['react', 'The React components leak state across requests.'],
-    ['rails', 'Critical Rails security update released.'],
-    ['rails', 'The Rails security advisory lists two flaws.'],
+    ['react', 'The React components leak state across requests in the npm package.'],
+    ['rails', 'Critical Rails security update released for 7.1.'],
+    ['rails', 'The Rails security advisory lists two flaws in the framework.'],
     ['express', 'The Express web applications were exposed.'],
     ['express', 'The Express web app leaks sessions.'],
   ])
     assert.equal(packageMentioned(text, component(name)), true, text);
   assert.equal(packageMentioned('The Express applications were exposed.', component('express')), false);
   assert.equal(packageMentioned('The Express app leaks sessions.', component('express')), false);
+});
+
+test('shared words after a library named second in a sentence count only when the text speaks of a library', () => {
+  const component = (name) => ({ id: 'c', ecosystem: 'npm', name, version: '1.0.0' });
+  for (const [name, text] of [
+    ['nest', 'The Nest security team confirmed the issue.'],
+    ['nest', 'New Nest security update fixes cameras.'],
+    ['cypress', 'The Cypress security advisory covers CVE-2026-1111.'],
+    ['puma', 'The Puma security team confirmed customer data was taken.'],
+    ['mongoose', 'The Mongoose components of the ransomware encrypt files.'],
+    ['react', 'The React community reacted to the bug.'],
+    ['react', 'The React devs shipped a patch.'],
+    ['nest', 'The Nest thermostat bug locked users out.'],
+    ['cypress', 'Critical Cypress chip flaw affects billions of devices.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), false, text);
+  for (const [name, text] of [
+    ['express', 'The Express SDK leaks keys.'],
+    ['express', 'The Express API router leaks keys.'],
+    ['express', 'The Express authentication bypass flaw lets anyone in.'],
+  ])
+    assert.equal(packageMentioned(text, component(name)), true, text);
 });

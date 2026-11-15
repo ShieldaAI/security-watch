@@ -388,11 +388,20 @@ const SOFTWARE_KIND =
   'validation|parsing|parser|image|ui|UI|frontend|backend|server-side|open-source|npm|PyPI|pypi)';
 /** Words that name software or its people. */
 const SOFTWARE_NOUN =
-  '(?:team|core(?: team)?|maintainers?|project|developers?|devs|community|ecosystem|codebase|repository|' +
-  'librar(?:y|ies)|framework|packages?|modules?|components?|plugins?|extensions?|middleware|router|' +
-  'dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|cli|api|sdk|versions?|releases?|' +
-  'patch(?:es)?|fix(?:es)?|issues?|advisor(?:y|ies)|' +
+  '(?:team|core(?: team)?|maintainers?|project|developers?|ecosystem|codebase|repository|' +
+  'librar(?:y|ies)|framework|packages?|modules?|plugins?|extensions?|middleware|router|' +
+  'dependenc(?:y|ies)|gems?|crates?|runtime|runner|installer|cli|CLI|api|API|sdk|SDK|versions?|' +
+  'releases?|patch(?:es)?|fix(?:es)?|advisor(?:y|ies))';
+/**
+ * Words that also follow a company or a malware name ("The Nest security team", "The Mongoose
+ * components"): they count only when the text also speaks of a library (LIBRARY_CUE).
+ */
+const SHARED_NOUN =
+  '(?:community|components?|devs|issues?|' +
   'security (?:team|advisor(?:y|ies)|releases?|updates?|fix(?:es)?|patch(?:es)?))';
+/** A sign that a text is about a software library: a registry, the kind of package, or a version. */
+const LIBRARY_CUE =
+  /(?:^|[^\p{L}])(?:npm|pypi|pip|gems?|crates?|packages?|librar(?:y|ies)|frameworks?|modules?|plugins?|open[- ]source|github|maintainers?)(?![\p{L}])|(?:^|[^\p{L}\p{N}.])v?\d+\.\d+/iu;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
 /** Words for the kind of a flaw that may come before it ("remote code execution flaw"). */
@@ -414,15 +423,18 @@ const FLAW_KIND =
 const SOFTWARE_WORD =
   `(?:${SOFTWARE_KIND} (?:servers?|apps?|applications?|clients?)|(?:${SOFTWARE_KIND} )?${SOFTWARE_NOUN}|` +
   `(?:${FLAW_KIND} ){0,3}${FLAW_NOUN})`;
+const SHARED_WORD = `(?:${SOFTWARE_KIND} )?${SHARED_NOUN}`;
 function writtenAsName(names: string[]): (text: string) => boolean {
   const single = names.map((name) => name.trim()).filter((name) => /^\p{L}{3,}$/u.test(name));
   const form = capitalised;
   const end = '(?![\\p{L}\\p{N}_@/\\-])';
   const after = "(?<=(?:^|[^\\p{L}\\p{N}])\\p{Ll}[\\p{L}\\p{N}'’-]*[,:]? )";
   const patterns: RegExp[] = [];
-  const add = (group: string[], build: (alternatives: string) => string) => {
+  /** Patterns that count only in a text that also speaks of a library. */
+  const cued: RegExp[] = [];
+  const add = (group: string[], build: (alternatives: string) => string, into = patterns) => {
     for (let offset = 0; offset < group.length; offset += 400)
-      patterns.push(
+      into.push(
         new RegExp(
           build(
             `(?:${group
@@ -450,13 +462,19 @@ function writtenAsName(names: string[]): (text: string) => boolean {
       // Puma sportswear brand", "The Thor ransomware", "The Express reported").
       `|(?<=(?:^|[.!?]\\s+)${SECOND_WORD_AFTER} )${alternatives}(?:['’]s)?${end}(?= ${SOFTWARE_WORD}(?![\\p{L}\\p{N}]))`,
   );
+  add(
+    single.filter((name) => properName(name)),
+    (alternatives) =>
+      `(?<=(?:^|[.!?]\\s+)${SECOND_WORD_AFTER} )${alternatives}(?:['’]s)?${end}(?= ${SHARED_WORD}(?![\\p{L}\\p{N}]))`,
+    cued,
+  );
   if (!patterns.length) return () => false;
-  return (text) =>
-    text
+  return (text) => {
+    const all = cued.length && LIBRARY_CUE.test(text) ? [...patterns, ...cued] : patterns;
+    return text
       .split('\n')
-      .some(
-        (line) => !titleCase(line) && patterns.some((pattern) => pattern.test(technologyInLowerCase(line))),
-      );
+      .some((line) => !titleCase(line) && all.some((pattern) => pattern.test(technologyInLowerCase(line))));
+  };
 }
 
 export interface InventoryMatcher {

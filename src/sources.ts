@@ -802,23 +802,39 @@ async function github(
    * update, and never once a run reaches the page limit.
    */
   let unidentifiedHold = Infinity;
-  const blocked = new Map<string, number>();
+  /**
+   * By package: when a row without an identifier naming it was first seen (`at`), and the latest
+   * update among such rows (`updated`; unknown is Infinity). Saved as `at`, or `[at, updated]`.
+   */
+  const blocked = new Map<string, { at: number; updated: number }>();
   /** Packages named by such rows in this run: kept while their rows are still listed. */
   const seenNow = new Set<string>();
   try {
     const saved: unknown = JSON.parse(unreadable.unconfirmed || '{}');
     if (typeof saved === 'object' && saved !== null && !Array.isArray(saved))
-      for (const [name, at] of Object.entries(saved))
-        if (typeof at === 'number' && Number.isFinite(at)) blocked.set(name, Math.min(at, now));
+      for (const [name, value] of Object.entries(saved)) {
+        const [at, updated] = Array.isArray(value) ? value : [value, Infinity];
+        if (typeof at === 'number' && Number.isFinite(at))
+          blocked.set(name, {
+            at: Math.min(at, now),
+            updated: typeof updated === 'number' && Number.isFinite(updated) ? updated : Infinity,
+          });
+      }
   } catch {
     // An unreadable list only means those records are confirmed as before.
   }
-  /** When a stored record was last possibly replaced by a row without an identifier. */
-  const blockedAt = (item: Evidence) =>
-    Math.max(
-      blocked.get('*') ?? -Infinity,
-      ...item.packages.map((claim) => blocked.get(claim.name.toLowerCase()) ?? -Infinity),
-    );
+  /**
+   * Whether a stored record may have been replaced by such a row: read before the row was first
+   * seen, and not already at the row's version (its own update is earlier than the row's).
+   */
+  const waits = (item: Evidence, only?: string) =>
+    [...(only ? [only] : ['*', ...item.packages.map((claim) => claim.name.toLowerCase())])].some((name) => {
+      const entry = blocked.get(name);
+      if (!entry) return false;
+      if (only && only !== '*' && !item.packages.some((claim) => claim.name.toLowerCase() === only))
+        return false;
+      return Date.parse(item.fetched_at) < entry.at && !(Date.parse(item.modified_at) >= entry.updated);
+    });
   const names = new Set(
     inventory.systems.flatMap((system) => system.components.map((component) => component.name.toLowerCase())),
   );
@@ -874,11 +890,14 @@ async function github(
       // than the row's update) keeps that time, so listing it again does not make records read
       // since wait again.
       const named = githubPackageNames(item);
+      const version = Number.isFinite(updated) ? updated : Infinity;
       for (const name of named.length ? named : ['*']) {
         seenNow.add(name);
-        const first = blocked.get(name);
-        if (first === undefined || !(first >= (Number.isFinite(updated) ? updated : Infinity)))
-          blocked.set(name, now);
+        const entry = blocked.get(name);
+        blocked.set(name, {
+          at: entry && entry.at >= version ? entry.at : now,
+          updated: Math.max(entry?.updated ?? -Infinity, version),
+        });
       }
     }
     return parsed;
@@ -944,23 +963,21 @@ async function github(
       rewind = Math.min(rewind ?? Infinity, unidentifiedHold);
     // A package stays remembered while a stored record for it, read before its row was met, waits to
     // be read again.
-    const waitingFor = (name: string, at: number) =>
+    const waitingFor = (name: string) =>
       stored.some(
         (item) =>
           item.source === `github:${type}` &&
           !evidence.has(item.id) &&
-          Date.parse(item.fetched_at) < at &&
-          item.packages.some(
-            (claim) =>
-              names.has(claim.name.toLowerCase()) && (name === '*' || claim.name.toLowerCase() === name),
-          ),
+          item.packages.some((claim) => names.has(claim.name.toLowerCase())) &&
+          waits(item, name),
       );
     unreadable.nextUnconfirmed = JSON.stringify(
       Object.fromEntries(
         [...blocked]
-          .filter(([name, at]) => seenNow.has(name) || waitingFor(name, at))
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, MAX_UNREADABLE),
+          .filter(([name]) => seenNow.has(name) || waitingFor(name))
+          .sort((a, b) => b[1].at - a[1].at)
+          .slice(0, MAX_UNREADABLE)
+          .map(([name, { at, updated }]) => [name, Number.isFinite(updated) ? [at, updated] : at]),
       ),
     );
     unreadable.nextPending = JSON.stringify(
@@ -1067,7 +1084,7 @@ async function github(
           !unreadableNow.has(k) &&
           !pending.has(k) &&
           !skipped.has(k) &&
-          Date.parse(item.fetched_at) < blockedAt(item) &&
+          waits(item) &&
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         );
       })
@@ -1138,7 +1155,7 @@ async function github(
         !evidence.has(item.id) &&
         !unconfirmed.has(key(item.id.slice(7))) &&
         Date.parse(item.fetched_at) >= chainStart &&
-        !(Date.parse(item.fetched_at) < blockedAt(item)) &&
+        !waits(item) &&
         Date.parse(item.fetched_at) <= now &&
         item.packages.some((claim) => names.has(claim.name.toLowerCase()))
       )
