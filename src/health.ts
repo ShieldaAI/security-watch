@@ -30,8 +30,8 @@ function time(value: unknown): number {
 /**
  * Since when a worker starting at `startedAt` has been catching up without recording a scan. It is
  * kept across restarts until a scan is recorded, so a worker killed during every scan cannot renew
- * its startup grace by restarting; a restart after a recorded scan starts afresh, and so does one
- * after the previous worker was last seen more than the grace ago (a stop, not a crash loop).
+ * its startup grace by restarting; a restart after a recorded scan starts afresh. The time between
+ * the previous worker's last sign of life and this start does not count.
  */
 export function catchingUpFrom(store: Store, startedAt: string): string {
   try {
@@ -47,12 +47,11 @@ export function catchingUpFrom(store: Store, startedAt: string): string {
       ...[time(previous?.heartbeat_at), time(previous?.started_at)].filter(Number.isFinite),
     );
     const start = Date.parse(startedAt);
-    return Number.isFinite(since) &&
-      since <= start &&
-      !(scanned >= since) &&
-      !(Number.isFinite(seen) && start - seen > FIRST_SCAN_GRACE)
-      ? previous!.catching_up_since!
-      : startedAt;
+    if (!Number.isFinite(since) || since > start || scanned >= since) return startedAt;
+    // Only running time counts: the time the worker was stopped moves the start forward. A crash
+    // loop is down for seconds, so it cannot renew the grace; a stop of any length costs nothing.
+    const down = Number.isFinite(seen) && seen >= since && seen <= start ? start - seen : 0;
+    return new Date(since + down).toISOString();
   } catch {
     return startedAt;
   }

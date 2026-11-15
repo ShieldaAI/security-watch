@@ -54,7 +54,8 @@ function sourcePrefix(text: string, length: number): string {
 }
 
 // IDs select source text; the model never has to reproduce punctuation or table spacing.
-function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, index: number): Excerpt[] {
+// Exported for tests only; not part of the package API.
+export function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, index: number): Excerpt[] {
   const text = `${evidence.title}\n${evidence.description}`;
   const excerpts: Excerpt[] = [];
   let start = 0;
@@ -70,6 +71,9 @@ function excerptsFor(evidence: Pick<Evidence, 'title' | 'description'>, index: n
       }
       // Do not leave a final fragment too short to satisfy the stored quote contract.
       if (text.length - end < 20) end = Math.max(start + 20, text.length - 20);
+      // Whole characters: not between the halves of a surrogate pair, nor before a combining mark.
+      if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
+      while (end > start + 20 && /^\p{M}$/u.test(text[end] ?? '')) end--;
       if (/^[\uDC00-\uDFFF]$/.test(text[end] ?? '')) end--;
     }
     excerpts.push({ id: `e${index}s${excerpts.length}`, text: text.slice(start, end) });
@@ -303,6 +307,8 @@ function quotesPhrase(
   const last = [...wanted].at(-1)!;
   const attached = (character: string) =>
     /[\p{P}\p{S}]/u.test(character) &&
+    // Brackets and quotation marks of any script ("Struts【CVE-…】", "Intel「R」").
+    !/[\p{Ps}\p{Pe}\p{Pi}\p{Pf}]/u.test(character) &&
     // Handled above, with their own exceptions, or the punctuation of a sentence.
     !/[-@/:~+#._.,;!?'"’‘“”«»()[\]{}<>。、，；！？…—–]/u.test(character);
   for (let at = quote.indexOf(wanted); at !== -1; at = quote.indexOf(wanted, at + 1)) {
@@ -387,7 +393,8 @@ function inQuote(
  * changes nothing, so positions found in one reading hold in the next.
  */
 function readText(text: string): string {
-  return quoteText(text).toLowerCase().normalize('NFC');
+  // A final sigma is a sigma: where an excerpt ends decides which form lowering the case gives.
+  return quoteText(text).toLowerCase().normalize('NFC').replace(/ς/g, 'σ');
 }
 /**
  * A quote and a claim read the same way: full-width forms ("＋", "２") as their plain forms, every

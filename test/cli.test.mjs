@@ -524,7 +524,7 @@ test('foreground worker continues with missing model credentials and disabled so
   assert.equal(run(['unlock'], f.dir).code, 0);
 });
 
-test('start keeps the catch-up start of a worker stopped before a scan, and starts afresh after a long stop', async (t) => {
+test('start carries the running time of a worker stopped before a scan into its catch-up grace', async (t) => {
   const f = fixture(t, { notifications: {}, policy: { health_channels: [] } });
   mkdirSync(join(f.dir, 'state'), { recursive: true });
   const workerMeta = () => {
@@ -562,11 +562,11 @@ test('start keeps the catch-up start of a worker stopped before a scan, and star
     await waitFor(() => child.exitCode !== null || child.signalCode !== null);
     return { since, meta };
   };
-  // Last seen ten minutes ago, catching up for forty: a crash loop does not renew the grace.
-  const kept = await restart(10 * 60_000);
-  assert.equal(kept.meta.catching_up_since, kept.since);
-  assert.notEqual(kept.meta.started_at, kept.since);
-  // Last seen two hours ago: a stop, not a crash loop, so the hour starts again.
-  const fresh = await restart(2 * 3_600_000);
-  assert.equal(fresh.meta.catching_up_since, fresh.meta.started_at);
+  // The previous worker caught up for thirty minutes. Whether it stopped seconds or hours ago, the
+  // new one has used those thirty minutes of its hour, and no more.
+  for (const lastSeenAgo of [5_000, 2 * 3_600_000]) {
+    const { meta } = await restart(lastSeenAgo);
+    const used = Date.parse(meta.started_at) - Date.parse(meta.catching_up_since);
+    assert.ok(Math.abs(used - 30 * 60_000) < 20_000, `${lastSeenAgo}: ${used}`);
+  }
 });

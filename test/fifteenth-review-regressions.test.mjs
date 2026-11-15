@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catchingUpFrom, checkHealth } from '../dist/health.js';
 import { validateDestination } from '../dist/http.js';
-import { validateAnalysis } from '../dist/models.js';
+import { excerptsFor, validateAnalysis } from '../dist/models.js';
 import { parseConfig } from '../dist/config.js';
 import { Store } from '../dist/store.js';
 
@@ -708,7 +708,7 @@ test('a catch-up start ahead of the clock (a clock set back) is not kept', (t) =
   assert.equal(checkHealth(store, config, NOW).ok, false, 'two hours since the start, not ten minutes');
 });
 
-test('a restart after the previous worker was last seen more than an hour ago starts the grace afresh', (t) => {
+test('only running time counts against the catch-up grace: the time stopped moves its start', (t) => {
   const store = new Store(':memory:');
   t.after(() => store.close());
   const since = iso(NOW - 3 * 3_600_000);
@@ -717,18 +717,39 @@ test('a restart after the previous worker was last seen more than an hour ago st
       'worker',
       JSON.stringify({ status: 'stopped', catching_up_since: since, [field]: iso(NOW - ago) }),
     );
-  seenAgo(59 * 60_000);
-  assert.equal(catchingUpFrom(store, iso(NOW)), since, 'a crash loop keeps it');
-  seenAgo(61 * 60_000);
-  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW), 'a stop renews it');
+  // Catching up began three hours ago: whatever the stop, only the time running is used.
+  for (const ago of [5_000, 59 * 60_000, 3_600_000, 61 * 60_000, 2 * 3_600_000]) {
+    seenAgo(ago);
+    const kept = Date.parse(catchingUpFrom(store, iso(NOW)));
+    assert.equal(NOW - kept, Date.parse(iso(NOW - ago)) - Date.parse(since), String(ago));
+  }
+  // A crash loop down for seconds keeps nearly all of what it used.
+  seenAgo(5_000);
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 3 * 3_600_000 + 5_000));
   seenAgo(61 * 60_000, 'started_at');
-  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW), 'the start counts when no heartbeat is recorded');
+  assert.equal(
+    catchingUpFrom(store, iso(NOW)),
+    iso(NOW - 3 * 3_600_000 + 61 * 60_000),
+    'the start without a heartbeat',
+  );
   // The later of the two counts.
   store.setMeta(
     'worker',
     JSON.stringify({ catching_up_since: since, started_at: since, heartbeat_at: iso(NOW - 5 * 60_000) }),
   );
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW - 3 * 3_600_000 + 5 * 60_000));
+  // A last sign of life before the catch-up start or after this start moves nothing.
+  store.setMeta(
+    'worker',
+    JSON.stringify({ catching_up_since: since, heartbeat_at: iso(NOW - 4 * 3_600_000) }),
+  );
   assert.equal(catchingUpFrom(store, iso(NOW)), since);
+  store.setMeta('worker', JSON.stringify({ catching_up_since: since, heartbeat_at: iso(NOW + 60_000) }));
+  assert.equal(catchingUpFrom(store, iso(NOW)), since);
+  // A scan recorded at the very instant catching up began ends it.
+  store.setMeta('worker', JSON.stringify({ catching_up_since: since }));
+  store.setMeta('last_scan', JSON.stringify({ at: since, degraded: false, errors: [] }));
+  assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW));
 });
 
 test('a catch-up start that is not a time string starts the grace afresh', (t) => {
@@ -761,4 +782,59 @@ test('a claim whose own letters compose only after lowering the case is read lik
     const text = `The vendor reports that ${name} 2.4.1 lets remote users run code without signing in.`;
     assert.equal(accepts(text, [text], { products: [name], versions: ['2.4.1'] }), true, name);
   }
+});
+
+test('brackets and quotation marks of any script do not join a name', () => {
+  for (const [open, close] of [
+    '【】',
+    '〔〕',
+    '「」',
+    '『』',
+    '〈〉',
+    '《》',
+    '‹›',
+    '〖〗',
+    '⟨⟩',
+    '（）',
+    '()',
+    '[]',
+  ]) {
+    const text = `The vendor says Apache Struts${open}CVE-2026-1234${close} lets remote users run code at once.`;
+    assert.equal(accepts(text, [text], { products: ['Apache Struts'] }), true, open);
+  }
+  // Other marks written straight between a name and more of a word still join.
+  const text = 'The vendor says x©Struts lets remote users run code without signing in at all.';
+  assert.equal(accepts(text, [text], { products: ['Struts'] }), false);
+});
+
+test('a quote with letters that compose only after lowering the case inside it keeps its place', () => {
+  const text = 'Intro text. The ÄT̈X tool and Apache Struts 2.5.32 are affected now. Outro text here.';
+  const quote = 'The ÄT̈X tool and Apache Struts 2.5.32 are affected now.';
+  assert.equal(accepts(text, [quote], { products: ['Apache Struts'], versions: ['2.5.32'] }), true);
+  assert.equal(accepts(text, [quote], { products: ['ÄT̈X tool'] }), true);
+});
+
+test('excerpts are cut between whole characters, and a Greek word cut after a sigma is still found', () => {
+  const filler = 'Le correctif concerne Apache Struts 2.5.32 et les versions antérieures du produit. ';
+  let checked = 0;
+  for (let pad = 0; pad < 80; pad++) {
+    const description = (filler.repeat(5) + 'y'.repeat(pad) + ' risque élevé. Mise a jour faite').normalize(
+      'NFD',
+    );
+    const text = `News\n${description}`;
+    const excerpts = excerptsFor({ title: 'News', description }, 0);
+    let at = 0;
+    for (const excerpt of excerpts.slice(0, -1)) {
+      at += excerpt.text.length;
+      assert.doesNotMatch(text[at], /\p{M}/u, `pad ${pad}`);
+      checked++;
+    }
+    const quotes = excerpts.map((excerpt) => excerpt.text).filter((quote) => quote.length >= 20);
+    assert.equal(accepts(description, quotes, { products: ['Apache Struts'], versions: ['2.5.32'] }), true);
+  }
+  assert.ok(checked > 0);
+  // A quote that ends inside a Greek word after a capital sigma.
+  const greek = 'Η ενημέρωση αφορά το Apache Struts 2.5.32 και το ΣΥΣΤΗΜΑ ελέγχου πρόσβασης σήμερα.';
+  const cut = greek.slice(0, greek.indexOf('ΣΥΣ') + 3);
+  assert.equal(accepts(greek, [cut], { products: ['Apache Struts'] }), true);
 });
