@@ -914,3 +914,83 @@ test('a given-up record that this scan could not read in the listing is not aske
   assert.ok(!log.byId.includes('GHSA-aaaa-bbbb-0150'), JSON.stringify(log.byId));
   assert.ok(log.byId.includes('GHSA-aaaa-bbbb-0151'), JSON.stringify(log.byId));
 });
+
+test('a given-up record listed again is remembered once more and asked for once per run', async () => {
+  const store = new Store(':memory:');
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW - HOUR),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0160', 'GHSA-aaaa-bbbb-0161']),
+  });
+  // Updated again and still unreadable.
+  const { http, log } = github(() => [advisory('GHSA-aaaa-bbbb-0160', 'zeta', NOW - 10 * MINUTE, false)]);
+  const first = await poll(store, http, NOW + 30 * MINUTE);
+  assert.deepEqual(
+    remembered(first).map((entry) => entry[0]),
+    ['GHSA-aaaa-bbbb-0160'],
+  );
+  assert.deepEqual(JSON.parse(first.checkpoints['github:reviewed:skipped']), ['GHSA-aaaa-bbbb-0161']);
+  for (let run = 2; run <= 4; run++) {
+    log.byId.length = 0;
+    const result = await poll(store, http, NOW + run * 3 * HOUR);
+    assert.equal(new Set(log.byId).size, log.byId.length, `run ${run}: ${log.byId}`);
+    assert.ok(
+      remembered(result).some((entry) => entry[0] === 'GHSA-aaaa-bbbb-0160') ||
+        JSON.parse(result.checkpoints['github:reviewed:skipped']).includes('GHSA-aaaa-bbbb-0160'),
+    );
+  }
+  // An entry already in both lists (saved by an earlier version) is still asked for once.
+  const both = new Store(':memory:');
+  both.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:unreadable': JSON.stringify([['GHSA-aaaa-bbbb-0170', NOW - 2 * HOUR, 1]]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0170']),
+  });
+  const again = github(() => [advisory('GHSA-aaaa-bbbb-0170', 'zeta', NOW - DAY, false)]);
+  await poll(both, again.http, NOW + 30 * MINUTE);
+  assert.deepEqual(again.log.byId, ['GHSA-aaaa-bbbb-0170']);
+});
+
+test('with a token, at most two given-up records are asked for again per run', async () => {
+  const store = new Store(':memory:');
+  const ids = Array.from({ length: 6 }, (_, index) => `GHSA-aaaa-bbbb-018${index}`);
+  store.saveEvidence([], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    'github:reviewed:skipped': JSON.stringify(ids),
+  });
+  const { http, log } = github(() => ids.map((id) => advisory(id, 'zeta', NOW - DAY, false)));
+  process.env.FOURTEENTH_GITHUB_TOKEN = 'synthetic';
+  try {
+    await poll(store, http, NOW + 30 * MINUTE);
+  } finally {
+    delete process.env.FOURTEENTH_GITHUB_TOKEN;
+  }
+  assert.deepEqual(log.byId, ids.slice(0, 2));
+});
+
+test('beyond the cap of given-up records, one with a stored copy is kept although it is the oldest', async () => {
+  const store = new Store(':memory:');
+  const others = Array.from(
+    { length: 10_001 },
+    (_, index) => `GHSA-jjjj-${String(index).padStart(4, '0')}-jjjj`,
+  );
+  store.saveEvidence([storedCopy('GHSA-aaaa-bbbb-0190')], {
+    'github:reviewed': iso(NOW),
+    'github:malware': iso(NOW),
+    // Two remembered records take the whole budget, so no given-up record moves to the back.
+    'github:reviewed:unreadable': JSON.stringify([
+      ['GHSA-aaaa-bbbb-0191', NOW - 2 * HOUR, 1],
+      ['GHSA-aaaa-bbbb-0192', NOW - HOUR, 1],
+    ]),
+    'github:reviewed:skipped': JSON.stringify(['GHSA-aaaa-bbbb-0190', ...others]),
+  });
+  const { http, log } = github(() => []);
+  const result = await poll(store, http, NOW + 30 * MINUTE);
+  assert.ok(!log.byId.includes('GHSA-aaaa-bbbb-0190'));
+  const kept = JSON.parse(result.checkpoints['github:reviewed:skipped']);
+  assert.equal(kept[0], 'GHSA-aaaa-bbbb-0190');
+  assert.equal(kept.filter((id) => id.startsWith('GHSA-jjjj')).length, 10_000);
+  assert.ok(!kept.includes(others[0]), 'the oldest without a copy is dropped');
+});

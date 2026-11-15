@@ -730,3 +730,28 @@ test('a restart after the previous worker was last seen more than an hour ago st
   );
   assert.equal(catchingUpFrom(store, iso(NOW)), since);
 });
+
+test('a catch-up start that is not a time string starts the grace afresh', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  for (const since of [0, 946_684_800_000, null, ['2026-01-01']]) {
+    store.setMeta('worker', JSON.stringify({ status: 'running', catching_up_since: since }));
+    assert.equal(catchingUpFrom(store, iso(NOW)), iso(NOW), JSON.stringify(since));
+  }
+});
+
+test('a heartbeat more than five seconds ahead of the clock is not a live worker', (t) => {
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  const config = parseConfig({ version: 1 });
+  store.setMeta('last_scan', JSON.stringify({ at: iso(NOW - 60_000), degraded: false, errors: [] }));
+  const beat = (ahead) =>
+    store.setMeta(
+      'worker',
+      JSON.stringify({ status: 'running', started_at: iso(NOW - 3_600_000), heartbeat_at: iso(NOW + ahead) }),
+    );
+  beat(4_000);
+  assert.equal(checkHealth(store, config, NOW).ok, true);
+  beat(6_000);
+  assert.equal(checkHealth(store, config, NOW).ok, false);
+});

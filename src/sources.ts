@@ -809,13 +809,16 @@ async function github(
         nextPending.delete(k);
         skipped.set(k, before.id);
         passed++;
-      } else
+      } else {
+        // Listed again: it is remembered, so it no longer waits for a turn among those given up on.
+        skipped.delete(k);
         nextPending.set(k, {
           id: before.id,
           firstMet: before.firstMet,
           attempts,
           updated: Number.isFinite(updated) ? updated : before.updated,
         });
+      }
     }
     let rewind: number | undefined;
     const earliest = (entries: Remembered[]) =>
@@ -933,7 +936,7 @@ async function github(
     // record with a stored copy (its copy is never confirmed until it is read) and one to the next
     // record in turn, so neither kind can take every turn; with one, they simply take turns.
     const room = budget - asked.length;
-    const waiting = [...skipped].filter(([k]) => !unreadableNow.has(k));
+    const waiting = [...skipped].filter(([k]) => !unreadableNow.has(k) && !pending.has(k));
     const picks: [string, string][] = [];
     const copyFirst = room >= 2 ? waiting.find(([k]) => withCopy.has(k)) : undefined;
     if (copyFirst) picks.push(copyFirst);

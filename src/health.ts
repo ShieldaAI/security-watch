@@ -41,8 +41,8 @@ export function catchingUpFrom(store: Store, startedAt: string): string {
       heartbeat_at?: string;
     } | null;
     const scan = JSON.parse(store.getMeta('last_scan') ?? 'null') as { at?: string } | null;
-    const since = Date.parse(previous?.catching_up_since ?? '');
-    const scanned = Date.parse(scan?.at ?? '');
+    const since = time(previous?.catching_up_since);
+    const scanned = time(scan?.at);
     const seen = Math.max(
       ...[time(previous?.heartbeat_at), time(previous?.started_at)].filter(Number.isFinite),
     );

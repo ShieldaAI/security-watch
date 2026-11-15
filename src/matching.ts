@@ -212,7 +212,8 @@ function releaseTest(names: Iterable<string>, ecosystem: Ecosystem): (text: stri
           .join('|')})@v?\\d+\\.\\d+`,
       ),
     );
-  // Or, in exactly its own spelling, right next to the word "package", "library" or "module":
+  // Or, in exactly its own spelling, right next to the word "package" or "library" ("module" is
+  // left out: "the send module" too often names a part of a product, not a package):
   // "the ws library", "the npm package qs". "IP address" is not the package `ip`.
   for (let offset = 0; offset < short.length; offset += 400) {
     const alternatives = `(?:${short
