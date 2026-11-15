@@ -41,6 +41,8 @@ const MAX_ADVISORIES = 5_000;
 const MAX_FEED_ENTRIES = 500;
 const LATE_ENTRY_DAYS = 7;
 const HOUR = 3_600_000;
+/** How long a GitHub record that cannot be read holds the checkpoint before it is passed over. */
+const UNREADABLE_HOLD_HOURS = 24;
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue {
@@ -671,6 +673,8 @@ async function github(
   inventory: Inventory,
   stored: Evidence[],
   since: string | undefined,
+  /** When a record GitHub serves in a form that cannot be read was first met; set for the next run. */
+  unreadable: { since?: string; next?: string } = {},
 ): Promise<Evidence[]> {
   const { start, chainStart } = githubWindow(checkpoint, since, now);
   const url = new URL(GITHUB);
@@ -691,20 +695,40 @@ async function github(
   const seen = new Set<string>();
   const evidence = new Map<string, Evidence>();
   const invalid = new SourceItemFailures();
+  /** The update time of the oldest record that could not be read, when it gives one. */
+  let unreadableAt = Infinity;
+  // A record that cannot be read holds the checkpoint so that it is read again, but only for a day:
+  // after that it is reported and passed over, or one bad record would stop GitHub for good.
+  const firstMet = unreadable.since ? Date.parse(unreadable.since) : NaN;
+  const metAt = Number.isFinite(firstMet) && firstMet <= now ? firstMet : now;
+  const holding = now - metAt <= UNREADABLE_HOLD_HOURS * HOUR;
+  /** Where the next run starts: the given point, or the record that could not be read while held. */
+  const resumeAt = (point: number) => {
+    if (invalid.summary('GitHub') === undefined) {
+      unreadable.next = '';
+      return point;
+    }
+    unreadable.next = holding ? timestamp(metAt) : '';
+    return holding ? Math.min(point, (Number.isFinite(unreadableAt) ? unreadableAt : start) + HOUR) : point;
+  };
+  const unreadableNote = () =>
+    holding
+      ? 'It is read again on the next run, for up to a day after it was first met.'
+      : 'It could not be read for a day and was passed over.';
   try {
     for (let page = 0; next; page++) {
       if (page >= MAX_PAGES) {
         // Records arrive oldest update first, so everything up to the last one read is complete.
         // The next start is the checkpoint minus an hour: continue exactly from that record.
         const reached = Math.max(...[...evidence.values()].map((item) => Date.parse(item.modified_at)));
-        const message = invalid.message('GitHub');
+        const skipped = invalid.summary('GitHub');
         // Only a run of full pages of distinct records shows real progress through a backlog.
-        if (message || evidence.size < MAX_PAGES * 90 || !Number.isFinite(reached) || reached <= start)
+        if (evidence.size < MAX_PAGES * 90 || !Number.isFinite(reached) || reached <= start)
           throw new SourceError('GitHub pagination limit reached; collection is incomplete.');
         throw new PartialSourceError(
-          'GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.',
+          `GitHub returned more updated advisories than one run reads; the oldest were collected and the next run continues from there.${skipped ? ` ${skipped} ${unreadableNote()}` : ''}`,
           [...evidence.values()],
-          timestamp(Math.min(now, reached + HOUR)),
+          timestamp(resumeAt(Math.min(now, reached + HOUR))),
         );
       }
       if (seen.has(next)) throw new SourceError('GitHub returned repeated pagination.');
@@ -723,6 +747,13 @@ async function github(
       for (const item of items) {
         const parsed = invalid.read(() => githubRecord(item, type, now));
         if (parsed) retainNewest(evidence, parsed);
+        else {
+          const updated =
+            typeof item === 'object' && item !== null
+              ? Date.parse(String((item as Record<string, unknown>).updated_at))
+              : NaN;
+          if (Number.isFinite(updated) && updated <= now) unreadableAt = Math.min(unreadableAt, updated);
+        }
       }
       const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'link')?.[1];
       next = nextGithubLink(link);
@@ -747,7 +778,15 @@ async function github(
           item.packages.some((claim) => names.has(claim.name.toLowerCase()))
         )
           evidence.set(item.id, { ...item, fetched_at: timestamp(now) });
-    return invalid.finish('GitHub', [...evidence.values()]);
+    const skipped = invalid.summary('GitHub');
+    const resume = resumeAt(now);
+    if (skipped)
+      throw new PartialSourceError(
+        `${skipped} ${unreadableNote()}`,
+        [...evidence.values()],
+        timestamp(resume),
+      );
+    return [...evidence.values()];
   } catch (error) {
     throwSourceFailure(error, [...evidence.values()]);
   }
@@ -1227,6 +1266,10 @@ export async function collectSources(
 ): Promise<SourceResult> {
   const result: SourceResult = { evidence: [], errors: [], checkpoints: { ...checkpoints }, coverage: [] };
   const jobs: { source: string; run: () => Promise<Evidence[] | FeedResult> }[] = [];
+  const githubUnreadable: Record<'reviewed' | 'malware', { since?: string; next?: string }> = {
+    reviewed: {},
+    malware: {},
+  };
   const window = (source: string) =>
     newsWindow(
       source,
@@ -1242,7 +1285,8 @@ export async function collectSources(
   if (config.sources.osv)
     jobs.push({ source: 'osv', run: () => osv(inventory, previousEvidence, http, now) });
   if (config.sources.github)
-    for (const type of ['reviewed', 'malware'] as const)
+    for (const type of ['reviewed', 'malware'] as const) {
+      githubUnreadable[type].since = checkpoints[`github:${type}:unreadable_since`];
       jobs.push({
         source: `github:${type}`,
         run: () =>
@@ -1255,8 +1299,10 @@ export async function collectSources(
             inventory,
             previousEvidence,
             checkpoints[`github:${type}:since`],
+            githubUnreadable[type],
           ),
       });
+    }
   if (config.sources.kev) jobs.push({ source: 'kev', run: () => kev(http, now, previousEvidence) });
   for (const vendor of new Set(config.sources.vendor_feeds ?? [])) {
     const source = `vendor:${vendor}`;
@@ -1336,6 +1382,10 @@ export async function collectSources(
       result.checkpoints['cve_now:owed'] = cveNowState.nextOwed;
     if (job.source === 'cve_now' && cveNowState.nextLookups !== undefined)
       result.checkpoints['cve_now:lookups'] = cveNowState.nextLookups;
+    if (job.source === 'github:reviewed' || job.source === 'github:malware') {
+      const next = githubUnreadable[job.source === 'github:reviewed' ? 'reviewed' : 'malware'].next;
+      if (next !== undefined) result.checkpoints[`${job.source}:unreadable_since`] = next;
+    }
     if (job.source === 'cve_now' && cveNowState.nextRefusedSince !== undefined)
       result.checkpoints['cve_now:refused_since'] = String(cveNowState.nextRefusedSince ?? '');
     const evidence = (Array.isArray(collected) ? collected : collected.evidence).filter((item) => {

@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { createConnection, type Socket } from 'node:net';
 import type { Assessment, Config, HttpClient, Notification } from './types.js';
-import { cleanText, cut, singleLine } from './util.js';
+import { FILLERS, INVISIBLE, cleanText, cut, singleLine } from './util.js';
 import { decide } from './assessment.js';
 import { Store } from './store.js';
 import { NetworkError } from './http.js';
@@ -173,24 +173,16 @@ export const sendEmail: EmailSender = async (message) => {
 
 function safeText(input: string, length: number, mentions = true): string {
   // The length is applied last: what is removed or reduced below must not count against it.
-  // Invisible characters go before any limit is applied, so they cannot push the visible end of a
-  // value past it.
+  // Fillers become spaces and characters that show as nothing are removed before any limit is
+  // applied, so that they cannot push the visible end of a value past it. Some fillers count as
+  // default-ignorable, so they are turned into spaces first; the removal comes before spaces are
+  // counted, so that spaces they separated are one run.
   const cleaned = cleanText(
-    input
-      .replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, ' ')
-      .replace(/[\r\p{Default_Ignorable_Code_Point}\p{Cf}\ufff9-\ufffc]/gu, ''),
+    input.replace(FILLERS, ' ').replace(/[\r]/g, '').replace(INVISIBLE, ''),
     Math.max(length, 4000),
   )
     // A lone half of a surrogate pair is not text; services may refuse a message that has one.
     .replace(/\p{Cs}/gu, '\ufffd')
-    // Fillers that show as a blank (braille blank, Hangul fillers) are spaces to the reader. Some
-    // of them count as default-ignorable, so they are turned into spaces first.
-    .replace(/[\u115f\u1160\u2800\u3164\uffa0]/g, ' ')
-    // Characters that show as nothing (Unicode's default-ignorable code points: zero-width and
-    // joining marks, direction marks, variation selectors, tag characters, the soft hyphen).
-    // Removed before spaces are counted, so that spaces they separated are one run.
-    // Format characters and the object and annotation marks show as nothing too.
-    .replace(/[\r\p{Default_Ignorable_Code_Point}\p{Cf}\ufff9-\ufffc]/gu, '')
     // A run of blanks moves what follows as far as a line break would.
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim();

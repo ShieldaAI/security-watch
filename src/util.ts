@@ -18,13 +18,13 @@ export function cleanText(value: string, max = 4000): string {
  * line and paragraph separators. Mail clients and chat applications render them as line breaks.
  */
 export const LINE_BREAKING = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+/** Fillers that show as a blank (braille blank, Hangul fillers): spaces to the reader. */
+export const FILLERS = /[\u115f\u1160\u2800\u3164\uffa0]/g;
 /**
  * Characters that show as nothing: Unicode's default-ignorable code points (zero-width and joining
  * marks, direction marks, variation selectors, tag characters, the soft hyphen), format characters,
  * and the object and annotation marks.
  */
-/** Fillers that show as a blank (braille blank, Hangul fillers): spaces to the reader. */
-export const FILLERS = /[\u115f\u1160\u2800\u3164\uffa0]/g;
 export const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}\ufff9-\ufffc]/gu;
 /** The first `max` UTF-16 units of a text, without leaving half of a surrogate pair at the end. */
 export function cut(value: string, max: number): string {

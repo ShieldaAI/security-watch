@@ -455,7 +455,8 @@ test('the remembered list of missing identifiers survives a clock that moved bac
   const gone = () => ({ status: 404, headers: {}, body: '' });
   const first = {};
   const one = await collectSources(inv, sources, checkpoint, service(first, { detail: gone }), NOW, stories);
-  assert.equal(first.details.length, 5000, 'one poll asks for at most 5,000 records');
+  // Everything but new records from the listing shares 4,000 requests, leaving the listing its room.
+  assert.equal(first.details.length, 4000, 'one poll asks for at most 4,000 cited records');
   assert.ok(JSON.parse(one.checkpoints['cve_now:missing']).length <= 5000);
   // Asked "in the future": the clock was moved back. The entry is not trusted, and is asked for again.
   const later = { ...checkpoint, 'cve_now:missing': JSON.stringify([[ids[0], NOW + 5 * DAY]]) };
