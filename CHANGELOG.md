@@ -8,6 +8,7 @@ Package metadata and documentation only; no change to behaviour or to the public
 
 - The npm description now says what the tool does: "Self-hosted monitor that checks new security advisories and news against the libraries and products you run, and alerts you on Slack or by email." The keywords no longer suggest an npm-only, OSV-based tool (`npm`, `osv` and `typescript` replaced by `security`, `sbom`, `email-alerts` and `nodejs`).
 - The 1.0.0 notes below record its publication.
+- `npm run release -- --dry-run` was rehearsed on 2026-11-15 on commit 284ab8b (tag `latest`, 110 files, 577 kB packed, nothing uploaded); the commit that records it changes only this changelog.
 
 ## 1.0.0
 
