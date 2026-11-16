@@ -4,7 +4,7 @@ Versions follow [semantic versioning](https://semver.org/). What counts as a com
 
 ## 1.1.0
 
-Start from your code instead of a hand-written inventory, and keep the inventory current from CI. Existing configurations and inventories work unchanged. To be published under the default `latest` tag; tag the commit `v1.1.0` so that `uses: ShieldaAI/security-watch@v1.1.0` resolves.
+Start from your code instead of a hand-written inventory, and keep the inventory current from CI. Existing configurations and inventories work unchanged. To be published under the default `latest` tag. The GitHub Action is used as `uses: ShieldaAI/security-watch@v1.1.0`.
 
 ### Added
 
