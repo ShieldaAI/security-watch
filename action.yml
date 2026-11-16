@@ -1,0 +1,97 @@
+name: Shielda Security Watch SBOM
+description: Make a CycloneDX SBOM from your lockfiles (12 ecosystems) for Shielda Security Watch. Reads files only; installs and runs nothing from your project.
+author: Shielda
+branding:
+  icon: shield
+  color: blue
+inputs:
+  project:
+    description: Folder to read, or one dependency file. Defaults to the repository root.
+    default: .
+  output:
+    description: Where to write the SBOM.
+    default: security-watch.cdx.json
+  system-id:
+    description: Stable system ID. In a Security Watch SBOM folder, one ID is one monitored system. Defaults to a name derived from the project.
+    default: ''
+  name:
+    description: System name shown in alerts. Defaults to the name in package.json or pyproject.toml, or the folder name.
+    default: ''
+  owner:
+    description: Who to ask, shown in alerts (for example "Dana, platform team").
+    default: ''
+  environment:
+    description: For example production or staging.
+    default: ''
+  note:
+    description: Where the system runs, shown in alerts. Defaults to "repository OWNER/REPO".
+    default: ''
+  exposure:
+    description: internet, internal or unknown.
+    default: ''
+  criticality:
+    description: low, medium, high or critical.
+    default: ''
+  production:
+    description: Leave out development-only dependencies where the lockfile marks them.
+    default: 'false'
+  sbom-file:
+    description: Use an SBOM made by another tool (Trivy, Syft, cdxgen, GitHub) instead of generating one. The action checks that Security Watch can read it and uploads it.
+    default: ''
+  upload-artifact:
+    description: Upload the SBOM as a workflow artifact.
+    default: 'true'
+  artifact-name:
+    description: Name of the uploaded artifact.
+    default: security-watch-sbom
+  retention-days:
+    description: How long GitHub keeps the artifact.
+    default: '30'
+  security-watch-version:
+    description: Version of @shieldaai/security-watch to run.
+    default: 1.1.0
+outputs:
+  sbom-file:
+    description: Path of the SBOM.
+    value: ${{ steps.sbom.outputs.path }}
+  packages:
+    description: Number of packages in the SBOM.
+    value: ${{ steps.sbom.outputs.packages }}
+runs:
+  using: composite
+  steps:
+    - id: node
+      shell: bash
+      run: |
+        if node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>24||(a===24&&b>=10)?0:1)' 2>/dev/null; then
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+        fi
+    - if: steps.node.outputs.ready != 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+    - id: sbom
+      shell: bash
+      env:
+        SW_PACKAGE: '@shieldaai/security-watch@${{ inputs.security-watch-version }}'
+        SW_PROJECT: ${{ inputs.project }}
+        SW_OUTPUT: ${{ inputs.output }}
+        SW_SYSTEM_ID: ${{ inputs.system-id }}
+        SW_NAME: ${{ inputs.name }}
+        SW_OWNER: ${{ inputs.owner }}
+        SW_ENVIRONMENT: ${{ inputs.environment }}
+        SW_NOTE: ${{ inputs.note }}
+        SW_EXPOSURE: ${{ inputs.exposure }}
+        SW_CRITICALITY: ${{ inputs.criticality }}
+        SW_PRODUCTION: ${{ inputs.production }}
+        SW_SBOM_FILE: ${{ inputs.sbom-file }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/action-sbom.sh"
+    - if: inputs.upload-artifact == 'true'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.sbom.outputs.path }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}

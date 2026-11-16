@@ -1,6 +1,6 @@
 # Shielda Security Watch
 
-Security Watch tells you, within minutes, when a newly reported security problem concerns software you run, and tells you **where to look**. You give it a list of your systems and the libraries they use. It keeps watching public security advisories and security news, compares them with your list, and sends a message to Slack or email when something needs attention.
+Security Watch tells you, within minutes, when a newly reported security problem concerns software you run, and tells you **where to look**. Point it at your code and it reads the lockfiles you already have (or give it a list of your systems by hand). It keeps watching public security advisories and security news, compares them with your list, and sends a message to Slack or email when something needs attention.
 
 It runs on your own server or laptop. Your list of systems stays with you.
 
@@ -12,12 +12,12 @@ There is far more security news than anyone can read, and most of it has nothing
 
 - **Problems are used by attackers within hours.** A check that runs once a day, or once a week in a build pipeline, leaves most of that day uncovered. In the starter setup Security Watch checks every 30 minutes, and it catches up by itself after downtime.
 - **The CVE entry often arrives late.** A vulnerability is usually discussed in vendor announcements and security news before a complete CVE record with affected versions exists. If you wait for the CVE, you start late. Security Watch reads the news as well as the advisory databases, and raises a "possibly affected, please check" finding as soon as a story names something on your list.
-- **A list that was correct last month is not enough.** A library you already use can become vulnerable tomorrow without any change on your side. The check has to run continuously against the versions you run today, so keep your list current; in the starter setup Security Watch warns when the list has not been updated for a week.
+- **A list that was correct last month is not enough.** A library you already use can become vulnerable tomorrow without any change on your side. The check has to run continuously against the versions you run today, so keep your list current: let your CI pipeline send a fresh SBOM on every merge. In the starter setup Security Watch warns when the list has not been updated for a week.
 - **Knowing the library is not knowing the place.** "lodash is vulnerable" does not tell anyone which service, repository or team has to act. Every system and library on your list can carry a short note, and the alert repeats that note.
 
 ## What an alert looks like
 
-This is the message produced by the example list in step 3 below and a fictional advisory:
+This is the message produced by the [hand-written example list](#describe-systems-by-hand) below and a fictional advisory:
 
 ```text
 [CRITICAL] express request smuggling (fictional test record)
@@ -37,7 +37,7 @@ https://example.com/advisory
 
 The `Where to look` and `Affected item` lines come from your own list: the system's name, owner and note, and the note you wrote beside the library. Whoever receives the alert can go straight to the right place and confirm it. The `Finding` value is what you pass to commands such as `security-watch explain`.
 
-## Get started in five steps
+## Get started in four steps
 
 You need a computer that stays on (a small server is enough) and [Node.js](https://nodejs.org/) version 24.10 or newer. In a terminal:
 
@@ -47,42 +47,27 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
    npm install --global @shieldaai/security-watch
    ```
 
-2. **Create a starter folder.** This writes a configuration file, an example list of systems and a template for secrets. Nothing is sent anywhere yet.
+2. **Point it at your code.** Give it the folder of a project you run. It reads the lockfiles and manifests already there (npm, Python, Go, Rust, PHP, Ruby, Java, .NET, Dart, Elixir, Swift and Haskell), writes them as an SBOM and creates a starter configuration. Nothing is installed, run or sent anywhere.
 
    ```sh
-   security-watch init --directory ./watch --yes --notifications slack
+   security-watch init --directory ./watch --yes --project ./my-app --notifications slack
    ```
 
-3. **Describe what you run.** Open `watch/systems.yaml` in a text editor and replace the example with your own systems, libraries and notes:
-
-   ```yaml
-   systems:
-     - id: web-shop
-       name: Web shop
-       owner: Dana, platform team
-       note: runs on cluster eu-1, namespace shop
-       updated_at: '2026-11-13T09:00:00Z' # when you last checked this list; older than 7 days counts as stale
-       libraries:
-         - 'npm:express@4.21.2   # checkout API, repository acme/checkout, file package.json'
-         - 'python:requests==2.32.3   # billing worker, services/billing/requirements.txt'
-       products:
-         - name: PostgreSQL
-           version: '16.4'
-           note: managed database "shop-prod", owned by the data team
+   ```text
+   my-app: 412 packages (PyPI, npm) from 3 files: package-lock.json, services/billing/requirements.txt, services/billing/pyproject.toml.
+   Wrote /home/dana/watch/sboms/my-app.cdx.json.
    ```
 
-   Everything after `#` on a library line is the note for that library. Keep the quotes around each library line: without them the note is ignored. Notes are optional, but they are what makes an alert easy to act on.
+   Repeat `--project` for each project. Every SBOM in `watch/sboms` is one monitored system, and an alert names the file a package was found in. No code at hand? [Describe your systems by hand](#describe-systems-by-hand) instead.
 
-   If your list contains libraries that are not npm packages (Python, PHP, Java, Go and so on), also open `watch/security-watch.yaml` and change `osv: false` to `osv: true`. That turns on the advisory database that covers those ecosystems; it receives the library names and versions you list.
-
-4. **Add the Slack address.** Copy the secrets template, keep it private, then open `watch/.env` and paste your Slack incoming-webhook address after `SLACK_WEBHOOK_URL=`:
+3. **Add the Slack address.** Copy the secrets template, keep it private, then open `watch/.env` and paste your Slack incoming-webhook address after `SLACK_WEBHOOK_URL=`:
 
    ```sh
    cp ./watch/.env.example ./watch/.env
    chmod 600 ./watch/.env
    ```
 
-5. **Check, then start.** The first command verifies your files, the second shows what a scan finds without sending anything, the third keeps watching. The first scan reads the last day of advisories at roughly one request a second, so expect it to take 15 to 20 minutes; later scans usually take a minute or two. You can skip the second command and go straight to the third.
+4. **Check, then start.** The first command verifies your files, the second shows what a scan finds without sending anything, the third keeps watching. The first scan reads the last day of advisories at roughly one request a second, so expect it to take 15 to 20 minutes; later scans usually take a minute or two. You can skip the second command and go straight to the third.
 
    ```sh
    security-watch doctor --config ./watch/security-watch.yaml --credentials-file ./watch/.env
@@ -90,22 +75,64 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
    security-watch start --config ./watch/security-watch.yaml --credentials-file ./watch/.env
    ```
 
+**Keep it current from CI.** Dependencies change with every merge, and an SBOM older than a week is reported as stale. Let your pipeline make a fresh one and copy it into `watch/sboms`:
+
+```yaml
+# GitHub Actions: writes and uploads security-watch.cdx.json
+- uses: ShieldaAI/security-watch@v1.1.0
+  with:
+    system-id: my-app
+    owner: Dana, platform team
+```
+
+```sh
+# Any other pipeline with Node.js 24
+npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id my-app --output security-watch.cdx.json
+```
+
+[Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, ways to get the SBOM to the monitor (object storage, Git, SSH), and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
+
+### Describe systems by hand
+
+For products, databases and SaaS, or to add owners and notes yourself, write `watch/systems.yaml` (create the folder with `security-watch init --directory ./watch --yes --notifications slack`, which writes an example):
+
+```yaml
+sbom_directory: ./sboms # optional: SBOMs from step 2 or your pipelines
+systems:
+  - id: web-shop
+    name: Web shop
+    owner: Dana, platform team
+    note: runs on cluster eu-1, namespace shop
+    updated_at: '2026-11-13T09:00:00Z' # when you last checked this list; older than 7 days counts as stale
+    libraries:
+      - 'npm:express@4.21.2   # checkout API, repository acme/checkout, file package.json'
+      - 'python:requests==2.32.3   # billing worker, services/billing/requirements.txt'
+    products:
+      - name: PostgreSQL
+        version: '16.4'
+        note: managed database "shop-prod", owned by the data team
+```
+
+Everything after `#` on a library line is the note for that library. Keep the quotes around each library line: without them the note is ignored. Notes are optional, but they are what makes an alert easy to act on.
+
+If your list contains libraries that are not npm packages (Python, PHP, Java, Go and so on), also open `watch/security-watch.yaml` and change `osv: false` to `osv: true`. That turns on the advisory database that covers those ecosystems; it receives the library names and versions you list. `init --project` does this for you when it finds such packages.
+
 **What gets sent.** With the starter settings you get an immediate message for a critical finding in a library, anything reported as actively exploited, a malicious package, and a possibly critical finding that still needs checking (a critical product or news finding is one of these until it is confirmed). High findings for a product or in the news usually arrive in the daily digest: a product match cannot be confirmed from version ranges, and news is sent at once only when a configured model confirms that it affects you. Less urgent findings that need a look arrive together in one daily digest. Everything else is recorded and shown by `security-watch findings`. The `policy` section of the configuration file changes these thresholds.
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.0.1.** This is `@shieldaai/security-watch` 1.0.1, a patch release of the first stable version (1.0.0), published under the default `latest` tag. It has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed since the alpha.
+**Version 1.1.0.** This is `@shieldaai/security-watch` 1.1.0, a minor release of the first stable version (1.0.0) that adds SBOM generation from dependency files, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
 ## Features
 
-- YAML/JSON inventories, library lists across 12 ecosystems, and npm package-lock v2/v3 imports. Names alone are accepted; exact installed versions improve applicability checks.
+- Inventories from your code: `security-watch sbom` and `init --project` read the lockfiles and manifests of 12 ecosystems and write a CycloneDX SBOM; an SBOM folder turns every SBOM your pipelines deliver into a monitored system. A [GitHub Action](docs/sbom.md#github-actions) and a one-line command for other CI are included. Hand-written YAML/JSON inventories and library lists still work. Names alone are accepted; exact installed versions improve applicability checks.
 - cve.now CVE updates and npm stack checks, plus The Hacker News security articles. Optional sources include OSV, GitHub, CISA KEV, official Node.js/Python/PHP feeds and other RSS/Atom feeds.
 - Structured library checks without AI, with optional AI analysis to distinguish new vulnerabilities, updates to known vulnerabilities and general system news. Each finding records source severity, applicability and contextual priority separately.
 - Separate alert thresholds for libraries, products and news, plus review digests and configurable overrides for potentially critical findings, known exploitation and malware.
 - Slack incoming webhooks and SMTP email, backed by a SQLite delivery queue. An email is retried automatically only when it provably never left. A Slack message is retried when Slack answers HTTP 429 or 5xx or the connection fails before the request is sent; in rare cases Slack may have posted a message it answered 5xx for. Any other uncertain delivery is recorded for manual review and retry.
-- Per-source coverage receipts, bounded CycloneDX import with package URLs and dependency relationships, and inventory drift reports. Optional artifact kinds cover MCP servers/clients, plugins, skills and models; signature, attestation and remediation lifecycle fields record operator-supplied evidence. They do not perform verification or close findings. See [deployment evidence](docs/configuration.md#agent-deployment-evidence-sboms-and-drift).
+- Per-source coverage receipts, bounded CycloneDX and SPDX import (output of Trivy, Syft, cdxgen and GitHub's dependency graph) with package URLs and dependency relationships, and inventory drift reports. Optional artifact kinds cover MCP servers/clients, plugins, skills and models; signature, attestation and remediation lifecycle fields record operator-supplied evidence. They do not perform verification or close findings. See [deployment evidence](docs/configuration.md#agent-deployment-evidence-sboms-and-drift).
 - Finding history, revision-bound AI dismissal review, acknowledgement, suppression with an expiry, source checkpoints and model budgets. Optional external heartbeats, bounded retention and verified backups support ongoing operation.
 
 | Inventory item                         | Coverage                                                                                                                                    |
@@ -114,7 +141,7 @@ Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for to
 | PyPI package with a final release      | Match the documented PEP 440 final-release subset; other forms remain unknown                                                               |
 | Library in another supported ecosystem | Exact positive OSV query or explicitly listed affected version; unsupported version ranges remain unknown                                   |
 | Library without an installed version   | Discover advisory candidates by package identity; applicability remains unknown                                                             |
-| npm package-lock v2/v3                 | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts                              |
+| Lockfiles and SBOMs                    | Import resolved transitive, development and optional dependency metadata; no installation or lifecycle scripts                              |
 | Product, OS, database or SaaS name     | Whole-name/keyword candidates plus AI news/impact assessment; **no general product-version, vendor-backport or SaaS configuration adapter** |
 | Unknown or stale version               | Review required; never infer safety from missing evidence                                                                                   |
 
@@ -134,10 +161,10 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.0.1.tgz
+npm install --global ./shieldaai-security-watch-1.1.0.tgz
 ```
 
-Choose one setup command below. For a fictional example with AI disabled:
+Choose one setup command below. To start from your own code, use `init --project` as in [step 2](#get-started-in-four-steps). For a fictional example with AI disabled:
 
 ```sh
 security-watch init --directory ./watch --yes
@@ -213,6 +240,8 @@ To measure when an analyst acknowledged or triaged those incidents, use `pilot-r
 
 ## Library inventories
 
+The quickest inventory is the one generated from your lockfiles with `security-watch sbom` or `init --project` ([guide](docs/sbom.md)). This section covers library lists written by hand.
+
 Runtime requirement: Node **24.10.0 or newer**. PyPI final-release range evaluation uses a conservative PEP 440 subset; unsupported forms remain unknown (see [configuration](docs/configuration.md#python-version-range-coverage)).
 
 The supported ecosystems are npm, PyPI, Packagist, Go, Maven, crates.io, RubyGems, NuGet, Hex, Pub, Hackage and SwiftURL. Common language names such as `python`, `php` and `rust` are accepted as aliases. Run `security-watch ecosystems` for the canonical names.
@@ -278,7 +307,7 @@ docker run --rm --name security-watch \
   shielda-security-watch start --config /config/security-watch.yaml
 ```
 
-Before running, set `inventory: /config/systems.yaml` and `database: /data/watch.db` in the container's configuration. Create `watch/.env` privately with only the credentials you use; it is not loaded automatically by the npm CLI. Keep configuration, inventory and `.env` readable only by your user, for example with `chmod 600` on those files. The short initialization command assigns the data volume to your UID/GID; the application itself then runs as that user. Your Docker VM must be able to access the configuration/inventory bind mounts. Add a read-only mount for any imported lockfile under `/config` and use the matching path in the inventory.
+Before running, set `inventory: /config/systems.yaml` and `database: /data/watch.db` in the container's configuration. Create `watch/.env` privately with only the credentials you use; it is not loaded automatically by the npm CLI. Keep configuration, inventory and `.env` readable only by your user, for example with `chmod 600` on those files. The short initialization command assigns the data volume to your UID/GID; the application itself then runs as that user. Your Docker VM must be able to access the configuration/inventory bind mounts. Add a read-only mount under `/config` for any imported lockfile or SBOM folder (for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`) and use the matching path in the inventory.
 
 SQLite stays on a native Docker volume rather than a desktop VM's shared host filesystem. This avoids depending on host-sharing behavior for database locking and write-ahead logging. Retain `security-watch-data` when recreating the container. The application needs outbound network access and no inbound port.
 
@@ -292,7 +321,7 @@ chmod 600 security-watch.yaml systems.yaml .env
 export SECURITY_WATCH_UID=$(id -u) SECURITY_WATCH_GID=$(id -g)
 ```
 
-Edit the copied inventory, notification routes and credentials, and apply the same `/config/systems.yaml` and `/data/watch.db` settings before running `docker compose up --build -d`. Inspect `docker compose logs --follow`. Compose requires the host UID/GID variables and automatically runs a short volume-ownership initializer before the application starts. Its `watch-data` named volume keeps SQLite on Docker's native filesystem, while the private configuration/inventory remain read-only host mounts. You may persist the UID/GID values in the private `.env` file for later Compose invocations. Add an explicit read-only mount if the inventory imports a lockfile. Retain the named volume when recreating containers; `docker compose down --volumes` removes it.
+Edit the copied inventory, notification routes and credentials, and apply the same `/config/systems.yaml` and `/data/watch.db` settings before running `docker compose up --build -d`. Inspect `docker compose logs --follow`. Compose requires the host UID/GID variables and automatically runs a short volume-ownership initializer before the application starts. Its `watch-data` named volume keeps SQLite on Docker's native filesystem, while the private configuration/inventory remain read-only host mounts. You may persist the UID/GID values in the private `.env` file for later Compose invocations. Add an explicit read-only mount if the inventory imports a lockfile or reads an SBOM folder (`- ./sboms:/config/sboms:ro`). Retain the named volume when recreating containers; `docker compose down --volumes` removes it.
 
 ## How decisions work
 
@@ -321,6 +350,8 @@ Commands that operate on a configured monitor accept `--config PATH`; the defaul
 | `providers`                                                                                       | List supported provider profiles without configuration, credentials or network access                                     |
 | `templates`                                                                                       | List common system IDs available to `init --systems`                                                                      |
 | `ecosystems`                                                                                      | List supported library ecosystems                                                                                         |
+| `sbom [--project PATH] [--output FILE]`                                                           | Read a project's lockfiles and manifests and write a CycloneDX SBOM; no network requests ([guide](docs/sbom.md))          |
+| `import-sbom --input PATH`                                                                        | Show what Security Watch reads from a CycloneDX or SPDX SBOM; exits 2 when some packages cannot be watched                |
 | `normalize-libraries --input PATH`                                                                | Parse a library list without network requests; optional `--ecosystem` sets the group and `--output` saves a new JSON file |
 | `scan`                                                                                            | Run once, save evidence/findings and queue notifications; does not deliver by default                                     |
 | `scan --dry-run`                                                                                  | Use in-memory state, disable model calls and send no notifications; source requests still occur                           |
@@ -384,11 +415,11 @@ The corpus contains source-derived synthetic scenarios with fictional inventorie
 
 ## Boundaries and privacy
 
-cve.now stack queries disclose deduplicated npm package names and versions; lockfiles and deployment metadata are not uploaded. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives, under the default `minimal` disclosure profile, the matched package and product names and versions plus selected evidence; the `deployment-context` profile adds environment, exposure, criticality and matching keywords (see [SECURITY.md](SECURITY.md)). Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
+cve.now stack queries disclose deduplicated npm package names and versions; lockfiles, SBOMs and deployment metadata are not uploaded. `security-watch sbom` makes no network requests. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives, under the default `minimal` disclosure profile, the matched package and product names and versions plus selected evidence; the `deployment-context` profile adds environment, exposure, criticality and matching keywords (see [SECURITY.md](SECURITY.md)). Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
 
 Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no automatic application telemetry. An explicitly configured heartbeat service receives success pings and normal request metadata. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
 
-This release has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, general SBOM import, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported. OSV and GitHub also support [CVSS v4 base-vector scoring](docs/cvss-v4-support.md), with explicit base projection and unsupported-vector diagnostics. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
+This release has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, VEX import, operating-system package matching, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported. OSV and GitHub also support [CVSS v4 base-vector scoring](docs/cvss-v4-support.md), with explicit base projection and unsupported-vector diagnostics. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
 
 Current evidence and findings are loaded into memory during each scan. Retention is disabled until configured, and protected unresolved records may continue growing even after cleanup is enabled. This release targets small installations. Plan storage and review retention dry runs before increasing scale.
 

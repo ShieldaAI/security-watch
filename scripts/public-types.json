@@ -16,6 +16,7 @@
   "DeclaredRemediation",
   "DeclaredVerification",
   "DeliveryOptions",
+  "DependencyFile",
   "DependencyLink",
   "DependencyRelationship",
   "DeploymentObservation",
@@ -26,6 +27,7 @@
   "Evidence",
   "ExternalHeartbeat",
   "FindingLocation",
+  "GeneratedSbom",
   "HealthReport",
   "HttpClient",
   "HttpOptions",
@@ -60,6 +62,7 @@
   "RetentionPolicy",
   "Rule",
   "SbomImport",
+  "SbomOptions",
   "Severity",
   "SourceResult",
   "System"

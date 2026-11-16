@@ -138,6 +138,8 @@ Replace the example names and timestamp with verified deployment information. `u
 | Product `name`, `version`, `keywords` | Product context and matching terms; not a supported vendor version/backport decision                   |
 | System `keywords`                     | Explicit terms for news matching                                                                       |
 
+An inventory may also set `sbom_directory: ./sboms` (relative to the inventory file) above `systems`. Every `.json` SBOM in that folder becomes one more system, read again at every scan; `systems` may then be empty. The SBOM's creation time is that system's `updated_at`. See [the SBOM folder](sbom.md#the-sbom-folder) and [Watch a project from its dependency files](sbom.md).
+
 ### Notes: telling readers where to look
 
 A finding names a system and a library. The person who receives the alert usually needs one more fact: where that library is used and who can check it. Put that in a `note`:
@@ -575,7 +577,11 @@ systems:
       LANGFLOW_WEBHOOK_AUTH_ENABLE: true
 ```
 
-`sbom` imports a local CycloneDX JSON 1.4, 1.5 or 1.6 file. The importer is bounded to
+`sbom` imports a local CycloneDX JSON 1.4, 1.5 or 1.6 file, or an SPDX JSON 2.2 or 2.3 file (including
+GitHub's `{"sbom": ...}` API response). To have every SBOM in a folder become a system of its own, set
+`sbom_directory` at the top of the inventory instead; see [the SBOM folder](sbom.md#the-sbom-folder).
+`security-watch sbom` writes such a file from a project's lockfiles ([guide](sbom.md)). A component's
+CycloneDX `evidence.occurrences` locations become its note (`found in package-lock.json`). The importer is bounded to
 20 MiB, 20,000 components and 32 nesting levels. Supported package URLs determine package
 identity and exact version; conflicting versions, duplicate references and invalid SHA-256
 hashes fail import. The same package listed twice without a reference of its own (nested under
@@ -589,7 +595,10 @@ relationships from an unknown source are retained with a warning. A declared Cyc
 root retains its outgoing edges without being treated as a missing package. Duplicate or malformed
 references fail import. Dependency edges are declarations, not verified reachability or
 transitive affectedness. Explicit `library`, `application`, `container` and machine-learning-model
-component types populate artifact kind; names do not establish MCP/plugin trust.
+component types populate artifact kind; names do not establish MCP/plugin trust. In SPDX, a package
+the document describes is the system, not a dependency; `DEPENDS_ON` and `DEPENDENCY_OF`
+relationships become dependency edges, and a version range in `versionInfo` (GitHub writes manifest
+ranges there) imports the package by name only, with a warning.
 References, scripts, vulnerabilities and remote artifacts in the SBOM are never fetched or
 executed. Unsupported ecosystems and missing package URLs are reported as incomplete
 inventory, never silently treated as safe. SBOM timestamps do not establish deployment freshness.
@@ -604,7 +613,7 @@ security-watch inventory-drift --config ./security-watch.yaml
 
 The import command creates a new private report file (never overwrites); warnings give exit
 code 2. `loadInventory` imports via `sbom` and scans emit monitoring-health findings for import
-warnings. Exported APIs include `importCycloneDx`, `compareInventories` and `refreshCoverage`.
+warnings. Exported APIs include `importCycloneDx`, `importSbom`, `generateSbom`, `compareInventories` and `refreshCoverage`.
 
 Each completed scan compares the inventory with the previous completed scan. Drift reports
 additions, removals and changes in identity, version, digest, origin, provenance, environment,

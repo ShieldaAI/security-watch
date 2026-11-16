@@ -28,6 +28,8 @@ try {
     'dist/index.js',
     'dist/index.d.ts',
     'dist/sbom.js',
+    'dist/manifests.js',
+    'docs/sbom.md',
     'dist/coverage.js',
     'dist/inventory-evidence.js',
     'dist/python-version.js',
@@ -101,6 +103,33 @@ try {
     imported.warnings.length
   )
     throw new Error('Packed SBOM import failed');
+  // The packed CLI makes an SBOM from a project's lockfiles, and init builds a monitor from it.
+  const project = join(consumer, 'project');
+  mkdirSync(join(project, 'api'), { recursive: true });
+  writeFileSync(join(project, 'requirements.txt'), 'requests==2.31.0\n');
+  writeFileSync(
+    join(project, 'api', 'go.mod'),
+    'module example.com/api\n\nrequire github.com/gin-gonic/gin v1.9.1\n',
+  );
+  const projectSbom = JSON.parse(run([cli, 'sbom', '--project', project], consumer));
+  if (
+    projectSbom.bomFormat !== 'CycloneDX' ||
+    projectSbom.components.map((component) => component.purl).join(' ') !==
+      'pkg:golang/github.com/gin-gonic/gin@v1.9.1 pkg:pypi/requests@2.31.0'
+  )
+    throw new Error('Packed SBOM generation failed');
+  const fromProject = join(consumer, 'from-project');
+  run([cli, 'init', '--yes', '--directory', fromProject, '--project', project], consumer);
+  const projectDoctor = JSON.parse(
+    run([cli, 'doctor', '--config', join(fromProject, 'security-watch.yaml')], consumer),
+  );
+  if (
+    !projectDoctor.ok ||
+    projectDoctor.systems !== 1 ||
+    projectDoctor.components !== 2 ||
+    !projectDoctor.sources.osv
+  )
+    throw new Error('Packed init --project failed');
   const configured = join(consumer, 'configured');
   run(
     [
@@ -152,6 +181,11 @@ try {
   writeFileSync(
     join(consumer, 'consumer.mts'),
     `import { ModelAnalyzer, safeHttp, deliverPending, attachLocation, type ModelState, type DeliveryOptions, type FindingLocation } from '@shieldaai/security-watch';
+import { generateSbom, importSbom, DEPENDENCY_FILES, type GeneratedSbom, type SbomOptions, type DependencyFile } from '@shieldaai/security-watch';
+const sbomOptions: SbomOptions = { project: './project', production: true, exposure: 'internal' };
+const generatedSbom: GeneratedSbom = generateSbom(sbomOptions);
+const sbomFiles: DependencyFile[] = generatedSbom.files;
+if (generatedSbom.packages !== 2 || sbomFiles.length !== 2 || !DEPENDENCY_FILES.npm.includes('package-lock.json') || typeof importSbom !== 'function') throw new Error('Unexpected SBOM exports');
 import { assess, decide, collectSources, parseConfig, Store, PROVIDERS, providerDefinition, parseLibraryList, importCycloneDx, compareInventories, refreshCoverage, runRehearsal, readRehearsal, readPilotReport, readPilotBackupReport, createPilotCasePacket, scorePilotCases, scorePilotRecall, type PilotIncidentReference, type PilotRecallScore, type PilotCasePacket, type PilotFeedback, type PilotScore, type PilotReport, type RehearsalReport, type CoverageReceipt, type Ecosystem, type Assessment, type AiReview, type ModelProvider, type Inventory } from '@shieldaai/security-watch';
 const recallScorer: (path: string, window: { from: string, until: string }, reference: PilotIncidentReference) => Promise<PilotRecallScore> = scorePilotRecall;
 import { createPilotResponseTemplate, scorePilotResponses, type PilotResponseRegister, type PilotResponseScore } from '@shieldaai/security-watch';

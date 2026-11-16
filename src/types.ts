@@ -105,7 +105,10 @@ export interface System extends InventoryEvidence {
 export interface Inventory {
   systems: System[];
   import_warnings?: string[];
-  /** Entries that are accepted as written but may not be what was meant. They do not degrade a scan. */
+  /**
+   * Things to read once that do not degrade a scan: entries accepted as written that may not be what
+   * was meant, and operating-system packages in an SBOM folder that are not matched.
+   */
   name_notices?: string[];
 }
 export interface PackageClaim {

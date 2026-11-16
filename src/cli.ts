@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -17,7 +18,8 @@ import { stringify } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, parseConfig, missingCredentials } from './config.js';
 import { loadInventory } from './inventory.js';
-import { importCycloneDx } from './sbom.js';
+import { importSbom } from './sbom.js';
+import { DEPENDENCY_FILES, generateSbom, type GeneratedSbom, type SbomOptions } from './manifests.js';
 import { refreshCoverage } from './coverage.js';
 import { Store, readPilotReport } from './store.js';
 import { PilotReportError } from './pilot-report.js';
@@ -75,7 +77,10 @@ const VERSION = (
 ).version;
 const help = `Shielda Security Watch ${VERSION}
 
-  security-watch init [--directory PATH] [--yes] [--systems nodejs,python]
+  security-watch sbom [--project PATH] [--output FILE.cdx.json] [--name NAME] [--system-id ID]
+    [--owner TEXT] [--environment TEXT] [--note TEXT] [--exposure internet|internal|unknown]
+    [--criticality low|medium|high|critical] [--production] [--source-url URL] [--source-revision REV]
+  security-watch init [--directory PATH] [--yes] [--project PATH ...] [--systems nodejs,python]
     [--libraries PATH --ecosystem php] [--vendor-feeds nodejs,python,php] [--heartbeat]
     [--provider NAME --model ID] [--endpoint URL] [--allow-private-endpoint]
     [--poll-minutes 30] [--lookback-minutes 40]
@@ -84,7 +89,7 @@ const help = `Shielda Security Watch ${VERSION}
   security-watch providers
   security-watch templates
   security-watch ecosystems
-  security-watch import-sbom --input PATH [--output PATH]
+  security-watch import-sbom --input PATH [--output PATH]   (CycloneDX or SPDX JSON)
   security-watch coverage | inventory-drift [--config PATH]
   security-watch normalize-libraries --input PATH [--ecosystem php] [--output PATH]
   security-watch scan [--dry-run] [--notify] [--fixture PATH] [--no-ai]
@@ -109,6 +114,10 @@ const help = `Shielda Security Watch ${VERSION}
   security-watch prune [--apply]    (shows the retention plan unless --apply is given)
   security-watch unlock             (only removes a stopped worker's lock)
   security-watch test-notification --channel slack|email
+
+sbom reads the lockfiles and manifests in a project (npm, Python, Go, Rust, PHP, Ruby, Java,
+.NET, Dart, Elixir, Swift, Haskell) and writes a CycloneDX SBOM. It runs nothing and sends nothing.
+init --project creates a monitor for that project in one step.
 
 Default config: ./security-watch.yaml. scan records findings; --dry-run writes no state,
 disables models and sends nothing. --notify sends due jobs. start runs the foreground scheduler and
@@ -164,6 +173,17 @@ function argumentsFromCommandLine() {
       help: { type: 'boolean' },
       version: { type: 'boolean' },
       'scan-only': { type: 'boolean' },
+      project: { type: 'string', multiple: true },
+      name: { type: 'string' },
+      'system-id': { type: 'string' },
+      owner: { type: 'string' },
+      environment: { type: 'string' },
+      note: { type: 'string' },
+      exposure: { type: 'string' },
+      criticality: { type: 'string' },
+      production: { type: 'boolean' },
+      'source-url': { type: 'string' },
+      'source-revision': { type: 'string' },
     },
   });
 }
@@ -202,6 +222,132 @@ function libraryInput(path: string, ecosystem?: string) {
     throw new Error('Provide between 1 and 20000 libraries.');
   return components;
 }
+/** The repository a CI job runs for, from the variables GitHub Actions and GitLab CI set. */
+function ciSource(env: NodeJS.ProcessEnv): { url?: string; revision?: string; repository?: string } {
+  let url: string | undefined;
+  let revision: string | undefined;
+  if (env.GITHUB_ACTIONS === 'true' && env.GITHUB_REPOSITORY) {
+    url = `${env.GITHUB_SERVER_URL ?? 'https://github.com'}/${env.GITHUB_REPOSITORY}`;
+    revision = env.GITHUB_SHA;
+  } else if (env.GITLAB_CI === 'true' && env.CI_PROJECT_URL) {
+    url = env.CI_PROJECT_URL;
+    revision = env.CI_COMMIT_SHA;
+  }
+  if (!url) return {};
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash)
+      return {};
+    return {
+      url: parsed.href.replace(/\/$/, ''),
+      repository: parsed.pathname.replace(/^\/|\/$/g, ''),
+      ...(revision && /^[A-Za-z0-9._-]{1,100}$/.test(revision) ? { revision } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+function oneOf<T extends string>(
+  flag: string,
+  value: string | undefined,
+  allowed: readonly T[],
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (!(allowed as readonly string[]).includes(value))
+    throw new Error(`--${flag} must be one of: ${allowed.join(', ')}.`);
+  return value as T;
+}
+function sbomOptions(project: string): SbomOptions {
+  const ci = ciSource(process.env);
+  const sourceUrl = values['source-url'] ?? ci.url;
+  const sourceRevision = values['source-revision'] ?? (values['source-url'] ? undefined : ci.revision);
+  const note =
+    values.note ?? (ci.repository && !values['source-url'] ? `repository ${ci.repository}` : undefined);
+  return {
+    project,
+    ...(values.name ? { name: values.name } : {}),
+    ...(values['system-id'] ? { systemId: values['system-id'] } : {}),
+    ...(values.owner ? { owner: values.owner } : {}),
+    ...(values.environment ? { environment: values.environment } : {}),
+    ...(note ? { note } : {}),
+    ...(values.exposure
+      ? { exposure: oneOf('exposure', values.exposure, ['internet', 'internal', 'unknown'] as const) }
+      : {}),
+    ...(values.criticality
+      ? {
+          criticality: oneOf('criticality', values.criticality, [
+            'unknown',
+            'low',
+            'medium',
+            'high',
+            'critical',
+          ] as const),
+        }
+      : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
+    ...(sourceRevision ? { sourceRevision } : {}),
+    ...(values.production ? { production: true } : {}),
+    toolVersion: VERSION,
+  };
+}
+const SUPPORTED_FILES = Object.values(DEPENDENCY_FILES).flat().join(', ');
+/** Builds an SBOM and refuses one with no packages: an empty SBOM would look like a clean result. */
+function buildSbom(project: string): GeneratedSbom {
+  const result = generateSbom(sbomOptions(project));
+  if (!result.packages)
+    throw new Error(
+      `No packages found in ${resolve(project)}${result.files.length ? ` (read ${result.files.map((file) => file.path).join(', ')})` : ''}. Supported files: ${SUPPORTED_FILES}. For container images and other inputs, use Trivy or Syft; see docs/sbom.md.`,
+    );
+  return result;
+}
+function sbomSummary(result: GeneratedSbom, destination?: string, shown = Infinity): string {
+  const files = result.files.filter((file) => file.packages);
+  const lines = [
+    `${result.system.name}: ${result.packages} package${result.packages === 1 ? '' : 's'} (${result.ecosystems.join(', ')}) from ${files.length} file${files.length === 1 ? '' : 's'}: ${files
+      .slice(0, 8)
+      .map((file) => file.path)
+      .join(', ')}${files.length > 8 ? `, and ${files.length - 8} more` : ''}.`,
+  ];
+  if (result.unversioned)
+    lines.push(
+      `${result.unversioned} package${result.unversioned === 1 ? ' has' : 's have'} no exact version and ${result.unversioned === 1 ? 'is' : 'are'} watched by name only.`,
+    );
+  for (const warning of result.warnings.slice(0, shown)) lines.push(`warning: ${warning}`);
+  if (result.warnings.length > shown)
+    lines.push(
+      `warning: ${result.warnings.length - shown} more; security-watch sbom --project lists them all.`,
+    );
+  if (destination) lines.push(`Wrote ${destination}.`);
+  return lines.join('\n');
+}
+/** Replaces the destination in one step, so a reader never sees half a file. */
+function replaceFile(destination: string, content: string): void {
+  mkdirSync(dirname(destination), { recursive: true });
+  const directory = mkdtempSync(join(dirname(destination), '.security-watch-'));
+  try {
+    const staged = join(directory, 'sbom.json');
+    writeFileSync(staged, content, { flag: 'wx' });
+    renameSync(staged, destination);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+function writeSbom(): void {
+  if ((values.project?.length ?? 0) > 1)
+    throw new Error('sbom takes one --project; run it once per project.');
+  const result = buildSbom(values.project?.[0] ?? '.');
+  const content = JSON.stringify(result.bom, null, 2) + '\n';
+  if (values.output) {
+    const destination = resolve(values.output);
+    if (existsSync(destination) && !statSync(destination).isFile())
+      throw new Error('--output must name a file.');
+    replaceFile(destination, content);
+    console.error(sbomSummary(result, destination));
+  } else {
+    process.stdout.write(content);
+    console.error(sbomSummary(result));
+  }
+}
 async function initialize(): Promise<void> {
   const directory = resolve(values.directory ?? '.');
   const configPath = resolve(directory, 'security-watch.yaml'),
@@ -222,6 +368,21 @@ async function initialize(): Promise<void> {
     throw new Error('--libraries creates one application inventory; choose --systems separately.');
   if (values.ecosystem && !values.libraries) throw new Error('--ecosystem requires --libraries.');
   const libraries = values.libraries ? libraryInput(values.libraries, values.ecosystem) : undefined;
+  if (values.project && values.libraries)
+    throw new Error('--project and --libraries both describe your libraries; choose one.');
+  if (values.production && !values.project) throw new Error('--production requires --project.');
+  // Read the projects first: a project with nothing to watch is reported before any question is asked.
+  const projects = (values.project ?? []).map((project) => buildSbom(project));
+  const sbomIds = new Set<string>();
+  const sbomFiles = projects.map((project, index) => {
+    let id = project.system.id;
+    for (let suffix = 2; sbomIds.has(id); suffix++) id = `${project.system.id}-${suffix}`;
+    sbomIds.add(id);
+    return { id, project, path: resolve(values.project![index]!) };
+  });
+  const nonNpm = projects.some((project) => project.ecosystems.some((ecosystem) => ecosystem !== 'npm'));
+  if (sbomFiles.some(({ id }) => existsSync(resolve(directory, 'sboms', `${id}.cdx.json`))))
+    throw new Error('An SBOM with the same name already exists in sboms/; init never overwrites it.');
   if (provider === 'none' && (model || endpoint || allowPrivate))
     throw new Error('--model, --endpoint and --allow-private-endpoint require --provider.');
   if (provider !== 'none' && !PROVIDERS.some((entry) => entry.id === provider))
@@ -292,7 +453,7 @@ async function initialize(): Promise<void> {
     poll_interval_minutes: Number(pollMinutes),
     news_lookback_minutes: Number(lookbackMinutes),
     sources: {
-      ...(libraries ? { osv: true } : {}),
+      ...(libraries || nonNpm ? { osv: true } : {}),
       vendor_feeds: values['vendor-feeds']?.split(',').map((name) => name.trim()) ?? [],
     },
     ...(values.heartbeat ? { monitoring: { heartbeat_url_env: 'HEARTBEAT_URL' } } : {}),
@@ -334,34 +495,60 @@ async function initialize(): Promise<void> {
     '# Run doctor after editing this file. Credentials belong in a private env file.\n' + stringify(config),
     { flag: 'wx', mode: 0o600 },
   );
+  for (const { id, project } of sbomFiles) {
+    mkdirSync(resolve(directory, 'sboms'), { recursive: true });
+    const bom = project.bom as { metadata: { properties: Array<{ name: string; value: string }> } };
+    for (const property of bom.metadata.properties)
+      if (property.name === 'security-watch:system-id') property.value = id;
+    writeFileSync(resolve(directory, 'sboms', `${id}.cdx.json`), JSON.stringify(bom, null, 2) + '\n', {
+      flag: 'wx',
+    });
+  }
   writeFileSync(
     inventoryPath,
-    stringify({
-      systems: systems ?? [
-        {
-          id: libraries ? 'application' : 'example-api',
-          name: libraries ? 'Application' : 'Example API',
-          note: 'Replace me: where this system runs and who to ask',
-          environment: libraries ? 'unknown' : 'development',
-          exposure: 'unknown',
-          criticality: 'unknown',
-          updated_at: new Date().toISOString(),
-          components: libraries ?? [
-            {
-              id: 'example-parser',
-              ecosystem: 'npm',
-              name: 'example-parser',
-              version: '1.2.0',
-              note: 'Replace me: where this library is used',
-            },
-          ],
-          products: [],
-          keywords: [],
-        },
-      ],
-    }),
+    stringify(
+      sbomFiles.length
+        ? { sbom_directory: './sboms', systems: systems ?? [] }
+        : {
+            systems: systems ?? [
+              {
+                id: libraries ? 'application' : 'example-api',
+                name: libraries ? 'Application' : 'Example API',
+                note: 'Replace me: where this system runs and who to ask',
+                environment: libraries ? 'unknown' : 'development',
+                exposure: 'unknown',
+                criticality: 'unknown',
+                updated_at: new Date().toISOString(),
+                components: libraries ?? [
+                  {
+                    id: 'example-parser',
+                    ecosystem: 'npm',
+                    name: 'example-parser',
+                    version: '1.2.0',
+                    note: 'Replace me: where this library is used',
+                  },
+                ],
+                products: [],
+                keywords: [],
+              },
+            ],
+          },
+    ),
     { flag: 'wx', mode: 0o600 },
   );
+  if (sbomFiles.length) {
+    for (const { id, project, path } of sbomFiles) {
+      const destination = resolve(directory, 'sboms', `${id}.cdx.json`);
+      console.log(sbomSummary(project, destination, 5));
+      console.log(
+        `Refresh it when dependencies change, or from CI (docs/sbom.md):\n  security-watch sbom --project ${shellArgument(path)} --system-id ${shellArgument(id)} --output ${shellArgument(destination)}`,
+      );
+    }
+    if (nonNpm)
+      console.log(
+        'OSV is turned on: it covers the non-npm packages and receives their names and versions (see README, Boundaries and privacy).',
+      );
+  }
   const envExample = resolve(directory, '.env.example');
   if (!existsSync(envExample))
     writeFileSync(
@@ -377,7 +564,7 @@ async function initialize(): Promise<void> {
       { flag: 'wx', mode: 0o600 },
     );
   console.log(
-    `Created ${configPath} and ${inventoryPath}. Add installed versions and deployment details to systems.yaml. Copy .env.example to .env and fill in any required credentials. Then run:\n  security-watch doctor --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))}\n  security-watch scan --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))} --dry-run\nNo messages were sent.`,
+    `Created ${configPath} and ${inventoryPath}. ${sbomFiles.length ? 'Each SBOM in sboms/ is one system; add owners and notes with security-watch sbom --owner/--note, or describe more systems in systems.yaml.' : 'Add installed versions and deployment details to systems.yaml.'} Copy .env.example to .env and fill in any required credentials. Then run:\n  security-watch doctor --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))}\n  security-watch scan --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))} --dry-run\nNo messages were sent.`,
   );
 }
 async function main(): Promise<void> {
@@ -390,7 +577,23 @@ async function main(): Promise<void> {
     return;
   }
   const commandFlags: Record<string, string[]> = {
+    sbom: [
+      'project',
+      'output',
+      'name',
+      'system-id',
+      'owner',
+      'environment',
+      'note',
+      'exposure',
+      'criticality',
+      'production',
+      'source-url',
+      'source-revision',
+    ],
     init: [
+      'project',
+      'production',
       'directory',
       'yes',
       'systems',
@@ -465,9 +668,13 @@ async function main(): Promise<void> {
     output(ECOSYSTEMS);
     return;
   }
+  if (command === 'sbom') {
+    writeSbom();
+    return;
+  }
   if (command === 'import-sbom') {
     if (!values.input) throw new Error('--input PATH required');
-    const report = importCycloneDx(resolve(values.input));
+    const report = importSbom(resolve(values.input));
     if (values.output)
       writeFileSync(resolve(values.output), JSON.stringify(report, null, 2) + '\n', {
         flag: 'wx',

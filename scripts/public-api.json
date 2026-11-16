@@ -1,4 +1,5 @@
 [
+  "DEPENDENCY_FILES",
   "ECOSYSTEMS",
   "HeartbeatMonitor",
   "MaintenanceScheduler",
@@ -19,7 +20,9 @@
   "createPilotResponseTemplate",
   "decide",
   "deliverPending",
+  "generateSbom",
   "importCycloneDx",
+  "importSbom",
   "loadConfig",
   "loadInventory",
   "normalizeEcosystem",
