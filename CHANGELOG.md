@@ -2,6 +2,27 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## 1.1.0
+
+Start from your code instead of a hand-written inventory, and keep the inventory current from CI. Existing configurations and inventories work unchanged. To be published under the default `latest` tag. The GitHub Action is used as `uses: ShieldaAI/security-watch@v1.1.0`.
+
+### Added
+
+- **`security-watch sbom`** reads the lockfiles and manifests in a project and writes a CycloneDX 1.6 SBOM: npm (`package-lock.json` v1 to v3, `yarn.lock` 1 and 2+, `pnpm-lock.yaml` 5 to 9, `package.json`), Python (`poetry.lock`, `uv.lock`, `Pipfile.lock`, `pdm.lock`, `requirements*.txt`, `pyproject.toml`), Go (`go.mod`), Rust (`Cargo.lock`), PHP (`composer.lock`, `composer.json`), Ruby (`Gemfile.lock`, `Gemfile`), Java (`pom.xml`, `gradle.lockfile`), .NET (`packages.lock.json`, project files, `Directory.Packages.props`), Dart, Elixir, Swift and Haskell. It reads files only: no package manager, no symbolic links, no network. Each package records the files it was found in, and alerts show them (`Affected item: npm express 4.21.2 - found in package-lock.json`). `--owner`, `--note`, `--environment`, `--exposure`, `--criticality` and `--system-id` describe the system; in GitHub Actions and GitLab CI the repository address and commit are filled in. `--production` leaves out development-only dependencies. The command exits 1 when it finds no packages.
+- **`init --project PATH`** creates a monitor for one or more projects in one step: an SBOM per project in `sboms/`, an inventory that reads that folder, and OSV turned on when a project has packages outside npm.
+- **SBOM folder.** `sbom_directory` in the inventory makes every `.json` SBOM in a folder a system, read again at every scan. The SBOM's creation time is the system's `updated_at`, so an SBOM that stops arriving is reported as stale. A file that cannot be imported is reported and left out without stopping the other systems. Operating-system packages in container SBOMs (deb, rpm, apk and similar) are listed once as a notice instead of degrading every scan.
+- **SPDX import.** `import-sbom`, the system `sbom` field and the SBOM folder accept SPDX JSON 2.2 and 2.3, including GitHub's dependency-graph export, as well as CycloneDX. SBOMs from Trivy, Syft and cdxgen are accepted as they are.
+- **SBOM receiver.** An `intake` section makes `start` accept `PUT /v1/sboms/SYSTEM_ID` from pipelines, with bearer tokens limited to system IDs (lower case, as `sbom` writes them), TLS (or plain HTTP on loopback, or behind a TLS proxy with `allow_plain_http`), a 20 MiB limit, a slowdown after repeated failed tokens, and an answer a pipeline can act on: the upload is imported before it is written, so an unusable SBOM fails the job at once. `security-watch intake` runs the receiver alone. `security-watch upload` and `sbom --upload URL` send an SBOM, retrying network errors and busy answers; the GitHub Action takes `upload-url` and `upload-token`. An empty SBOM folder is accepted, so a monitor can start before the first upload.
+- **GitHub Action** (`action.yml`): `uses: ShieldaAI/security-watch@v1.1.0` writes the SBOM and uploads it as an artifact, or checks and uploads an SBOM made by another tool (`sbom-file`).
+- [Watch a project from its dependency files](docs/sbom.md): supported files, CI recipes, ways to deliver SBOMs to the monitor, and other generators.
+- Library exports: `generateSbom`, `importSbom`, `DEPENDENCY_FILES`, `startIntake`, `createIntakeHandler`, `uploadSbom`, and the types `SbomOptions`, `GeneratedSbom`, `DependencyFile`, `IntakeUpload`, `IntakeOptions`, `RunningIntake` and `UploadOptions`. `SbomImport.source.format` may be `SPDX`, and `SbomImport.subject` describes the system an SBOM is about.
+
+### Changed
+
+- CycloneDX components with `evidence.occurrences` take the listed locations as their note.
+- The inventory's `systems` list may be empty when `sbom_directory` is set; an inventory with no system at all is still refused.
+- The README starts from `init --project`; the npm description and keywords say that lockfiles and SBOMs are read.
+
 ## 1.0.1
 
 Package metadata and documentation only; no change to behaviour or to the public API. To be published under the default `latest` tag.

@@ -47,6 +47,21 @@ jobs:
           path: alert-evaluation.json
           if-no-files-found: error
           retention-days: 7
+      - name: Send this repository's SBOM to a local receiver through the action's script
+        if: matrix.node == 24
+        run: |
+          export SECURITY_WATCH_INTAKE_TOKEN="$(openssl rand -hex 32)"
+          mkdir -p .intake-ci/sboms
+          printf 'sbom_directory: ./sboms\n' > .intake-ci/systems.yaml
+          printf 'version: 1\ninventory: ./systems.yaml\nintake:\n  listen: 127.0.0.1:8787\n' > .intake-ci/security-watch.yaml
+          node dist/cli.js intake --config .intake-ci/security-watch.yaml &
+          receiver=$!
+          for attempt in $(seq 50); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 0.2; done
+          SW_PACKAGE=unused SW_CLI="node $PWD/dist/cli.js" SW_PROJECT=. SW_OUTPUT=sbom.cdx.json \
+            SW_SYSTEM_ID=security-watch SW_UPLOAD_URL=http://127.0.0.1:8787 bash scripts/action-sbom.sh
+          kill "$receiver"
+          node dist/cli.js doctor --config .intake-ci/security-watch.yaml |
+            node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8")); if (r.systems !== 1 || !r.components) process.exit(1)'
       - name: Rehearse isolated delivery and recovery
         id: local_rehearsal
         if: matrix.node == 24

@@ -105,7 +105,10 @@ export interface System extends InventoryEvidence {
 export interface Inventory {
   systems: System[];
   import_warnings?: string[];
-  /** Entries that are accepted as written but may not be what was meant. They do not degrade a scan. */
+  /**
+   * Things to read once that do not degrade a scan: entries accepted as written that may not be what
+   * was meant, and operating-system packages in an SBOM folder that are not matched.
+   */
   name_notices?: string[];
 }
 export interface PackageClaim {
@@ -208,6 +211,17 @@ export interface Config {
     heartbeat_url_env: string;
     interval_seconds: number;
     allow_private_endpoint: boolean;
+  };
+  /** An HTTPS endpoint that accepts SBOM uploads from CI pipelines into the inventory's SBOM folder. */
+  intake?: {
+    /** `HOST:PORT`. Default `127.0.0.1:8787`. */
+    listen: string;
+    /** Bearer tokens, each read from an environment variable and limited to some system IDs. */
+    tokens: Array<{ token_env: string; systems: string[] }>;
+    tls_cert_file?: string;
+    tls_key_file?: string;
+    /** Required to listen beyond loopback without TLS, for example behind a TLS proxy. */
+    allow_plain_http: boolean;
   };
   maintenance?: {
     interval_hours: number;

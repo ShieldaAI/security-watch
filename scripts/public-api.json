@@ -1,4 +1,5 @@
 [
+  "DEPENDENCY_FILES",
   "ECOSYSTEMS",
   "HeartbeatMonitor",
   "MaintenanceScheduler",
@@ -15,11 +16,14 @@
   "collectSources",
   "compareInventories",
   "configSchema",
+  "createIntakeHandler",
   "createPilotCasePacket",
   "createPilotResponseTemplate",
   "decide",
   "deliverPending",
+  "generateSbom",
   "importCycloneDx",
+  "importSbom",
   "loadConfig",
   "loadInventory",
   "normalizeEcosystem",
@@ -41,6 +45,8 @@
   "scorePilotResponses",
   "sendEmail",
   "smtpProblem",
+  "startIntake",
+  "uploadSbom",
   "validateAnalysis",
   "verifyBackup"
 ]

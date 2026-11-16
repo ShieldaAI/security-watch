@@ -9,21 +9,153 @@ export interface SbomImport {
   components: Component[];
   warnings: string[];
   dependencies: DependencyRelationship[];
-  source: { format: 'CycloneDX'; spec_version: string; digest: string };
+  source: { format: 'CycloneDX' | 'SPDX'; spec_version: string; digest: string };
+  /**
+   * What the document says about the system it describes: its name, when it was created, and the
+   * `security-watch:*` properties written by `security-watch sbom`. Used by an SBOM folder.
+   */
+  subject?: { name?: string; created?: string; properties: Record<string, string> };
 }
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 1000 && !LINE_BREAKING.test(value);
 
-/** Bounded local metadata import: never follows references, runs scripts or fetches packages. */
-export function importCycloneDx(path: string): SbomImport {
+function readSbom(path: string): { document: unknown; digest: string } {
   const stat = statSync(path);
   if (!stat.isFile() || stat.size > 20 * 1024 * 1024)
     throw new Error('SBOM must be a regular JSON file of at most 20 MiB');
   const bytes = readFileSync(path);
   if (bytes.byteLength > 20 * 1024 * 1024) throw new Error('SBOM exceeds 20 MiB');
-  const bom: unknown = JSON.parse(bytes.toString('utf8'));
+  let document: unknown;
+  try {
+    document = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('SBOM is not valid JSON');
+  }
+  return { document, digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}` };
+}
+
+/** Bounded local metadata import: never follows references, runs scripts or fetches packages. */
+export function importCycloneDx(path: string): SbomImport {
+  const { document, digest } = readSbom(path);
+  return importCycloneDxDocument(document, digest);
+}
+
+/**
+ * Imports a CycloneDX (1.4 to 1.6) or SPDX (2.2, 2.3) JSON document, whichever the file is. This
+ * accepts the output of `security-watch sbom`, Trivy, Syft, cdxgen and GitHub's dependency-graph
+ * export ("Export SBOM", or the REST API's `{ "sbom": ... }` response) without conversion.
+ */
+export function importSbom(path: string): SbomImport {
+  const { document, digest } = readSbom(path);
+  if (object(document) && document.bomFormat === 'CycloneDX')
+    return importCycloneDxDocument(document, digest);
+  const spdx = object(document) && object(document.sbom) ? document.sbom : document;
+  if (object(spdx) && typeof spdx.spdxVersion === 'string') return importSpdxDocument(spdx, digest);
+  throw new Error('Expected a CycloneDX JSON (1.4 to 1.6) or SPDX JSON (2.2, 2.3) SBOM');
+}
+
+const SPDX_RELATIONSHIPS = 100_000;
+
+/** SPDX packages become CycloneDX-shaped components so that both formats pass the same checks. */
+function importSpdxDocument(spdx: Record<string, unknown>, digest: string): SbomImport {
+  const version = /^SPDX-(2\.[23])$/.exec(String(spdx.spdxVersion));
+  if (!version || !Array.isArray(spdx.packages))
+    throw new Error('Expected SPDX JSON 2.2 or 2.3 with packages');
+  if (spdx.packages.length > 20_000) throw new Error('SBOM exceeds 20000 component entries');
+  const relationships = spdx.relationships === undefined ? [] : spdx.relationships;
+  if (!Array.isArray(relationships) || relationships.length > SPDX_RELATIONSHIPS)
+    throw new Error('Invalid SPDX relationships');
+  // The package the document describes is the system itself, not one of its dependencies.
+  const described = new Set<string>(
+    Array.isArray(spdx.documentDescribes) ? spdx.documentDescribes.filter(text) : [],
+  );
+  for (const relation of relationships)
+    if (object(relation) && relation.relationshipType === 'DESCRIBES' && text(relation.relatedSpdxElement))
+      described.add(relation.relatedSpdxElement);
+  const warnings: string[] = [];
+  const components: Record<string, unknown>[] = [];
+  let root: string | undefined;
+  for (const [index, entry] of spdx.packages.entries()) {
+    if (!object(entry)) throw new Error('Invalid SBOM component');
+    const id = entry.SPDXID;
+    if (!text(id)) throw new Error('Invalid SBOM component reference');
+    const refs = Array.isArray(entry.externalRefs) ? entry.externalRefs : [];
+    const purl = refs.find(
+      (ref) => object(ref) && ref.referenceType === 'purl' && text(ref.referenceLocator),
+    ) as { referenceLocator: string } | undefined;
+    if (described.has(id)) {
+      root ??= id;
+      continue;
+    }
+    const info = entry.versionInfo;
+    const component: Record<string, unknown> = {
+      'bom-ref': id,
+      ...(purl ? { purl: purl.referenceLocator } : {}),
+    };
+    // The package URL is authoritative. A version field beside a versionless purl is used only when
+    // it is one exact version: GitHub writes manifest ranges (`^4.17.0`) there.
+    if (
+      purl &&
+      !/@[^/]+$/.test(purl.referenceLocator.split(/[?#]/)[0]!) &&
+      text(info) &&
+      info !== 'NOASSERTION'
+    ) {
+      if (/^[A-Za-z0-9][A-Za-z0-9.!+_-]*$/.test(info) && !/^(?:latest|\*)$/i.test(info))
+        component.version = info;
+      else
+        warnings.push(
+          `Component ${index + 1}: version ${info.slice(0, 40)} is a range; imported by name only.`,
+        );
+    }
+    if (Array.isArray(entry.checksums)) {
+      const sha = entry.checksums.find(
+        (value) =>
+          object(value) &&
+          value.algorithm === 'SHA256' &&
+          typeof value.checksumValue === 'string' &&
+          /^[a-fA-F0-9]{64}$/.test(value.checksumValue),
+      );
+      if (object(sha)) component.hashes = [{ alg: 'SHA-256', content: sha.checksumValue }];
+    }
+    components.push(component);
+  }
+  const edges = new Map<string, string[]>();
+  for (const relation of relationships) {
+    if (!object(relation)) throw new Error('Invalid SPDX relationships');
+    const type = relation.relationshipType;
+    if (type !== 'DEPENDS_ON' && type !== 'DEPENDENCY_OF') continue;
+    const [from, to] =
+      type === 'DEPENDS_ON'
+        ? [relation.spdxElementId, relation.relatedSpdxElement]
+        : [relation.relatedSpdxElement, relation.spdxElementId];
+    if (!text(from) || !text(to)) throw new Error('Invalid SBOM dependency references');
+    const targets = edges.get(from) ?? [];
+    if (!targets.includes(to)) targets.push(to);
+    edges.set(from, targets);
+  }
+  const creation = object(spdx.creationInfo) ? spdx.creationInfo : {};
+  const result = importCycloneDxDocument(
+    {
+      bomFormat: 'CycloneDX',
+      specVersion: '1.6',
+      ...(root ? { metadata: { component: { 'bom-ref': root } } } : {}),
+      components,
+      ...(edges.size ? { dependencies: [...edges].map(([ref, dependsOn]) => ({ ref, dependsOn })) } : {}),
+    },
+    digest,
+    'SPDX',
+  );
+  result.source = { format: 'SPDX', spec_version: version[1]!, digest };
+  result.warnings.unshift(...warnings);
+  const name = text(spdx.name) ? spdx.name : undefined;
+  const created = text(creation.created) ? creation.created : undefined;
+  result.subject = { ...(name ? { name } : {}), ...(created ? { created } : {}), properties: {} };
+  return result;
+}
+
+function importCycloneDxDocument(bom: unknown, digest: string, provenance = 'CycloneDX'): SbomImport {
   if (
     !object(bom) ||
     bom.bomFormat !== 'CycloneDX' ||
@@ -31,7 +163,6 @@ export function importCycloneDx(path: string): SbomImport {
     !Array.isArray(bom.components)
   )
     throw new Error('Expected CycloneDX JSON 1.4, 1.5 or 1.6 with components');
-  const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   const result: SbomImport = {
     components: [],
     warnings: [],
@@ -131,8 +262,31 @@ export function importCycloneDx(path: string): SbomImport {
             ? { artifact_kind: 'model' as const }
             : {}),
         ...(version === undefined ? {} : { version }),
-        provenance: { source: 'CycloneDX', reference: digest },
+        provenance: { source: provenance, reference: digest },
       };
+      // `evidence.occurrences` (CycloneDX 1.5+) says which files the package was found in. That is
+      // where a reader of an alert should look, so it becomes the component's note.
+      const occurrences =
+        object(entry.evidence) && Array.isArray(entry.evidence.occurrences) ? entry.evidence.occurrences : [];
+      const locations = [
+        ...new Set(
+          occurrences
+            .slice(0, 100)
+            .map((occurrence) => (object(occurrence) ? occurrence.location : undefined))
+            .filter((location): location is string => text(location) && location.length <= 300),
+        ),
+      ];
+      if (locations.length) {
+        let note = `found in ${locations[0]}`;
+        for (const location of locations.slice(1)) {
+          if (note.length + location.length + 2 > 480) {
+            note += ' and others';
+            break;
+          }
+          note += `, ${location}`;
+        }
+        component.note = note;
+      }
       if (entry.hashes !== undefined) {
         if (!Array.isArray(entry.hashes) || entry.hashes.length > 32) throw new Error('Invalid SBOM hashes');
         const hashes = entry.hashes.filter((value) => object(value) && value.alg === 'SHA-256');
@@ -198,5 +352,23 @@ export function importCycloneDx(path: string): SbomImport {
           );
     }
   }
+  const metadata = object(bom.metadata) ? bom.metadata : {};
+  const subject = object(metadata.component) ? metadata.component : {};
+  const properties: Record<string, string> = {};
+  if (Array.isArray(metadata.properties))
+    for (const property of metadata.properties.slice(0, 200))
+      if (
+        object(property) &&
+        text(property.name) &&
+        property.name.startsWith('security-watch:') &&
+        text(property.value) &&
+        !Object.hasOwn(properties, property.name)
+      )
+        properties[property.name] = property.value;
+  result.subject = {
+    ...(text(subject.name) ? { name: subject.name } : {}),
+    ...(text(metadata.timestamp) ? { created: metadata.timestamp } : {}),
+    properties,
+  };
   return result;
 }
