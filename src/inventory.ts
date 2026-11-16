@@ -268,6 +268,73 @@ const isoTimestamp = z.iso.datetime({ offset: true });
  * refreshed is reported as stale. A file that cannot be imported is reported and left out; it does
  * not stop the other systems from being watched.
  */
+/**
+ * One system from one SBOM file, described by the SBOM itself, exactly as a scan will read it. The
+ * SBOM receiver calls this before it accepts an upload, so an upload it accepts is one a scan uses.
+ * Throws when the file cannot be imported or describes the system with values the inventory refuses.
+ */
+export function systemFromSbom(
+  path: string,
+  file: string,
+  label: string,
+): { system: Inventory['systems'][number]; warnings: string[]; notices: string[] } {
+  const imported = importSbom(path);
+  const properties = imported.subject?.properties ?? {};
+  const property = (name: string) => properties[`security-watch:${name}`];
+  const id =
+    property('system-id') ?? basename(file).replace(/(?:\.(?:cdx|spdx|bom|sbom|cyclonedx))?\.json$/i, '');
+  const created = imported.subject?.created;
+  const enumValue = <T extends string>(value: string | undefined, allowed: readonly T[]): T | undefined =>
+    value !== undefined && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
+  const parsed = systemSchema.safeParse({
+    id,
+    name: imported.subject?.name ?? id,
+    updated_at:
+      created && isoTimestamp.safeParse(created).success ? created : statSync(path).mtime.toISOString(),
+    note: property('note') ?? `SBOM ${label}`,
+    ...(property('owner') ? { owner: property('owner') } : {}),
+    ...(property('environment') ? { environment: property('environment') } : {}),
+    ...(enumValue(property('exposure'), ['internet', 'internal', 'unknown'] as const)
+      ? { exposure: property('exposure') }
+      : {}),
+    ...(enumValue(property('criticality'), ['unknown', 'low', 'medium', 'high', 'critical'] as const)
+      ? { criticality: property('criticality') }
+      : {}),
+    ...(property('source-url') ? { source_url: property('source-url') } : {}),
+    ...(property('source-revision') ? { source_revision: property('source-revision') } : {}),
+    provenance: { source: `${imported.source.format} SBOM`, reference: imported.source.digest },
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(
+      issue ? `${issue.path.join('.') || 'system'}: ${issue.message}` : 'invalid system description',
+    );
+  }
+  const { lockfile: _lockfile, libraries: _libraries, sbom: _sbom, ...system } = parsed.data;
+  system.components = imported.components;
+  if (imported.dependencies.length) system.sbom_dependencies = dependencyGraph.parse(imported.dependencies);
+  // A container SBOM always lists the image's operating-system packages, and GitHub's export lists
+  // the workflow's actions. Security Watch does not match those (it has no distribution backport
+  // data), which is a known limit rather than a fault, so it is said once as a notice instead of
+  // degrading every scan, together with the dependency edges that lead to them.
+  const warnings: string[] = [];
+  const notices: string[] = [];
+  const unmatched = new Map<string, number>();
+  for (const warning of imported.warnings) {
+    const kind = UNMATCHED_KIND.exec(warning)?.[1]?.toLowerCase();
+    if (kind) unmatched.set(kind, (unmatched.get(kind) ?? 0) + 1);
+    else if (!unmatched.size || !/^Dependency (?:target|source) .*: not an imported package/.test(warning))
+      warnings.push(`${id}: ${warning}`);
+  }
+  if (unmatched.size) {
+    const count = [...unmatched.values()].reduce((sum, value) => sum + value, 0);
+    notices.push(
+      `${id}: ${count} package${count === 1 ? '' : 's'} in ${label} ${count === 1 ? 'is' : 'are'} of a kind Security Watch does not match against advisories (${[...unmatched.keys()].sort().join(', ')}): operating-system packages and CI actions need your image or repository scanner. The other packages are watched.`,
+    );
+  }
+  return { system, warnings, notices };
+}
+
 function loadSbomDirectory(
   folder: string,
   base: string,
@@ -286,74 +353,18 @@ function loadSbomDirectory(
     const label = relative(base, path) || file;
     try {
       if (!statSync(path).isFile()) continue;
-      const imported = importSbom(path);
-      const properties = imported.subject?.properties ?? {};
-      const property = (name: string) => properties[`security-watch:${name}`];
-      const id =
-        property('system-id') ?? basename(file).replace(/(?:\.(?:cdx|spdx|bom|sbom|cyclonedx))?\.json$/i, '');
+      const loaded = systemFromSbom(path, file, label);
+      const id = loaded.system.id;
       if (taken.has(id)) {
         warnings.push(
           `${label}: system ID ${id} is already used in the inventory; this SBOM is not watched.`,
         );
         continue;
       }
-      const created = imported.subject?.created;
-      const enumValue = <T extends string>(
-        value: string | undefined,
-        allowed: readonly T[],
-      ): T | undefined =>
-        value !== undefined && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
-      const parsed = systemSchema.safeParse({
-        id,
-        name: imported.subject?.name ?? id,
-        updated_at:
-          created && isoTimestamp.safeParse(created).success ? created : statSync(path).mtime.toISOString(),
-        note: property('note') ?? `SBOM ${label}`,
-        ...(property('owner') ? { owner: property('owner') } : {}),
-        ...(property('environment') ? { environment: property('environment') } : {}),
-        ...(enumValue(property('exposure'), ['internet', 'internal', 'unknown'] as const)
-          ? { exposure: property('exposure') }
-          : {}),
-        ...(enumValue(property('criticality'), ['unknown', 'low', 'medium', 'high', 'critical'] as const)
-          ? { criticality: property('criticality') }
-          : {}),
-        ...(property('source-url') ? { source_url: property('source-url') } : {}),
-        ...(property('source-revision') ? { source_revision: property('source-revision') } : {}),
-        provenance: { source: `${imported.source.format} SBOM`, reference: imported.source.digest },
-      });
-      if (!parsed.success) {
-        const issue = parsed.error.issues[0];
-        warnings.push(
-          `${label}: ${issue ? `${issue.path.join('.') || 'system'}: ${issue.message}` : 'invalid system description'}; this SBOM is not watched.`,
-        );
-        continue;
-      }
-      const { lockfile: _lockfile, libraries: _libraries, sbom: _sbom, ...system } = parsed.data;
-      system.components = imported.components;
-      if (imported.dependencies.length)
-        system.sbom_dependencies = dependencyGraph.parse(imported.dependencies);
       taken.add(id);
-      systems.push(system);
-      // A container SBOM always lists the image's operating-system packages, and GitHub's export lists
-      // the workflow's actions. Security Watch does not match those (it has no distribution backport
-      // data), which is a known limit rather than a fault, so it is said once as a notice instead of
-      // degrading every scan, together with the dependency edges that lead to them.
-      const unmatched = new Map<string, number>();
-      for (const warning of imported.warnings) {
-        const kind = UNMATCHED_KIND.exec(warning)?.[1]?.toLowerCase();
-        if (kind) unmatched.set(kind, (unmatched.get(kind) ?? 0) + 1);
-        else if (
-          !unmatched.size ||
-          !/^Dependency (?:target|source) .*: not an imported package/.test(warning)
-        )
-          warnings.push(`${id}: ${warning}`);
-      }
-      if (unmatched.size) {
-        const count = [...unmatched.values()].reduce((sum, value) => sum + value, 0);
-        notices.push(
-          `${id}: ${count} package${count === 1 ? '' : 's'} in ${label} ${count === 1 ? 'is' : 'are'} of a kind Security Watch does not match against advisories (${[...unmatched.keys()].sort().join(', ')}): operating-system packages and CI actions need your image or repository scanner. The other packages are watched.`,
-        );
-      }
+      systems.push(loaded.system);
+      warnings.push(...loaded.warnings);
+      notices.push(...loaded.notices);
     } catch (error) {
       warnings.push(
         `${label}: ${singleLine(error instanceof Error ? error.message : 'could not be imported', 200)}; this SBOM is not watched.`,
@@ -464,11 +475,13 @@ export function loadInventory(path: string): Inventory {
       if (nameNotices.length < 200) nameNotices.push(singleLine(notice, 400));
       else omittedNotices++;
   }
+  if (!systems.length && !parsed.sbom_directory)
+    throw new Error('No systems: add at least one system, or an sbom_directory with SBOM files.');
+  // An empty SBOM folder is how a monitor fed by pipelines starts. Scans report the empty inventory
+  // as degraded monitoring until the first SBOM arrives.
   if (!systems.length)
-    throw new Error(
-      parsed.sbom_directory
-        ? `No systems: the inventory lists none and ${parsed.sbom_directory} holds no SBOM that could be imported. Create one with: security-watch sbom --project PATH --output ${join(parsed.sbom_directory, 'NAME.cdx.json')}`
-        : 'No systems: add at least one system, or an sbom_directory with SBOM files.',
+    nameNotices.push(
+      `The SBOM folder ${parsed.sbom_directory} has no SBOM that could be imported, so nothing is watched yet. Upload one from CI (security-watch upload) or create one with: security-watch sbom --project PATH --output ${join(parsed.sbom_directory!, 'NAME.cdx.json')}`,
     );
   if (omittedWarnings) importWarnings.push(`${omittedWarnings} more import warning(s) are not shown.`);
   if (omittedNotices) nameNotices.push(`${omittedNotices} more name notice(s) are not shown.`);

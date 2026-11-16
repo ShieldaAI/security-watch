@@ -75,22 +75,31 @@ You need a computer that stays on (a small server is enough) and [Node.js](https
    security-watch start --config ./watch/security-watch.yaml --credentials-file ./watch/.env
    ```
 
-**Keep it current from CI.** Dependencies change with every merge, and an SBOM older than a week is reported as stale. Let your pipeline make a fresh one and copy it into `watch/sboms`:
+**Keep it current from CI.** Dependencies change with every merge, and an SBOM older than a week is reported as stale. Let your pipeline send a fresh one. Turn on the receiver in `watch/security-watch.yaml`, put a token made with `openssl rand -hex 32` in `watch/.env` as `SECURITY_WATCH_INTAKE_TOKEN` and in your CI secrets, and restart:
 
 ```yaml
-# GitHub Actions: writes and uploads security-watch.cdx.json
+intake:
+  listen: 0.0.0.0:8787
+  tls_cert_file: ./tls/cert.pem # or allow_plain_http: true behind a TLS proxy
+  tls_key_file: ./tls/key.pem
+```
+
+```yaml
+# GitHub Actions: makes the SBOM and sends it; the job fails if the monitor refuses it
 - uses: ShieldaAI/security-watch@v1.1.0
   with:
     system-id: my-app
     owner: Dana, platform team
+    upload-url: https://watch.example.com:8787
+    upload-token: ${{ secrets.SECURITY_WATCH_INTAKE_TOKEN }}
 ```
 
 ```sh
-# Any other pipeline with Node.js 24
-npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id my-app --output security-watch.cdx.json
+# Any other pipeline with Node.js 24 and SECURITY_WATCH_INTAKE_TOKEN set
+npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id my-app --upload https://watch.example.com:8787
 ```
 
-[Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, ways to get the SBOM to the monitor (object storage, Git, SSH), and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
+[Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, the receiver (tokens limited to some systems, TLS, Docker), other ways to deliver SBOMs, and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
 
 ### Describe systems by hand
 
@@ -309,7 +318,7 @@ docker run --rm --name security-watch \
 
 Before running, set `inventory: /config/systems.yaml` and `database: /data/watch.db` in the container's configuration. Create `watch/.env` privately with only the credentials you use; it is not loaded automatically by the npm CLI. Keep configuration, inventory and `.env` readable only by your user, for example with `chmod 600` on those files. The short initialization command assigns the data volume to your UID/GID; the application itself then runs as that user. Your Docker VM must be able to access the configuration/inventory bind mounts. Add a read-only mount under `/config` for any imported lockfile or SBOM folder (for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`) and use the matching path in the inventory.
 
-SQLite stays on a native Docker volume rather than a desktop VM's shared host filesystem. This avoids depending on host-sharing behavior for database locking and write-ahead logging. Retain `security-watch-data` when recreating the container. The application needs outbound network access and no inbound port.
+SQLite stays on a native Docker volume rather than a desktop VM's shared host filesystem. This avoids depending on host-sharing behavior for database locking and write-ahead logging. Retain `security-watch-data` when recreating the container. The application needs outbound network access, and an inbound port only if you turn on the SBOM receiver (`intake`).
 
 The included Compose file uses root-level `security-watch.yaml`, `systems.yaml` and `.env`:
 
@@ -351,6 +360,7 @@ Commands that operate on a configured monitor accept `--config PATH`; the defaul
 | `templates`                                                                                       | List common system IDs available to `init --systems`                                                                      |
 | `ecosystems`                                                                                      | List supported library ecosystems                                                                                         |
 | `sbom [--project PATH] [--output FILE]`                                                           | Read a project's lockfiles and manifests and write a CycloneDX SBOM; no network requests ([guide](docs/sbom.md))          |
+| `upload --input FILE --url URL`                                                                   | Send an SBOM to a monitor's receiver (`intake`); `sbom --upload URL` makes and sends one in a step                        |
 | `import-sbom --input PATH`                                                                        | Show what Security Watch reads from a CycloneDX or SPDX SBOM; exits 2 when some packages cannot be watched                |
 | `normalize-libraries --input PATH`                                                                | Parse a library list without network requests; optional `--ecosystem` sets the group and `--output` saves a new JSON file |
 | `scan`                                                                                            | Run once, save evidence/findings and queue notifications; does not deliver by default                                     |

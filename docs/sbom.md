@@ -7,6 +7,7 @@ You do not have to write an inventory by hand. Security Watch can read the lockf
 - [Make or refresh an SBOM](#make-or-refresh-an-sbom)
 - [The SBOM folder](#the-sbom-folder)
 - [From a CI pipeline](#from-a-ci-pipeline)
+- [Receive SBOMs from pipelines](#receive-sboms-from-pipelines)
 - [SBOMs from other tools](#sboms-from-other-tools)
 - [Use it from code](#use-it-from-code)
 - [Limits](#limits)
@@ -98,6 +99,7 @@ systems: [] # systems you describe by hand can sit beside them
 - **The SBOM's creation time is the system's `updated_at`.** An SBOM that is no longer refreshed is reported as stale after `inventory_stale_days` (7 by default), exactly like a hand-written list. A file without a timestamp uses the file's modification time.
 - **The system ID** comes from the SBOM (`security-watch:system-id`), else from the file name (`checkout-api.cdx.json` is `checkout-api`). An ID already used by another system is reported and that file is not watched.
 - **Name, owner, note, environment, exposure and criticality** come from the SBOM properties that `security-watch sbom` writes. For an SBOM from another tool the name is the SBOM's own and the note is the file name.
+- **An empty folder** is how a monitor fed by pipelines starts: `doctor` says that nothing is watched yet, and scans report an empty inventory until the first SBOM arrives.
 - **A file that cannot be read** is reported as an import warning (`doctor`, and a monitoring-health finding at scan time) and left out; the other systems are still watched.
 - **Operating-system packages** (deb, rpm, apk and similar, found in container-image SBOMs) are not matched against advisories. They are listed once as a notice, which does not degrade monitoring. Use your image scanner for them.
 
@@ -105,7 +107,7 @@ CycloneDX JSON 1.4 to 1.6 and SPDX JSON 2.2 and 2.3 are accepted, including GitH
 
 ## From a CI pipeline
 
-A pipeline makes the SBOM where the code is, and copies it to the monitor's SBOM folder. Use the same `--system-id` (or `system-id`) on every run, so each build replaces the previous SBOM of that system.
+A pipeline makes the SBOM where the code is and sends it to the monitor, which [receives it](#receive-sboms-from-pipelines) into its SBOM folder. The upload is checked exactly as the scanner will read it, so the job fails at once if the SBOM is unusable or the token is wrong. Use the same `--system-id` (or `system-id`) on every run, so each build replaces the previous SBOM of that system.
 
 ### GitHub Actions
 
@@ -131,9 +133,11 @@ jobs:
           owner: Dana, platform team
           environment: production
           exposure: internet
+          upload-url: https://watch.example.com:8787
+          upload-token: ${{ secrets.SECURITY_WATCH_INTAKE_TOKEN }}
 ```
 
-The action writes `security-watch.cdx.json`, uploads it as the `security-watch-sbom` artifact, and sets the outputs `sbom-file` and `packages`. It runs Node.js 24 (installing it only if the runner has an older version) and `npx @shieldaai/security-watch`. Pin it to a release tag or a commit. All inputs are listed in [`action.yml`](https://github.com/ShieldaAI/security-watch/blob/main/action.yml).
+The action writes `security-watch.cdx.json`, sends it to `upload-url`, uploads it as the `security-watch-sbom` artifact, and sets the outputs `sbom-file` and `packages`. Without `upload-url` it only makes and keeps the SBOM, for [delivery another way](#other-ways-to-deliver). It runs Node.js 24 (installing it only if the runner has an older version) and `npx @shieldaai/security-watch`. Pin it to a release tag or a commit. All inputs are listed in [`action.yml`](https://github.com/ShieldaAI/security-watch/blob/main/action.yml).
 
 To use an SBOM made by another tool, pass it as `sbom-file`; the action checks that Security Watch can read it and uploads it:
 
@@ -142,6 +146,9 @@ To use an SBOM made by another tool, pass it as `sbom-file`; the action checks t
 - uses: ShieldaAI/security-watch@v1.1.0
   with:
     sbom-file: image.cdx.json
+    system-id: checkout-image
+    upload-url: https://watch.example.com:8787
+    upload-token: ${{ secrets.SECURITY_WATCH_INTAKE_TOKEN }}
 ```
 
 ### GitLab CI and other pipelines
@@ -149,18 +156,56 @@ To use an SBOM made by another tool, pass it as `sbom-file`; the action checks t
 Any job with Node.js 24.10 or newer can run the command:
 
 ```yaml
-# .gitlab-ci.yml
+# .gitlab-ci.yml; SECURITY_WATCH_INTAKE_TOKEN is a masked CI/CD variable
 security-watch-sbom:
   image: node:24-slim
   script:
-    - npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id checkout-api --output security-watch.cdx.json
+    - npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id checkout-api --output security-watch.cdx.json --upload https://watch.example.com:8787
   artifacts:
     paths: [security-watch.cdx.json]
 ```
 
-### Getting the SBOM to the monitor
+`sbom --upload URL` sends what it made; `security-watch upload --input FILE --url URL` sends an SBOM made by anything else. Both read the token from `SECURITY_WATCH_INTAKE_TOKEN` (or the variable `--token-env` names), retry network errors and busy answers, and exit 1 with the monitor's reason when it refuses. They send to HTTPS addresses only, or plain HTTP to the same machine; `--allow-http` permits plain HTTP elsewhere, which exposes the token to the network in between. Run the pipeline on a schedule as well as on merges (daily is plenty), so that a repository nobody touched for a week is not reported as stale.
 
-Security Watch is self-hosted and opens no port, so the SBOM is copied to it. Choose what you already have:
+## Receive SBOMs from pipelines
+
+Add an `intake` section to `security-watch.yaml`, and `start` receives uploads while it watches:
+
+```yaml
+intake:
+  listen: 0.0.0.0:8787 # default 127.0.0.1:8787, this machine only
+  tls_cert_file: ./tls/cert.pem # relative to this file
+  tls_key_file: ./tls/key.pem
+  tokens:
+    - token_env: SECURITY_WATCH_INTAKE_TOKEN # may upload any system
+    - token_env: PAYMENTS_TEAM_INTAKE_TOKEN
+      systems: [checkout-api, 'billing-*'] # exact IDs, or a prefix ending in *
+```
+
+Create each token with `openssl rand -hex 32` and put it in the credentials file (`.env`) and in the pipeline's secret store. Tokens must be at least 32 characters; `start` refuses to begin without them, and `doctor` reports a missing one. `security-watch intake` runs the receiver alone, for example in its own container beside the monitor.
+
+The receiver accepts `PUT /v1/sboms/SYSTEM_ID` with `Authorization: Bearer TOKEN` and the SBOM as the body. It writes the file as `SYSTEM_ID.cdx.json` (or `.spdx.json`) into the SBOM folder in one step, replacing the system's previous SBOM, and the next scan watches it. `GET /healthz` answers without a token, for load balancers.
+
+| Answer | Meaning                                                                                                                                                                          |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    | Stored. The answer lists the packages that will be watched and how many entries were not usable, with examples.                                                                  |
+| 400    | The system ID is not 1 to 100 letters, digits, dots, hyphens or underscores, or the body is empty.                                                                               |
+| 401    | No token, or a wrong one. After twenty failures from one address in a minute, further wrong tokens are answered 429 for the rest of that minute; a valid token is always served. |
+| 403    | The token may not upload that system.                                                                                                                                            |
+| 409    | The SBOM names another system ID, the system is written by hand in `systems.yaml`, or another file in the folder already describes it.                                           |
+| 413    | Larger than 20 MiB.                                                                                                                                                              |
+| 422    | Not a CycloneDX or SPDX JSON SBOM, or it has no package Security Watch can watch.                                                                                                |
+| 503    | Four uploads are already being processed; the client retries.                                                                                                                    |
+
+Every upload and refusal is logged as one JSON line, naming the token's variable and never the token.
+
+**Exposing it.** Listening beyond this machine needs TLS: either the certificate and key above, or `allow_plain_http: true` when a TLS proxy in front of it is the only way in (for example Caddy: `watch.example.com { reverse_proxy 127.0.0.1:8787 }`, with `listen: 127.0.0.1:8787` needing neither). For a certificate from a private authority, give pipelines its root with `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`. Open the port to your CI runners only where you can; the token is the authentication, the network rule keeps everyone else from trying. In Docker, publish the port (`-p 8787:8787`), mount the SBOM folder writable (`--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms`) and pass the token in the environment.
+
+What an upload can change: the SBOM for one system ID the token allows, including the owner and note that alerts show for it. It cannot touch systems written in `systems.yaml`, other files, or the configuration.
+
+### Other ways to deliver
+
+Without the receiver, copy the SBOM into the folder with what you already have:
 
 - **Object storage.** The pipeline uploads, the monitor host syncs every few minutes:
 
@@ -176,7 +221,7 @@ Security Watch is self-hosted and opens no port, so the SBOM is copied to it. Ch
 - **The same host.** A self-hosted runner writes straight into the folder.
 - **Workflow artifacts.** The monitor host fetches the newest artifact: `gh run download --repo acme/checkout-api --name security-watch-sbom --dir ./watch/sboms`.
 
-Whichever you choose, an SBOM that stops arriving is reported as stale, so a broken pipeline does not look like a quiet week. Run the pipeline on a schedule as well as on merges (daily is plenty), so that a repository nobody touched for a week is not reported as stale either.
+However it arrives, an SBOM that stops arriving is reported as stale, so a broken pipeline does not look like a quiet week.
 
 ## SBOMs from other tools
 

@@ -81,6 +81,10 @@ export type { RetentionPolicy, PruneCounts, PruneReport, BackupVerification } fr
 export { importCycloneDx, importSbom } from './sbom.js';
 export { generateSbom, DEPENDENCY_FILES } from './manifests.js';
 export type { SbomOptions, GeneratedSbom, DependencyFile } from './manifests.js';
+export { createIntakeHandler, startIntake } from './intake.js';
+export type { IntakeUpload, IntakeOptions, RunningIntake } from './intake.js';
+export { uploadSbom } from './upload.js';
+export type { UploadOptions } from './upload.js';
 export type { SbomImport } from './sbom.js';
 export { compareInventories, attachLocation, attachRemediation } from './inventory-evidence.js';
 export { refreshCoverage } from './coverage.js';

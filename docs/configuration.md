@@ -478,6 +478,21 @@ This is optional; `init --heartbeat` adds the default environment-variable name 
 
 Intervals may be 30–3,600 seconds. Requests have a five-second timeout, no redirects and a 4 KiB response cap. Public HTTPS is required unless `allow_private_endpoint: true` explicitly permits a trusted private/local HTTP(S) destination; plain HTTP to an address that is not private or local is refused even then. The URL is not included in recorded status or errors. `status` exposes the last external-heartbeat outcome independently of the local worker heartbeat. An external ping cannot itself notify you that it was never sent; the receiving service must detect that absence.
 
+## SBOM receiver
+
+```yaml
+intake:
+  listen: 127.0.0.1:8787 # HOST:PORT; [::]:8787 for IPv6
+  tokens: # default: one token in SECURITY_WATCH_INTAKE_TOKEN for every system
+    - token_env: SECURITY_WATCH_INTAKE_TOKEN
+      systems: ['*'] # IDs, or prefixes ending in *
+  tls_cert_file: ./tls/cert.pem # both or neither; relative to this file
+  tls_key_file: ./tls/key.pem
+  allow_plain_http: false # required to listen beyond loopback without TLS
+```
+
+With `intake` set, `start` accepts SBOM uploads from CI into the inventory's `sbom_directory`, and `security-watch intake` runs the receiver alone. The inventory must set `sbom_directory`. Tokens are read from the named environment variables and must be at least 32 characters. See [Receive SBOMs from pipelines](sbom.md#receive-sboms-from-pipelines).
+
 ## Retention and verified backups
 
 Every scan compares every stored news story with the inventory. Without retention the stored news grows by roughly 5,000 stories a year, and with a large inventory (thousands of components) that comparison takes a minute or more per scan after a year. Enable retention for news when the inventory is large.

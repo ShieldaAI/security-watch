@@ -10,3 +10,6 @@ data/
 security-watch.yaml
 systems.yaml
 .docker-check-*/
+.intake-ci/
+sbom.cdx.json
+security-watch.cdx.json

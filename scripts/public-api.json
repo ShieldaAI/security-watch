@@ -16,6 +16,7 @@
   "collectSources",
   "compareInventories",
   "configSchema",
+  "createIntakeHandler",
   "createPilotCasePacket",
   "createPilotResponseTemplate",
   "decide",
@@ -44,6 +45,8 @@
   "scorePilotResponses",
   "sendEmail",
   "smtpProblem",
+  "startIntake",
+  "uploadSbom",
   "validateAnalysis",
   "verifyBackup"
 ]

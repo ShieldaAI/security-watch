@@ -655,15 +655,18 @@ test('every SBOM in the SBOM folder becomes a system described by the SBOM', (t)
   ]);
 });
 
-test('an SBOM folder needs a folder and at least one system overall', (t) => {
+test('an SBOM folder must exist, and an inventory without one needs a system', (t) => {
   const directory = temp(t);
   const inventory = join(directory, 'systems.yaml');
   writeFileSync(inventory, 'sbom_directory: ./sboms\n');
   assert.throws(() => loadInventory(inventory), /ENOENT/);
   mkdirSync(join(directory, 'sboms'));
-  assert.throws(
-    () => loadInventory(inventory),
-    /No systems: the inventory lists none and \.\/sboms holds no SBOM/,
+  // An empty folder is how a monitor fed by pipelines starts: nothing is watched, and it says so.
+  const empty = loadInventory(inventory);
+  assert.equal(empty.systems.length, 0);
+  assert.match(
+    empty.name_notices[0],
+    /The SBOM folder \.\/sboms has no SBOM that could be imported, so nothing is watched yet/,
   );
   writeFileSync(join(directory, 'file'), '');
   writeFileSync(inventory, 'sbom_directory: ./file\n');
@@ -965,7 +968,13 @@ test('the GitHub Action is pinned, matches the release and runs its script as do
   const script = readFileSync(join(root, 'scripts/action-sbom.sh'), 'utf8');
   for (const name of Object.keys(action.inputs).filter(
     (name) =>
-      !['upload-artifact', 'artifact-name', 'retention-days', 'security-watch-version'].includes(name),
+      ![
+        'upload-artifact',
+        'artifact-name',
+        'retention-days',
+        'security-watch-version',
+        'upload-token',
+      ].includes(name),
   )) {
     const variable = `SW_${name.replace(/-/g, '_').toUpperCase()}`;
     assert.ok(script.includes(variable), `${variable} is used`);
@@ -974,6 +983,11 @@ test('the GitHub Action is pinned, matches the release and runs its script as do
       `${variable} is passed`,
     );
   }
+  // The token reaches the CLI as the variable it reads, from the input, and nowhere else.
+  assert.equal(
+    action.runs.steps.find((step) => step.id === 'sbom').env.SECURITY_WATCH_INTAKE_TOKEN,
+    '${{ inputs.upload-token }}',
+  );
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   const guide = readFileSync(join(root, 'docs/sbom.md'), 'utf8');
   for (const text of [readme, guide]) {

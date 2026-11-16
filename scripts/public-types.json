@@ -32,6 +32,8 @@
   "HttpClient",
   "HttpOptions",
   "HttpResult",
+  "IntakeOptions",
+  "IntakeUpload",
   "Inventory",
   "InventoryDrift",
   "InventoryEvidence",
@@ -61,9 +63,11 @@
   "RemediationEvidence",
   "RetentionPolicy",
   "Rule",
+  "RunningIntake",
   "SbomImport",
   "SbomOptions",
   "Severity",
   "SourceResult",
-  "System"
+  "System",
+  "UploadOptions"
 ]

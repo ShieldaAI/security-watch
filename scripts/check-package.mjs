@@ -29,6 +29,8 @@ try {
     'dist/index.d.ts',
     'dist/sbom.js',
     'dist/manifests.js',
+    'dist/intake.js',
+    'dist/upload.js',
     'docs/sbom.md',
     'dist/coverage.js',
     'dist/inventory-evidence.js',
@@ -182,6 +184,10 @@ try {
     join(consumer, 'consumer.mts'),
     `import { ModelAnalyzer, safeHttp, deliverPending, attachLocation, type ModelState, type DeliveryOptions, type FindingLocation } from '@shieldaai/security-watch';
 import { generateSbom, importSbom, DEPENDENCY_FILES, type GeneratedSbom, type SbomOptions, type DependencyFile } from '@shieldaai/security-watch';
+import { startIntake, createIntakeHandler, uploadSbom, type IntakeUpload, type IntakeOptions, type RunningIntake, type UploadOptions } from '@shieldaai/security-watch';
+const intakeStarter: (config: Parameters<typeof startIntake>[0], options?: IntakeOptions) => Promise<RunningIntake> = startIntake;
+const uploader: (options: UploadOptions) => Promise<IntakeUpload> = uploadSbom;
+if (typeof intakeStarter !== 'function' || typeof uploader !== 'function' || typeof createIntakeHandler !== 'function') throw new Error('Unexpected intake exports');
 const sbomOptions: SbomOptions = { project: './project', production: true, exposure: 'internal' };
 const generatedSbom: GeneratedSbom = generateSbom(sbomOptions);
 const sbomFiles: DependencyFile[] = generatedSbom.files;

@@ -220,6 +220,66 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    intake: z
+      .object({
+        listen: z
+          .string()
+          .trim()
+          .regex(
+            /^(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+):\d{1,5}$/,
+            'Use HOST:PORT, for example 127.0.0.1:8787 or [::]:8787',
+          )
+          .refine((value) => Number(value.slice(value.lastIndexOf(':') + 1)) <= 65535, 'Invalid port')
+          .default('127.0.0.1:8787'),
+        tokens: z
+          .array(
+            z
+              .object({
+                token_env: envName,
+                systems: z
+                  .array(
+                    z
+                      .string()
+                      .regex(
+                        /^(?:\*|[A-Za-z0-9][A-Za-z0-9._-]{0,99}\*?)$/,
+                        'Use a system ID, an ID prefix ending in *, or * for every system',
+                      ),
+                  )
+                  .min(1)
+                  .max(1000)
+                  .default(['*']),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(100)
+          .default([{ token_env: 'SECURITY_WATCH_INTAKE_TOKEN', systems: ['*'] }]),
+        tls_cert_file: z.string().trim().min(1).max(4096).optional(),
+        tls_key_file: z.string().trim().min(1).max(4096).optional(),
+        allow_plain_http: z.boolean().default(false),
+      })
+      .strict()
+      .superRefine((intake, ctx) => {
+        if (Boolean(intake.tls_cert_file) !== Boolean(intake.tls_key_file))
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Set both tls_cert_file and tls_key_file, or neither',
+            path: ['tls_cert_file'],
+          });
+        const host = intake.listen.slice(0, intake.listen.lastIndexOf(':')).replace(/^\[|\]$/g, '');
+        const loopback = host === 'localhost' || host === '::1' || /^127\./.test(host);
+        if (!loopback && !intake.tls_cert_file && !intake.allow_plain_http)
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Listening beyond this machine sends upload tokens over the network: set tls_cert_file and tls_key_file, or allow_plain_http: true when a TLS proxy in front of it is the only way in',
+            path: ['listen'],
+          });
+        const envs = intake.tokens.map((token) => token.token_env);
+        if (new Set(envs).size !== envs.length)
+          ctx.addIssue({ code: 'custom', message: 'Each token needs its own token_env', path: ['tokens'] });
+      })
+      .optional(),
     maintenance: z
       .object({
         interval_hours: z.number().int().min(1).max(168).default(24),
@@ -397,6 +457,10 @@ export function loadConfig(path: string): Config {
   const config = parseConfig(substitute(parse(raw, { maxAliasCount: 0 })));
   config.inventory = resolve(dirname(resolve(path)), config.inventory);
   config.database = resolve(dirname(resolve(path)), config.database);
+  if (config.intake?.tls_cert_file)
+    config.intake.tls_cert_file = resolve(dirname(resolve(path)), config.intake.tls_cert_file);
+  if (config.intake?.tls_key_file)
+    config.intake.tls_key_file = resolve(dirname(resolve(path)), config.intake.tls_key_file);
   if (config.maintenance?.backup)
     config.maintenance.backup.directory = resolve(
       dirname(resolve(path)),

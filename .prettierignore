@@ -10,3 +10,5 @@ security-watch.yaml
 systems.yaml
 .docker-check-*/
 src/word-filter.ts
+.intake-ci/
+*.cdx.json

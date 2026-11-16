@@ -38,6 +38,12 @@ inputs:
   sbom-file:
     description: Use an SBOM made by another tool (Trivy, Syft, cdxgen, GitHub) instead of generating one. The action checks that Security Watch can read it and uploads it.
     default: ''
+  upload-url:
+    description: Address of your Security Watch intake, for example https://watch.example.com:8787. The SBOM is sent there and the step fails if the monitor refuses it.
+    default: ''
+  upload-token:
+    description: Intake upload token. Pass it from a secret, for example secrets.SECURITY_WATCH_INTAKE_TOKEN.
+    default: ''
   upload-artifact:
     description: Upload the SBOM as a workflow artifact.
     default: 'true'
@@ -87,6 +93,8 @@ runs:
         SW_CRITICALITY: ${{ inputs.criticality }}
         SW_PRODUCTION: ${{ inputs.production }}
         SW_SBOM_FILE: ${{ inputs.sbom-file }}
+        SW_UPLOAD_URL: ${{ inputs.upload-url }}
+        SECURITY_WATCH_INTAKE_TOKEN: ${{ inputs.upload-token }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action-sbom.sh"
     - if: inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

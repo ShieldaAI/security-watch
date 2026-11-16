@@ -38,6 +38,16 @@ else
   packages="$(count "$path")"
 fi
 
+if [ -n "${SW_UPLOAD_URL:-}" ]; then
+  if [ -z "${SECURITY_WATCH_INTAKE_TOKEN:-}" ]; then
+    echo "upload-url is set but upload-token is empty; pass it from a secret." >&2
+    exit 1
+  fi
+  upload=(upload --input "$path" --url "$SW_UPLOAD_URL")
+  [ -n "${SW_SYSTEM_ID:-}" ] && upload+=(--system-id "$SW_SYSTEM_ID")
+  "${cli[@]}" "${upload[@]}"
+fi
+
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {
     echo "path=$path"
