@@ -20,7 +20,7 @@ export interface UploadOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const SYSTEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const SYSTEM_ID = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 
 function loopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '');
@@ -43,7 +43,7 @@ export function intakeAddress(base: string, systemId: string, allowHttp = false)
     );
   if (!SYSTEM_ID.test(systemId))
     throw new Error(
-      'A system ID is 1 to 100 letters, digits, dots, hyphens or underscores, starting with a letter or digit.',
+      'A system ID is 1 to 100 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit.',
     );
   url.pathname = `${url.pathname.replace(/\/+$/, '')}/v1/sboms/${encodeURIComponent(systemId)}`;
   return url;

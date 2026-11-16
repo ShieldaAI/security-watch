@@ -31,7 +31,7 @@ import { singleLine } from './util.js';
  */
 
 export const INTAKE_MAX_BYTES = 20 * 1024 * 1024;
-const SYSTEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const SYSTEM_ID = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 const SBOM_SUFFIX = /(?:\.(?:cdx|spdx|bom|sbom|cyclonedx))?\.json$/i;
 const MIN_TOKEN_LENGTH = 32;
 const MAX_ACTIVE_UPLOADS = 4;
@@ -339,7 +339,7 @@ export function createIntakeHandler(
       if (!SYSTEM_ID.test(id)) {
         send(response, 400, {
           error:
-            'A system ID is 1 to 100 letters, digits, dots, hyphens or underscores, starting with a letter or digit.',
+            'A system ID is 1 to 100 lower-case letters, digits, dots, hyphens or underscores, starting with a letter or digit.',
         });
         return;
       }

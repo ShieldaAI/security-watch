@@ -57,7 +57,7 @@ jobs:
           node dist/cli.js intake --config .intake-ci/security-watch.yaml &
           receiver=$!
           for attempt in $(seq 50); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 0.2; done
-          SW_PACKAGE=unused SW_CLI="node dist/cli.js" SW_PROJECT=. SW_OUTPUT=sbom.cdx.json \
+          SW_PACKAGE=unused SW_CLI="node $PWD/dist/cli.js" SW_PROJECT=. SW_OUTPUT=sbom.cdx.json \
             SW_SYSTEM_ID=security-watch SW_UPLOAD_URL=http://127.0.0.1:8787 bash scripts/action-sbom.sh
           kill "$receiver"
           node dist/cli.js doctor --config .intake-ci/security-watch.yaml |

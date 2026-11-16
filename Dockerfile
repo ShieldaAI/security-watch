@@ -10,7 +10,7 @@ FROM build AS test
 COPY test ./test
 COPY scripts ./scripts
 # The documentation, example and version checks read these files.
-COPY README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md compose.yaml ./
+COPY README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md compose.yaml action.yml ./
 COPY docs ./docs
 COPY examples ./examples
 COPY evals ./evals

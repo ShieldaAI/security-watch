@@ -189,7 +189,7 @@ The receiver accepts `PUT /v1/sboms/SYSTEM_ID` with `Authorization: Bearer TOKEN
 | Answer | Meaning                                                                                                                                                                          |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    | Stored. The answer lists the packages that will be watched and how many entries were not usable, with examples.                                                                  |
-| 400    | The system ID is not 1 to 100 letters, digits, dots, hyphens or underscores, or the body is empty.                                                                               |
+| 400    | The system ID is not 1 to 100 lower-case letters, digits, dots, hyphens or underscores, or the body is empty.                                                                    |
 | 401    | No token, or a wrong one. After twenty failures from one address in a minute, further wrong tokens are answered 429 for the rest of that minute; a valid token is always served. |
 | 403    | The token may not upload that system.                                                                                                                                            |
 | 409    | The SBOM names another system ID, the system is written by hand in `systems.yaml`, or another file in the folder already describes it.                                           |

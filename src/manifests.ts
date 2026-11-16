@@ -536,8 +536,9 @@ function composerVersion(value: unknown): string | undefined {
   if (!string(value) || /^dev-|-dev$/.test(value)) return undefined;
   return value.replace(/^v(?=\d)/, '');
 }
-const composerPlatform = (name: string) =>
-  !name.includes('/') || /^(?:php|ext-|lib-|composer-(?:plugin|runtime)-api)/.test(name);
+// Platform requirements (php, ext-json, lib-icu, composer-plugin-api) have no vendor; every real
+// package does, including vendors whose name starts with "php" (phpmailer/phpmailer, phpunit/phpunit).
+const composerPlatform = (name: string) => !name.includes('/');
 
 const composerLock: Reader = (text) => {
   const lock: unknown = JSON.parse(text);
@@ -788,7 +789,7 @@ const pubspecYaml: Reader = (text) => {
 /** `.package(url: "https://github.com/vapor/vapor.git", from: "4.0.0")` and its variants. */
 const packageSwift: Reader = (text) => {
   const packages: Found[] = [];
-  for (const match of text.matchAll(/\.package\s*\(([^)]*)\)/g)) {
+  for (const match of text.matchAll(/\.package\s*\(([^)]{0,2000})\)/g)) {
     const url = /url:\s*"([^"]+)"/.exec(match[1]!)?.[1];
     const name = swiftIdentity(url);
     if (!name) continue;

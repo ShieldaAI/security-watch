@@ -73,6 +73,8 @@ const EXPECTED = [
   'pkg:composer/acme/branch',
   'pkg:composer/guzzlehttp/guzzle@7.8.0',
   'pkg:composer/monolog/monolog',
+  'pkg:composer/phpstan/phpstan@1.10.0',
+  'pkg:composer/phpunit/phpunit@10.5.0',
   'pkg:composer/symfony/http-foundation@6.4.0',
   'pkg:gem/nokogiri@1.16.5',
   'pkg:gem/puma',
@@ -162,6 +164,8 @@ test('every supported dependency file is read into one CycloneDX document', (t) 
   // Development-only dependencies are kept and marked.
   const scoped = result.bom.components.filter((component) => component.scope === 'optional');
   assert.deepEqual(scoped.map((component) => component.purl).sort(), [
+    'pkg:composer/phpstan/phpstan@1.10.0',
+    'pkg:composer/phpunit/phpunit@10.5.0',
     'pkg:maven/junit/junit@4.13.2',
     'pkg:maven/org.junit.jupiter/junit-jupiter@5.10.0',
     'pkg:npm/%40babel/core@7.24.0',
@@ -383,6 +387,39 @@ dev_dependencies:
   for (let index = 0; index <= 20_000; index++) packages[`node_modules/p${index}`] = { version: '1.0.0' };
   writeFileSync(join(huge, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages }));
   assert.throws(() => generateSbom({ project: huge }), /at most 20000 fit one system/);
+});
+
+test('Composer vendors whose name starts with "php" are packages, not platform requirements', (t) => {
+  const project = mkdtempSync(join(tmpdir(), 'sw-composer-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  writeFileSync(
+    join(project, 'composer.lock'),
+    JSON.stringify({
+      packages: [
+        { name: 'phpmailer/phpmailer', version: 'v6.8.0' },
+        { name: 'phpseclib/phpseclib', version: '3.0.20' },
+        { name: 'monolog/monolog', version: '3.4.0' },
+      ],
+      'packages-dev': [{ name: 'phpunit/phpunit', version: '10.0.0' }],
+      platform: { php: '>=8.1', 'ext-json': '*' },
+    }),
+  );
+  const purls = generateSbom({ project }).bom.components.map((component) => component.purl);
+  assert.deepEqual(purls, [
+    'pkg:composer/monolog/monolog@3.4.0',
+    'pkg:composer/phpmailer/phpmailer@6.8.0',
+    'pkg:composer/phpseclib/phpseclib@3.0.20',
+    'pkg:composer/phpunit/phpunit@10.0.0',
+  ]);
+});
+
+test('an unclosed .package( in Package.swift does not make reading slow', (t) => {
+  const project = mkdtempSync(join(tmpdir(), 'sw-swift-'));
+  t.after(() => rmSync(project, { recursive: true, force: true }));
+  writeFileSync(join(project, 'Package.swift'), '.package('.repeat(200_000));
+  const started = performance.now();
+  generateSbom({ project });
+  assert.ok(performance.now() - started < 5_000, 'read in under 5 seconds');
 });
 
 test('package URLs follow the purl specification for every ecosystem', () => {
@@ -731,7 +768,7 @@ test('the sbom command writes, replaces and describes an SBOM, and fills in the 
   const printed = run(['sbom', '--project', project], directory);
   assert.equal(printed.code, 0, printed.stderr);
   assert.equal(JSON.parse(printed.stdout).components.length, EXPECTED.length);
-  assert.match(printed.stderr, /^project: 69 packages \(Go, Hackage/m);
+  assert.match(printed.stderr, /^project: 71 packages \(Go, Hackage/m);
   assert.match(printed.stderr, /^11 packages have no exact version and are watched by name only\.$/m);
   assert.match(printed.stderr, /^warning: web\/package-lock\.json: 2 entries come from Git/m);
 

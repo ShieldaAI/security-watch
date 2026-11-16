@@ -225,6 +225,8 @@ test('the intake refuses what it should, with an answer a pipeline can act on', 
     ['PUT', '/v1/sboms/..%2F..%2Fetc', good, TOKEN, 400, /system ID is 1 to 100/],
     ['PUT', '/v1/sboms/%E0%A4%A', good, TOKEN, 400, /system ID/],
     ['PUT', '/v1/sboms/.hidden', good, TOKEN, 400, /system ID/],
+    // Lower case only: on a case-insensitive disk BILLING.cdx.json would replace billing.cdx.json.
+    ['PUT', '/v1/sboms/BILLING', good, TOKEN, 400, /lower-case/],
     ['PUT', '/v1/sboms/web-checkout', good, OTHER, 403, /may not upload system web-checkout/],
     ['PUT', '/v1/sboms/checkout-api', '', TOKEN, 400, /body is empty/],
     ['PUT', '/v1/sboms/checkout-api', '{', TOKEN, 422, /Not a usable SBOM: SBOM is not valid JSON/],
@@ -304,7 +306,12 @@ test('the intake refuses what it should, with an answer a pipeline can act on', 
 
   // A body over 20 MiB is refused whether or not its size is declared up front.
   const huge = Buffer.alloc(20 * 1024 * 1024 + 1, 0x20);
-  const declared = await put(intake.url, '/v1/sboms/checkout-api', huge);
+  // The receiver answers 413 and closes the connection at once; on some platforms (macOS) the client
+  // is still sending and sees the closed connection instead of the answer.
+  const declared = await put(intake.url, '/v1/sboms/checkout-api', huge).catch((error) => {
+    if (['EPIPE', 'ECONNRESET'].includes(error?.cause?.code)) return { status: 413 };
+    throw error;
+  });
   assert.equal(declared.status, 413);
   const streamed = await new Promise((resolve, reject) => {
     const url = new URL('/v1/sboms/checkout-api', intake.url);
@@ -622,4 +629,8 @@ test('the GitHub Action uploads to the intake when given an address and a token'
   const refused = await run({ SECURITY_WATCH_INTAKE_TOKEN: OTHER, SW_SYSTEM_ID: 'web-api' });
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /Upload refused \(403\)/);
+  // sbom lower-cases the system ID; the upload sends the ID the SBOM carries, not the input as typed.
+  const capitals = await run({ SECURITY_WATCH_INTAKE_TOKEN: OTHER, SW_SYSTEM_ID: 'Checkout-Caps' });
+  assert.equal(capitals.status, 0, capitals.stderr);
+  assert.ok(existsSync(join(sboms, 'checkout-caps.cdx.json')));
 });
