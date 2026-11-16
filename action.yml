@@ -1,5 +1,5 @@
 name: Shielda Security Watch SBOM
-description: Make a CycloneDX SBOM from your lockfiles for Shielda Security Watch. Reads files only; installs and runs nothing from project
+description: Create a CycloneDX SBOM for the Shielda Security Watch. Reads files only; installs and runs nothing from the project.
 author: Shielda
 branding:
   icon: shield
