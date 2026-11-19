@@ -267,7 +267,11 @@ export const configSchema = z
             path: ['tls_cert_file'],
           });
         const host = intake.listen.slice(0, intake.listen.lastIndexOf(':')).replace(/^\[|\]$/g, '');
-        const loopback = host === 'localhost' || host === '::1' || /^127\./.test(host);
+        // An address, not a name that starts like one: `127.example.com` can point anywhere.
+        const loopback =
+          host.toLowerCase() === 'localhost' ||
+          (isIP(host) === 4 && host.startsWith('127.')) ||
+          (isIP(host) === 6 && /^(?:0*:)*:?0*1$/.test(host));
         if (!loopback && !intake.tls_cert_file && !intake.allow_plain_http)
           ctx.addIssue({
             code: 'custom',

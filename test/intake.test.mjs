@@ -96,9 +96,15 @@ test('intake configuration refuses tokens in clear text over a network', () => {
     allow_plain_http: false,
   });
   assert.equal(parseConfig({ ...base, intake: { listen: '[::1]:9000' } }).intake.listen, '[::1]:9000');
+  for (const listen of ['127.0.0.2:9000', 'LOCALHOST:9000', '[0:0:0:0:0:0:0:1]:9000'])
+    assert.equal(parseConfig({ ...base, intake: { listen } }).intake.listen, listen);
   for (const [intake, message] of [
     [{ listen: '0.0.0.0:8787' }, /set tls_cert_file and tls_key_file, or allow_plain_http/],
     [{ listen: 'watch.internal:8787' }, /allow_plain_http/],
+    // A name that starts like a loopback address is a name: it can resolve anywhere.
+    [{ listen: '127.example.com:8787' }, /allow_plain_http/],
+    [{ listen: '127.0.0.1.nip.io:8787' }, /allow_plain_http/],
+    [{ listen: '[::2]:8787' }, /allow_plain_http/],
     [{ listen: '8787' }, /HOST:PORT/],
     [{ listen: '127.0.0.1:70000' }, /Invalid port/],
     [{ tls_cert_file: 'cert.pem' }, /both tls_cert_file and tls_key_file/],

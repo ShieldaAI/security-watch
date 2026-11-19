@@ -1090,3 +1090,27 @@ test('the GitHub Action is pinned, matches the release and runs its script as do
   assert.equal(action_run({ SW_SBOM_FILE: 'bad.json' }).status, 1);
   assert.notEqual(action_run({ SW_PROJECT: join(directory, 'nowhere') }).status, 0);
 });
+
+test('a dependency file given as a symbolic link is refused; a linked project folder is still read', () => {
+  const base = mkdtempSync(join(tmpdir(), 'sw-sbom-link-'));
+  try {
+    const outside = join(base, 'outside');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'secret.txt'), 'require a.b/c v1.0.0\n');
+    const project = join(base, 'project');
+    mkdirSync(project);
+    symlinkSync(join(outside, 'secret.txt'), join(project, 'go.mod'));
+    assert.throws(
+      () => generateSbom({ project: join(project, 'go.mod'), now: NOW }),
+      /go\.mod is a symbolic link; give the dependency file itself/,
+    );
+    const real = join(base, 'real');
+    mkdirSync(real);
+    writeFileSync(join(real, 'go.mod'), 'module x\n\nrequire a.b/c v1.0.0\n');
+    symlinkSync(real, join(base, 'linked-folder'));
+    const result = generateSbom({ project: join(base, 'linked-folder'), now: NOW });
+    assert.ok(result.bom.components.some((component) => component.name === 'a.b/c'));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
