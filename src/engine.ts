@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { cvssV4BaseScore } from './cvss4.js';
 import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
-import { attachEpss, readEpssCache, refreshEpss } from './epss.js';
+import { attachEpss, findingCves, readEpssCache, refreshEpss } from './epss.js';
 import { attachLocation, attachRemediation, compareInventories } from './inventory-evidence.js';
 import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
@@ -201,10 +201,12 @@ export async function runScan(options: {
   // EPSS is attached when a finding is saved, after its analysis basis is taken, and is left out of
   // its revision and review: a score that changes daily must not re-send, reopen or re-analyse.
   let epssCache = config.sources.epss ? readEpssCache(store.getMeta('epss:cache')) : {};
+  let epssEvidence = new Map(remediationEvidence.map((item) => [item.id, item]));
   const persist = (assessment: Assessment) => {
     assessment = attachEpss(
       attachLocation(attachRemediation(assessment, inventory, remediationEvidence, config, now), inventory),
       epssCache,
+      findingCves(assessment, epssEvidence),
     );
     const decision = decide(assessment, config);
     decisions[assessment.id] = decision;
@@ -222,7 +224,9 @@ export async function runScan(options: {
         : undefined,
     );
   };
-  const retire = (assessment: Assessment) => {
+  const retire = (previous: Assessment) => {
+    // A retired finding is not looked up any more; an ageing score would only mislead.
+    const { epss: _epss, ...assessment } = previous;
     store.saveAssessment(
       {
         ...assessment,
@@ -333,6 +337,7 @@ export async function runScan(options: {
   const evidence = store.evidence();
   remediationEvidence = evidence;
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
+  epssEvidence = evidenceById;
   const findings = assess(inventory, evidence, config, now, now, knownEvents, knownFindings);
   const bases = new Map(findings.map((a) => [a.id, basis(a, evidenceById)]));
   const errors = [
@@ -373,7 +378,9 @@ export async function runScan(options: {
     );
   if (config.sources.epss && !options.fixture) {
     const refreshed = await refreshEpss(
-      findings.filter((finding) => finding.category !== 'health').map((finding) => finding.event_id),
+      findings
+        .filter((finding) => finding.category !== 'health')
+        .flatMap((finding) => findingCves(finding, evidenceById)),
       epssCache,
       http,
       now,
@@ -462,7 +469,11 @@ export async function runScan(options: {
         errors.push({ source: 'models', message: code });
     }
     // After analysis, so a model never receives it and a new score never asks for a new one.
-    enriched = attachEpss(attachRemediation(enriched, inventory, evidence, config, now), epssCache);
+    enriched = attachEpss(
+      attachRemediation(enriched, inventory, evidence, config, now),
+      epssCache,
+      findingCves(enriched, evidenceById),
+    );
     analyzed.push(enriched);
     persist(enriched);
     store.setMeta(`assessment-basis:${finding.id}`, bases.get(finding.id)!);

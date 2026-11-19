@@ -83,6 +83,8 @@ export interface Product {
  * and its rank among all scored CVEs. Shown only; not part of a finding's revision or review.
  */
 export interface EpssScore {
+  /** The CVE it is for: the finding's event, or a CVE alias of its advisory when the event is a GHSA. */
+  cve: string;
   /** 0 to 1. */
   probability: number;
   /** 0 to 1: the share of scored CVEs with a lower probability. */

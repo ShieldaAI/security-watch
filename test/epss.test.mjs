@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachEpss, readEpssCache, refreshEpss } from '../dist/epss.js';
+import { attachEpss, findingCves, readEpssCache, refreshEpss } from '../dist/epss.js';
 import { parseConfig } from '../dist/config.js';
 import { Store } from '../dist/store.js';
 import { runScan } from '../dist/engine.js';
@@ -156,26 +156,45 @@ test('the stored cache is read defensively and attached by the finding s CVE', (
   const finding = {
     id: 'f',
     event_id: cve(1).toLowerCase(),
-    epss: { probability: 0.9, percentile: 1, date: '2026-01-01' },
+    evidence_ids: [],
+    epss: { cve: cve(9), probability: 0.9, percentile: 1, date: '2026-01-01' },
   };
-  assert.equal(attachEpss(finding, cache).epss.probability, 0.2);
-  assert.equal(
-    'epss' in attachEpss({ ...finding, event_id: cve(5) }, cache),
-    false,
-    'an old score is removed',
-  );
-  assert.equal('epss' in attachEpss({ ...finding, event_id: 'GHSA-aaaa-bbbb-cccc' }, cache), false);
+  assert.deepEqual(attachEpss(finding, cache, [cve(1).toLowerCase()]).epss, {
+    cve: cve(1),
+    probability: 0.2,
+    percentile: 0.9,
+    date: '2026-11-18',
+  });
+  assert.equal('epss' in attachEpss(finding, cache, [cve(5)]), false, 'an old score is removed');
+  assert.equal('epss' in attachEpss(finding, cache, []), false);
+  // Several CVEs: the highest score, and which CVE it is for.
+  const both = {
+    ...cache,
+    [cve(6)]: { fetched: now, score: { probability: 0.7, percentile: 0.99, date: '2026-11-18' } },
+  };
+  assert.equal(attachEpss(finding, both, [cve(1), cve(6)]).epss.cve, cve(6));
+});
+
+test('a finding s CVEs: its event, and the aliases of its advisories, not of the news it cites', () => {
+  const evidence = new Map([
+    ['cve_now:x', { id: 'cve_now:x', kind: 'advisory', aliases: [cve(1), 'GHSA-aaaa-bbbb-cccc'] }],
+    ['kev:y', { id: 'kev:y', kind: 'kev', aliases: [cve(2)] }],
+    ['news:z', { id: 'news:z', kind: 'news', aliases: [cve(3), cve(4)] }],
+  ]);
+  const finding = { event_id: 'GHSA-AAAA-BBBB-CCCC', evidence_ids: ['cve_now:x', 'kev:y', 'news:z', 'gone'] };
+  assert.deepEqual(findingCves(finding, evidence), [cve(1), cve(2)]);
+  assert.deepEqual(findingCves({ event_id: cve(5).toLowerCase(), evidence_ids: [] }, evidence), [cve(5)]);
 });
 
 // Scans: a score that changes daily must not re-send, reopen or re-analyse anything.
-const advisory = (id) => ({
+const advisory = (id, aliases = []) => ({
   id: `cve_now:${id}`,
   source: 'cve_now',
   kind: 'advisory',
   title: `${id} in alpha`,
   url: `https://cve.now/${id}`,
   description: 'Overflow in alpha.',
-  aliases: [id],
+  aliases: [id, ...aliases],
   severity: 'critical',
   modified_at: iso(),
   fetched_at: iso(),
@@ -313,12 +332,12 @@ test('a review is not reopened by a new score', () => {
   };
   const decision = { action: 'digest', channels: ['slack'], review: 'ai_not_affected', reason: 'r' };
   store.saveAssessment(
-    { ...base, epss: { probability: 0.1, percentile: 0.5, date: '2026-11-18' } },
+    { ...base, epss: { cve: cve(45), probability: 0.1, percentile: 0.5, date: '2026-11-18' } },
     decision,
     now,
   );
   store.saveAssessment(
-    { ...base, epss: { probability: 0.9, percentile: 0.99, date: '2026-11-19' } },
+    { ...base, epss: { cve: cve(45), probability: 0.9, percentile: 0.99, date: '2026-11-19' } },
     decision,
     now + DAY,
   );
@@ -341,7 +360,7 @@ test('alerts and digests show EPSS as numbers', () => {
     urls: [],
     exploited: false,
     updated_at: iso(),
-    epss: { probability: 0.0164, percentile: 0.7686, date: '2026-11-18' },
+    epss: { cve: cve(46), probability: 0.0164, percentile: 0.7686, date: '2026-11-18' },
   };
   const job = (id, a = assessment) => ({
     id,
@@ -355,12 +374,91 @@ test('alerts and digests show EPSS as numbers', () => {
   });
   assert.match(
     notificationText(job('d1')).text,
-    /EPSS: 1\.6% chance of exploitation in the next 30 days; higher than 76% of scored CVEs \(FIRST, 2026-11-18\)/,
+    /EPSS for CVE-2026-10046: 1\.6% chance of exploitation in the next 30 days; higher than 76% of scored CVEs \(FIRST, 2026-11-18\)/,
   );
-  const tiny = { ...assessment, epss: { probability: 0.0004, percentile: 0.1, date: '2026-11-18' } };
-  assert.match(notificationText(job('d2', tiny)).text, /EPSS: under 0\.1% chance/);
-  const high = { ...assessment, epss: { probability: 0.97, percentile: 1, date: '2026-11-18' } };
-  assert.match(notificationText(job('d3', high)).text, /EPSS: 97% chance .* higher than 100%/);
-  assert.match(digestText([job('d1'), job('d4')]).text, /EPSS: 1\.6%/);
+  const tiny = {
+    ...assessment,
+    epss: { cve: cve(46), probability: 0.0004, percentile: 0.1, date: '2026-11-18' },
+  };
+  assert.match(notificationText(job('d2', tiny)).text, /EPSS for CVE-2026-10046: under 0\.1% chance/);
+  const high = {
+    ...assessment,
+    epss: { cve: cve(46), probability: 0.97, percentile: 1, date: '2026-11-18' },
+  };
+  assert.match(
+    notificationText(job('d3', high)).text,
+    /EPSS for CVE-2026-10046: 97% chance .* higher than 100%/,
+  );
+  assert.match(digestText([job('d1'), job('d4')]).text, /EPSS for CVE-2026-10046: 1\.6%/);
   assert.doesNotMatch(notificationText(job('d5', { ...assessment, epss: undefined })).text, /EPSS/);
+});
+
+test('a library finding keyed by its GHSA identifier shows the EPSS of its CVE', async () => {
+  const store = new Store(':memory:');
+  const id = cve(47);
+  store.saveEvidence([advisory(id, ['GHSA-qqqq-wwww-eeee'])], {});
+  const asked = [];
+  const http = async (url) => {
+    asked.push(...new URL(url).searchParams.get('cve').split(','));
+    return {
+      status: 200,
+      headers: {},
+      body: JSON.stringify({
+        status: 'OK',
+        data: [{ cve: id, epss: '0.42', percentile: '0.98', date: '2026-11-18' }],
+      }),
+    };
+  };
+  await runScan({ config: scanConfig(true), inventory, store, http, now });
+  const finding = store.findings().find((item) => item.category === 'library');
+  assert.equal(finding.event_id, 'GHSA-QQQQ-WWWW-EEEE');
+  assert.deepEqual(asked, [id]);
+  assert.equal(finding.epss.cve, id);
+  assert.equal(finding.epss.probability, 0.42);
+});
+
+test('a scan without findings keeps recent scores; unused ones go after 30 days', async () => {
+  const score = { probability: 0.3, percentile: 0.9, date: '2026-11-18' };
+  const stored = {
+    [cve(1)]: { fetched: now - 2 * DAY, score },
+    [cve(2)]: { fetched: now - 31 * DAY, score },
+  };
+  const { http, calls } = first();
+  const result = await refreshEpss([], stored, http, now);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(Object.keys(result.cache), [cve(1)]);
+});
+
+test('a score a successful answer leaves out is kept while recent', async () => {
+  const recent = { probability: 0.3, percentile: 0.9, date: '2026-11-17' };
+  const old = { probability: 0.3, percentile: 0.9, date: '2026-11-01' };
+  const stored = {
+    [cve(1)]: { fetched: now - 2 * DAY, score: recent },
+    [cve(2)]: { fetched: now - 2 * DAY, score: old },
+  };
+  const { http } = first({ unscored: new Set([cve(1), cve(2)]) });
+  const result = await refreshEpss([cve(1), cve(2)], stored, http, now);
+  assert.deepEqual(result.cache[cve(1)], { fetched: now, score: recent });
+  assert.deepEqual(result.cache[cve(2)], { fetched: now });
+});
+
+test('a retired finding drops its score', async () => {
+  const store = new Store(':memory:');
+  const id = cve(48);
+  store.saveEvidence([advisory(id)], {});
+  const http = async () => ({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      status: 'OK',
+      data: [{ cve: id, epss: '0.2', percentile: '0.9', date: '2026-11-18' }],
+    }),
+  });
+  await runScan({ config: scanConfig(true), inventory, store, http, now });
+  assert.ok(store.findings().find((item) => item.event_id === id).epss);
+  const without = { systems: [{ ...inventory.systems[0], components: [] }] };
+  await runScan({ config: scanConfig(true), inventory: without, store, http, now: now + 60_000 });
+  const retired = store.findings().find((item) => item.event_id === id);
+  assert.equal(retired.active, false);
+  assert.equal('epss' in retired, false);
 });

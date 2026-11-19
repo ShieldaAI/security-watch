@@ -317,7 +317,7 @@ function epssLine(a: Assessment): string[] {
   const shown = percent < 0.1 ? 'under 0.1%' : `${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`;
   return [
     single(
-      `EPSS: ${shown} chance of exploitation in the next 30 days; higher than ${Math.floor(epss.percentile * 100)}% of scored CVEs (FIRST, ${epss.date})`,
+      `EPSS for ${epss.cve}: ${shown} chance of exploitation in the next 30 days; higher than ${Math.floor(epss.percentile * 100)}% of scored CVEs (FIRST, ${epss.date})`,
       200,
     ),
   ];
