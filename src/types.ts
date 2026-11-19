@@ -200,6 +200,11 @@ export interface Config {
     ai_dismissals?: 'review' | 'record';
     /** Deprecated configuration alias; true maps to review, false to record. */
     review_before_news_suppression?: boolean;
+    /**
+     * Read stated CVSS scores, vendor ratings and exploitation reports from news to raise the
+     * priority of findings without an advisory severity. Default true.
+     */
+    news_signals?: boolean;
     health_channels: Channel[];
   };
   notifications: {
