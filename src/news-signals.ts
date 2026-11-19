@@ -31,12 +31,22 @@ const HEDGE_WINDOW = 60;
 /** How far after a report of exploitation its identifier may stand. */
 const FOLLOWING_WINDOW = 160;
 
-/** "CVSS score: 9.8", "CVSS v3.1 score of 9.8", "CVSSv4: 9.3", "CVSS 3.1 severity score of 8.1". */
+/**
+ * "CVSS score: 9.8", "CVSS v3.1 score of 9.8", "CVSSv4: 9.3", "CVSS 3.1: 5.5", "(CVSS 9.8)". A whole
+ * number counts only after "score" or "rating" or a colon: "CVSS v4 metrics" names a version.
+ */
 const SCORE_AFTER =
-  /^CVSS\s*(?:v(?:ersion)?\s*)?([234](?:\.[01])?)?\s*(?:\(\s*v?[234]\.[01]\s*\)\s*)?(?:[-:,\s]*(?:base|severity|risk|overall)\b)?(?:[-:,\s]*(score|rating)\b)?(?:\s+(?:of|is|was|at))?[\s:=]*(\d{1,2}(?:\.\d)?)(?![\d%]|\.\d)/i;
+  /^CVSS\s*(?:v(?:ersion)?\s*)?([234](?:\.[01])?)?\s*(?:\(\s*v?[234]\.[01]\s*\)\s*)?(?:[-:,\s]*(?:base|severity|risk|overall)\b)?(?:[-:,\s]*(score|rating)\b)?(?:\s+(?:of|is|was|at))?([\s:=]*)(\d{1,2}(?:\.\d)?)(?![\d%]|\.\d)/i;
+/** A threshold, not a score: "a CVSS score of 7 or higher", "CVSS 9.0+". */
+const THRESHOLD_AFTER = /^\s*(?:\+|(?:or|and)\s+(?:higher|above|more|greater|over|up|lower|less|below))/i;
+const THRESHOLD_BEFORE =
+  /\b(?:above|over|below|at least|at most|exceed(?:s|ing)?|greater than|less than|higher than|lower than|threshold|minimum|maximum)\s+(?:(?:an?|the)\s+)?$/i;
 /** "9.2 CVSS rating", "9.2 out of 10 on CVSS 4.0", "rated 9.8/10 under the CVSS scale". */
 const SCORE_BEFORE =
-  /(?<![\d.])(\d{1,2}(?:\.\d)?)(?:\s*\/\s*10|\s+out of 10)?(?:\s+(?:on|under|in|with|using))?(?:\s+the)?\s+$/i;
+  /(?<![\d.])(\d{1,2}\.\d|10(?=\s*\/\s*10|\s+out of 10)|\d(?=\s*\/\s*10|\s+out of 10))(?:\s*\/\s*10|\s+out of 10)?(?:\s+(?:on|under|in|with|using))?(?:\s+the)?\s+$/i;
+/** What may follow "CVSS" after a score written before it: a version, then a noun or the end. */
+const AFTER_SCORE_BEFORE =
+  /^CVSS\s*(?:v(?:ersion)?\s*)?(?:[234](?:\.[01])?)?\s*(?:score|rating|scale|base|severity|\(|[.,;)]|$)/i;
 /** The CVSS version right after "CVSS", when a score came before it ("on CVSS 4.0"). */
 const VERSION_AFTER = /^CVSS\s*(?:v(?:ersion)?\s*)?([234]\.[01])(?!\.?\d)/i;
 /** A vendor's own word rating: "Severity: moderate" (Apache), "rated the vulnerability Important". */
@@ -70,9 +80,21 @@ const DENIED_ONLY = /\battacks? (?:exploiting|using|leveraging|targeting)/i;
 /** Public exploit code: shown as a reason, it raises nothing. */
 const PUBLIC_EXPLOIT =
   /proof[- ]of[- ]concept|\bPoC\b|exploit code|public(?:ly available)? exploits?\b|working exploits?\b|exploits? (?:is|was|were|has been|have been) (?:released|published)/i;
-/** A sentence that denies what it states. Anywhere in the sentence: "no evidence ... exploited". */
+/**
+ * A denial of the statement that follows in the same clause: "no evidence that ... has been
+ * exploited", "neither ... nor ... report that it was used in attacks". "Without authentication"
+ * and "no patch" after a report do not deny it.
+ */
 const NEGATION =
-  /\b(?:no|not|never|neither|nor|none|nothing|nobody|no one|without|unaware|yet to|absence|lack of)\b|n['’]t\b/i;
+  /\b(?:no|not|never|neither|nor|none|nothing|nobody|no one|unaware|yet to|absence|lack of)\b|n['’]t\b/i;
+/** How far before a statement a denial counts, within its clause. */
+const NEGATION_WINDOW = 160;
+/** Where a clause ends inside a sentence: "X was patched, but attackers exploit Y". */
+const CLAUSE_BREAK =
+  /;|,\s*(?:but|while|whereas|although|though|yet|and|or|so)\b|\s(?:but|while|whereas|although)\s|\s[–—]\s/gi;
+/** Reports whose identifier follows them: "attackers are exploiting CVE-A", "added CVE-A to KEV". */
+const OBJECT_FOLLOWS =
+  /^(?:attackers|hackers|threat actors|adversaries|bad|miscreants|criminals|crooks|added|detected|observed|confirmed|seen|reported|exploitation|in-the-wild|proof|poc|exploit|public|working)/i;
 /** Words just before a statement that only suppose it: "could be exploited", "suspected to be exploiting". */
 const HEDGE =
   /\b(?:could|may|might|can|would|should|if|potential(?:ly)?|possibl[ey]|suspect(?:ed|s)?|alleged(?:ly)?|claims?|likely|unconfirmed|whether|unless|expects?)\b/i;
@@ -140,19 +162,48 @@ export function newsSignals(
     for (const sentence of sentences(text)) {
       if (sentence.endsWith('?')) continue; // "Is there a proof-of-concept available?"
       const ids = [...sentence.matchAll(IDENTIFIER)].map((m) => ({ at: m.index, id: normal(m[0]) }));
-      const named = singleSubject && names.some((name) => mentions(sentence, name));
-      /**
-       * The nearest identifier before the statement. For a report of exploitation with none before
-       * it, the first one shortly after it ("X has come under active exploitation ..., tracked as
-       * CVE-A"); a score or rating comes after its identifier.
-       */
-      const bound = (at: number, following = false): string | undefined => {
-        const nearest =
-          ids.filter((item) => item.at < at).at(-1) ??
-          (following ? ids.find((item) => item.at - at <= FOLLOWING_WINDOW) : undefined);
+      const breaks = [...sentence.matchAll(CLAUSE_BREAK)].map((m) => m.index);
+      const clause = (at: number): [number, number] => [
+        breaks.filter((index) => index < at).at(-1) ?? 0,
+        breaks.find((index) => index >= at) ?? sentence.length,
+      ];
+      /** An inventory name in the clause around `at`, when the article cites only the finding's identifiers. */
+      const namedIn = (at: number): string | undefined => {
+        if (!singleSubject) return undefined;
+        const [start, end] = clause(at);
+        const part = sentence.slice(start, end);
+        return names.find((name) => mentions(part, name));
+      };
+      /** A score or rating: the nearest identifier before it, as in lists; or a name in its clause. */
+      const boundScore = (at: number): string | undefined => {
+        const nearest = ids.filter((item) => item.at < at).at(-1);
         if (nearest) return targets.has(nearest.id) ? nearest.id : undefined;
-        if (ids.length) return undefined;
-        return named ? names.find((name) => mentions(sentence, name)) : undefined;
+        return ids.length ? undefined : namedIn(at);
+      };
+      /**
+       * A report: an identifier in its own clause, the one it names when the report reads
+       * "attackers are exploiting CVE-A" or "added CVE-A to KEV", else the nearest before it ("CVE-A
+       * is being exploited"), else shortly after it ("X has come under active exploitation ...,
+       * tracked as CVE-A"). With no identifier in its clause and none in the sentence, a name in its
+       * clause.
+       */
+      const boundReport = (match: RegExpExecArray): string | undefined => {
+        const [start, end] = clause(match.index);
+        const inClause = ids.filter((item) => item.at >= start && item.at < end);
+        const after = inClause.find(
+          (item) => item.at >= match.index && item.at - match.index <= FOLLOWING_WINDOW,
+        );
+        const before = inClause.filter((item) => item.at < match.index).at(-1);
+        const nearest = OBJECT_FOLLOWS.test(match[0]) ? (after ?? before) : (before ?? after);
+        if (nearest) return targets.has(nearest.id) ? nearest.id : undefined;
+        return ids.length ? undefined : namedIn(match.index);
+      };
+      /** A denial before the statement, in its clause. */
+      const negated = (match: RegExpExecArray) => {
+        const [start] = clause(match.index);
+        return NEGATION.test(
+          sentence.slice(Math.max(start, match.index - NEGATION_WINDOW), match.index + match[0].length),
+        );
       };
       const excerpt = () => cut(sentence.replace(/\s+/g, ' '), EXCERPT);
 
@@ -162,14 +213,19 @@ export function newsSignals(
         let score: number | undefined;
         let version: string | undefined;
         if (after) {
+          const [, written, word, separator, number] = after;
           // "CVSS 4.0" names a version; it is a score only after "score" or "rating".
-          const isVersion = !after[1] && !after[2] && /^[234]\.[01]$/.test(after[3]!);
-          if (!isVersion) {
-            score = Number(after[3]);
-            version = after[1];
+          const isVersion = !written && !word && /^[234]\.[01]$/.test(number!);
+          const stated = Boolean(word) || /[:=]/.test(separator!) || number!.includes('.');
+          const threshold =
+            THRESHOLD_AFTER.test(sentence.slice(at + after[0].length, at + after[0].length + 20)) ||
+            THRESHOLD_BEFORE.test(sentence.slice(Math.max(0, at - 30), at));
+          if (!isVersion && stated && !threshold) {
+            score = Number(number);
+            version = written;
           }
         }
-        if (score === undefined) {
+        if (score === undefined && AFTER_SCORE_BEFORE.test(sentence.slice(at, at + 40))) {
           const before = SCORE_BEFORE.exec(sentence.slice(Math.max(0, at - 40), at));
           if (before) {
             score = Number(before[1]);
@@ -177,7 +233,7 @@ export function newsSignals(
           }
         }
         if (score === undefined || !(score > 0 && score <= 10)) continue;
-        const subject = bound(at) ?? (ids.length ? undefined : articleSubject);
+        const subject = boundScore(at) ?? (ids.length ? undefined : articleSubject);
         if (!subject) continue;
         if (!signals.cvss || score > signals.cvss.score)
           signals.cvss = {
@@ -193,30 +249,32 @@ export function newsSignals(
         const match = pattern.exec(sentence);
         if (!match) continue;
         // A "Severity:" field stands on a line of its own in Apache advisories.
-        const subject = bound(match.index + match[0].length) ?? (ids.length ? undefined : articleSubject);
+        const subject =
+          boundScore(match.index + match[0].length) ?? (ids.length ? undefined : articleSubject);
         if (!subject) continue;
         const level = ratingLevel(match[1]!);
         if (!signals.rating || highest(level, signals.rating.level) !== signals.rating.level)
           signals.rating = { level, word: match[1]!.toLowerCase(), subject, excerpt: excerpt() };
       }
 
-      // A negation anywhere in the sentence voids it ("no evidence ... has been exploited"); a hedge
-      // counts only just before the statement, since a merged sentence often goes on to "could".
+      // A denial counts before the statement in its clause; a hedge only just before it, since a
+      // merged sentence often goes on to "could".
       const hedged = (match: RegExpExecArray) =>
         HEDGE.test(sentence.slice(Math.max(0, match.index - HEDGE_WINDOW), match.index + match[0].length));
-      const exploited = EXPLOITED.exec(sentence);
-      const denied = NEGATION.test(sentence) ? (exploited ?? DENIED_ONLY.exec(sentence)) : null;
-      if (denied) {
-        const subject = bound(denied.index, true);
-        if (subject) signals.no_known_exploitation ??= { subject, excerpt: excerpt() };
-      } else if (exploited && !hedged(exploited)) {
-        const subject = bound(exploited.index, true);
-        if (subject) signals.exploitation ??= { subject, excerpt: excerpt() };
+      for (const pattern of [EXPLOITED, DENIED_ONLY]) {
+        for (const match of sentence.matchAll(new RegExp(pattern.source, 'gi'))) {
+          const denied = negated(match);
+          if (!denied && (pattern === DENIED_ONLY || hedged(match))) continue;
+          const subject = boundReport(match);
+          if (!subject) continue;
+          if (denied) signals.no_known_exploitation ??= { subject, excerpt: excerpt() };
+          else signals.exploitation ??= { subject, excerpt: excerpt() };
+        }
       }
 
-      const exploit = PUBLIC_EXPLOIT.exec(sentence);
-      if (exploit && !NEGATION.test(sentence) && !hedged(exploit)) {
-        const subject = bound(exploit.index, true);
+      for (const exploit of sentence.matchAll(new RegExp(PUBLIC_EXPLOIT.source, 'gi'))) {
+        if (negated(exploit) || hedged(exploit)) continue;
+        const subject = boundReport(exploit);
         if (subject) signals.public_exploit ??= { subject, excerpt: excerpt() };
       }
     }

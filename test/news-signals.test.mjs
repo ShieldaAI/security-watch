@@ -223,3 +223,61 @@ test('identifiers match in any spelling, and the reading is bounded', () => {
   assert.equal(read(long), undefined);
   assert.equal(read('', { identifiers: [], names: [] }), undefined);
 });
+
+// Review of 2026-11-19.
+test('a denial counts only before the statement in its clause', async (t) => {
+  const acme = { identifiers: [], names: ['Acme Gateway'] };
+  for (const [text, target] of [
+    ['Acme Gateway is under active exploitation and no patch is available yet.', acme],
+    [`Attackers are actively exploiting ${A} without authentication.`, undefined],
+    [`No fix exists, but attackers are exploiting ${A} now.`, undefined],
+  ])
+    await t.test(text, () => {
+      const signals = read(text, target);
+      assert.ok(signals?.exploitation, JSON.stringify(signals));
+      assert.equal(signals.no_known_exploitation, undefined);
+    });
+});
+
+test('a report is tied to the identifier in its own clause', () => {
+  const both = (text) => [
+    read(text)?.exploitation?.subject,
+    read(text, { identifiers: [B], names: [] })?.exploitation?.subject,
+  ];
+  assert.deepEqual(
+    both(`${B} in Zeta Portal was patched in March, but attackers are now exploiting ${A} in Acme Gateway.`),
+    [A, undefined],
+  );
+  assert.deepEqual(both(`${B} was patched last year; CISA added ${A} to its KEV catalog.`), [A, undefined]);
+  assert.deepEqual(
+    both(
+      `Google said a Chrome zero-day is being actively exploited, and Mozilla also patched ${A} in Firefox.`,
+    ),
+    [undefined, undefined],
+  );
+});
+
+test('a name is tied only within its clause', () => {
+  const text =
+    'Attackers are actively exploiting a zero-day in Acme Gateway, while Zeta Portal 2.1 adds dark mode.';
+  assert.equal(read(text, { identifiers: [], names: ['Zeta Portal'] }), undefined);
+  assert.equal(read(text, { identifiers: [], names: ['Acme Gateway'] }).exploitation.subject, 'Acme Gateway');
+  const score = 'Acme Gateway has a flaw with a CVSS score of 9.8, while Zeta Portal only adds dark mode.';
+  assert.equal(read(score, { identifiers: [], names: ['Zeta Portal'] })?.cvss, undefined);
+  assert.equal(read(score, { identifiers: [], names: ['Acme Gateway'] }).cvss.score, 9.8);
+});
+
+test('counts, versions and thresholds next to CVSS are not scores', async (t) => {
+  const windows = { identifiers: [], names: ['Windows'] };
+  for (const text of [
+    'Microsoft fixed 10 CVSS critical flaws in Windows.',
+    'Windows now uses CVSS v4 metrics.',
+    'Windows advisories carry a CVSSv3 vector.',
+    'For Windows, a CVSS score of 7 or higher must be patched within a week.',
+    'Windows flaws rated CVSS 9.0+ are patched first.',
+    'Windows flaws above a CVSS score of 8.0 are patched first.',
+  ])
+    await t.test(text, () => assert.equal(read(text, windows)?.cvss, undefined));
+  assert.equal(read('Windows has a flaw with a CVSS score of 10.', windows).cvss.score, 10);
+  assert.equal(read('Windows: CVSS 3.1: 5.5 MEDIUM', windows).cvss.score, 5.5);
+});
