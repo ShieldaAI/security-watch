@@ -281,12 +281,37 @@ export interface Assessment {
   relevance?: 'relevant' | 'irrelevant' | 'unknown';
   /** Model assessment of the article, separate from version-range applicability. */
   news_analysis?: NewsAnalysis;
+  /** What articles state about a finding that has no advisory severity, read without a model. */
+  news_signals?: NewsSignals;
   ai?: {
     model: string;
     provider: string;
     prompt_version: string;
     status: 'complete' | 'unavailable' | 'conflicting';
   };
+}
+/** One statement an article makes about a finding's subject, with the sentence it was read from. */
+export interface NewsStatement {
+  /** The identifier or inventory name the statement is tied to. */
+  subject: string;
+  /** The sentence, shortened. Untrusted article text. */
+  excerpt: string;
+}
+/**
+ * What news articles state about a finding without an advisory severity, read without a model.
+ * Signals only raise priority; see the configuration guide for what is read.
+ */
+export interface NewsSignals {
+  /** The highest CVSS base score stated for the subject. */
+  cvss?: NewsStatement & { score: number; version?: string; level: Severity };
+  /** A vendor's word rating ("Severity: moderate", "rated Important"). */
+  rating?: NewsStatement & { level: Severity; word: string };
+  /** The article reports exploitation. Not a known-exploited catalog entry. */
+  exploitation?: NewsStatement;
+  /** The article says no exploitation is known. Shown only. */
+  no_known_exploitation?: NewsStatement;
+  /** The article reports public exploit code. Shown only. */
+  public_exploit?: NewsStatement;
 }
 export type AiReviewReason = 'ai_general_news' | 'ai_not_affected' | 'ai_irrelevant';
 export interface AiReview {
