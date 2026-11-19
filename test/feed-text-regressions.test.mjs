@@ -104,3 +104,55 @@ test('numeric character references in escaped HTML are decoded', async () => {
   );
   assert.equal(item.description, 'AB "C"');
 });
+
+// Review of 2026-11-19: plain-text fields must not be read as HTML after unescaping.
+async function atom(entry) {
+  const result = await collectSources(
+    inventory,
+    config(['https://feeds.example/atom']),
+    {},
+    async () =>
+      xml(
+        `<feed xmlns="http://www.w3.org/2005/Atom"><title>Feed</title><entry><id>urn:1</id><link href="https://feeds.example/post"/><updated>2026-11-18T10:00:00Z</updated>${entry}</entry></feed>`,
+      ),
+    NOW,
+  );
+  assert.deepEqual(result.errors, []);
+  return result.evidence[0];
+}
+
+test('escaped tags in plain-text fields stay text', async () => {
+  const titled = await atom(
+    '<title>Stored XSS via &lt;script&gt; tag in Acme Portal (CVE-2026-1234)</title><summary>s</summary>',
+  );
+  assert.equal(titled.title, 'Stored XSS via <script> tag in Acme Portal (CVE-2026-1234)');
+  assert.deepEqual(titled.aliases, ['CVE-2026-1234']);
+  const summary = await atom(
+    '<title>Post</title><summary type="text">Filter bypass with &lt;!-- in Acme. CVE-2026-1234 is exploited.</summary>',
+  );
+  assert.equal(summary.description, 'Filter bypass with <!-- in Acme. CVE-2026-1234 is exploited.');
+  const content = await atom('<title>Post</title><content type="text">if a &lt;b&gt; c</content>');
+  assert.equal(content.description, 'if a <b> c');
+  const [titledItem] = await read(
+    rss('<title>std::vector&lt;bool&gt; and Foo&lt;T&gt;</title><description>d</description>'),
+  );
+  assert.equal(titledItem.title, 'std::vector<bool> and Foo<T>');
+});
+
+test('Atom summary with type="html" and escaped markup is read as HTML', async () => {
+  const item = await atom(
+    '<title>Post</title><summary type="html">&lt;p&gt;One&lt;/p&gt;&lt;p&gt;Two&lt;/p&gt;</summary>',
+  );
+  assert.equal(item.description, 'One Two');
+});
+
+test('text mixed with CDATA keeps its order and its id', async () => {
+  const body = (guid) =>
+    rss(
+      `<title>Post</title><guid>${guid}</guid><description>Before <![CDATA[<b>inside</b>]]> after</description>`,
+    );
+  const [item] = await read(body('abc<![CDATA[-1]]>'));
+  assert.equal(item.description, 'Before inside after');
+  const [same] = await read(body('abc-1'));
+  assert.equal(item.id, same.id);
+});

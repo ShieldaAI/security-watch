@@ -1344,26 +1344,27 @@ function htmlText(root: HtmlNode, limit = 16_000): string {
   // Entity references have already been decoded once by the HTML parser.
   return cleanText(parts.join(' ').replace(/\s+/g, ' ').trim(), limit);
 }
-/** Feed text as HTML and read as plain text. Only for values parsed by `feed()`. */
-function plainText(value: unknown, limit = 16_000): string {
-  return htmlText(parseHtml(feedMarkup(value)), limit);
-}
-/** Key `feed()` gives CDATA sections, so escaped text and CDATA can be told apart. */
-const CDATA = '#cdata';
 /**
- * The HTML source a feed value carries. The feed parser leaves entity references alone
- * (`processEntities: false`), so text outside CDATA is still XML-escaped: a publisher that escapes
- * its HTML (`&lt;p&gt;`) instead of wrapping it in CDATA would otherwise show its tags as text.
- * CDATA is HTML as written and is not decoded here; the HTML parser decodes both once.
+ * A feed value read as plain text. Only for values parsed by `feed()`, which leaves entity
+ * references alone (`processEntities: false`), so the HTML parser decodes them once.
+ *
+ * With `html`, the field carries HTML (RSS `description` and `content:encoded`, Atom `content` and
+ * `summary` with `type="html"`). A publisher may escape that HTML with entities (`&lt;p&gt;`)
+ * instead of wrapping it in CDATA; escaped XML text can never hold a raw `<`, so a value without
+ * one is unescaped once as XML before it is read as HTML. Plain-text fields (titles, Atom text
+ * content) are read as before: `&lt;script&gt;` in a title is text, not a tag.
  */
-function feedMarkup(value: unknown): string {
-  if (typeof value === 'string' || typeof value === 'number') return xmlUnescape(String(value));
-  if (!value || typeof value !== 'object') return '';
-  if (Array.isArray(value)) return value.map(feedMarkup).join(' ');
-  return Object.entries(value)
-    .filter(([key]) => !key.startsWith('@_') && !HIDDEN_HTML_ELEMENTS.has(key.toLowerCase()))
-    .map(([key, child]) => (key === CDATA ? xmlText(child) : feedMarkup(child)))
-    .join(' ');
+function plainText(value: unknown, limit = 16_000, html = false): string {
+  const raw = xmlText(value);
+  return htmlText(parseHtml(html && !raw.includes('<') ? xmlUnescape(raw) : raw), limit);
+}
+/** Whether a feed field carries HTML: its `type` attribute when it has one (Atom), else the default. */
+function htmlField(value: unknown, otherwise: boolean): boolean {
+  const type =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as RecordValue)['@_type']
+      : undefined;
+  return typeof type === 'string' ? type.toLowerCase() === 'html' : otherwise;
 }
 /** The five predefined XML entities and character references; nothing that a DTD could declare. */
 function xmlUnescape(value: string): string {
@@ -1475,7 +1476,6 @@ async function feed(
         parseTagValue: false,
         parseAttributeValue: false,
         removeNSPrefix: true,
-        cdataPropName: CDATA,
       }).parse(response.body),
     );
   } catch {
@@ -1505,8 +1505,13 @@ async function feed(
       // (an image, read as `content` once namespace prefixes are removed) beside the article in
       // `<description>`, or an empty `<content:encoded>`.
       let description = '';
-      for (const field of [entry.encoded, entry.content, entry.description, entry.summary]) {
-        description = plainText(field);
+      for (const [field, html] of [
+        [entry.encoded, true],
+        [entry.content, htmlField(entry.content, false)],
+        [entry.description, true],
+        [entry.summary, htmlField(entry.summary, false)],
+      ] as const) {
+        description = plainText(field, 16_000, html);
         if (description) break;
       }
       const links = list(entry.link);
