@@ -954,6 +954,10 @@ interface Candidate extends Kind {
 /** Walks a project for dependency files without following links or entering installed-package folders. */
 function discover(root: string, warnings: string[]): Candidate[] {
   const stat = statSync(root);
+  // A link named like a dependency file can point at any file on the machine. The folder given as
+  // the project may be a link (the user chose it); a file must be the file itself.
+  if (stat.isFile() && lstatSync(root).isSymbolicLink())
+    throw new Error(`${basename(root)} is a symbolic link; give the dependency file itself.`);
   if (stat.isFile()) {
     const kind = classify(basename(root), basename(dirname(root)));
     if (!kind) throw new Error(`${basename(root)} is not a supported dependency file.`);

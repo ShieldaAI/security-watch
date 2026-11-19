@@ -1344,8 +1344,39 @@ function htmlText(root: HtmlNode, limit = 16_000): string {
   // Entity references have already been decoded once by the HTML parser.
   return cleanText(parts.join(' ').replace(/\s+/g, ' ').trim(), limit);
 }
+/** Feed text as HTML and read as plain text. Only for values parsed by `feed()`. */
 function plainText(value: unknown, limit = 16_000): string {
-  return htmlText(parseHtml(xmlText(value)), limit);
+  return htmlText(parseHtml(feedMarkup(value)), limit);
+}
+/** Key `feed()` gives CDATA sections, so escaped text and CDATA can be told apart. */
+const CDATA = '#cdata';
+/**
+ * The HTML source a feed value carries. The feed parser leaves entity references alone
+ * (`processEntities: false`), so text outside CDATA is still XML-escaped: a publisher that escapes
+ * its HTML (`&lt;p&gt;`) instead of wrapping it in CDATA would otherwise show its tags as text.
+ * CDATA is HTML as written and is not decoded here; the HTML parser decodes both once.
+ */
+function feedMarkup(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number') return xmlUnescape(String(value));
+  if (!value || typeof value !== 'object') return '';
+  if (Array.isArray(value)) return value.map(feedMarkup).join(' ');
+  return Object.entries(value)
+    .filter(([key]) => !key.startsWith('@_') && !HIDDEN_HTML_ELEMENTS.has(key.toLowerCase()))
+    .map(([key, child]) => (key === CDATA ? xmlText(child) : feedMarkup(child)))
+    .join(' ');
+}
+/** The five predefined XML entities and character references; nothing that a DTD could declare. */
+function xmlUnescape(value: string): string {
+  return value.replace(
+    /&(?:(lt|gt|amp|quot|apos)|#(\d{1,7})|#x([\da-f]{1,6}));/gi,
+    (match, name: string | undefined, decimal: string | undefined, hex: string | undefined) => {
+      if (name) return { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }[name.toLowerCase()]!;
+      const point = decimal ? Number(decimal) : Number.parseInt(hex!, 16);
+      return point > 0 && point <= 0x10ffff && (point < 0xd800 || point > 0xdfff)
+        ? String.fromCodePoint(point)
+        : match;
+    },
+  );
 }
 function list(value: unknown): unknown[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
@@ -1444,6 +1475,7 @@ async function feed(
         parseTagValue: false,
         parseAttributeValue: false,
         removeNSPrefix: true,
+        cdataPropName: CDATA,
       }).parse(response.body),
     );
   } catch {
@@ -1469,9 +1501,14 @@ async function feed(
       const entry = record(rawEntry);
       const title = plainText(entry.title, 500);
       if (!title) throw new SourceError('Feed entry is missing its title.');
-      const description = plainText(
-        entry.encoded ?? entry.content ?? entry.description ?? entry.summary ?? '',
-      );
+      // The first field that holds text. An element can be present and empty: `<media:content>`
+      // (an image, read as `content` once namespace prefixes are removed) beside the article in
+      // `<description>`, or an empty `<content:encoded>`.
+      let description = '';
+      for (const field of [entry.encoded, entry.content, entry.description, entry.summary]) {
+        description = plainText(field);
+        if (description) break;
+      }
       const links = list(entry.link);
       const selectedLink = links.find(
         (link) => typeof link === 'string' || !record(link)['@_rel'] || record(link)['@_rel'] === 'alternate',

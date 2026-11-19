@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: sbom
-        uses: ShieldaAI/security-watch@v1.1.0
+        uses: ShieldaAI/security-watch@v1.1.1
         with:
           system-id: checkout-api
           owner: Dana, platform team
@@ -143,7 +143,7 @@ To use an SBOM made by another tool, pass it as `sbom-file`; the action checks t
 
 ```yaml
 - run: trivy image --format cyclonedx --output image.cdx.json "$IMAGE"
-- uses: ShieldaAI/security-watch@v1.1.0
+- uses: ShieldaAI/security-watch@v1.1.1
   with:
     sbom-file: image.cdx.json
     system-id: checkout-image
@@ -160,7 +160,7 @@ Any job with Node.js 24.10 or newer can run the command:
 security-watch-sbom:
   image: node:24-slim
   script:
-    - npx --yes @shieldaai/security-watch@1.1.0 sbom --system-id checkout-api --output security-watch.cdx.json --upload https://watch.example.com:8787
+    - npx --yes @shieldaai/security-watch@1.1.1 sbom --system-id checkout-api --output security-watch.cdx.json --upload https://watch.example.com:8787
   artifacts:
     paths: [security-watch.cdx.json]
 ```
