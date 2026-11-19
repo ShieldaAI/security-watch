@@ -439,7 +439,8 @@ export class Store {
         : [];
       // Where the finding lives (inventory names and notes) is shown to the reader; it is not part
       // of the conclusion a reviewer approves, so editing a note does not ask for a new review.
-      const { updated_at: _updated, location: _location, ...reviewedAssessment } = assessment;
+      // EPSS changes daily and is shown only: it is not part of the conclusion either.
+      const { updated_at: _updated, location: _location, epss: _epss, ...reviewedAssessment } = assessment;
       // Ordinary alert deduplication stays semantic. A human review instead binds the exact
       // supplied conclusion, source content and host inventory/model context, excluding scan time.
       const signature = decision.review

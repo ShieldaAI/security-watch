@@ -129,6 +129,7 @@ export const configSchema = z
           .max(3)
           .refine((values) => new Set(values).size === values.length, 'Duplicate vendor feed')
           .default([]),
+        epss: z.boolean().default(false),
       })
       .strict()
       .default({
@@ -140,6 +141,7 @@ export const configSchema = z
         kev: false,
         feeds: [],
         vendor_feeds: [],
+        epss: false,
       }),
     models: z
       .object({

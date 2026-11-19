@@ -78,6 +78,18 @@ export interface Product {
   /** Operator's pointer to where this product runs. Shown in notifications; never sent to models or sources. */
   note?: string;
 }
+/**
+ * FIRST's EPSS for a finding's CVE: the estimated probability of exploitation in the next 30 days,
+ * and its rank among all scored CVEs. Shown only; not part of a finding's revision or review.
+ */
+export interface EpssScore {
+  /** 0 to 1. */
+  probability: number;
+  /** 0 to 1: the share of scored CVEs with a lower probability. */
+  percentile: number;
+  /** The day FIRST computed it, YYYY-MM-DD. */
+  date: string;
+}
 /** Where a reader should look to confirm a finding. Copied from the inventory; not security evidence. */
 export interface FindingLocation {
   system: string;
@@ -177,6 +189,8 @@ export interface Config {
     kev: boolean;
     feeds: string[];
     vendor_feeds?: ('nodejs' | 'python' | 'php')[];
+    /** Look up FIRST's EPSS for the CVEs of current findings (CVE identifiers only). Default false. */
+    epss?: boolean;
   };
   models: {
     enabled: boolean;
@@ -257,6 +271,8 @@ export interface Assessment {
   remediation?: RemediationEvidence;
   /** Inventory names and notes for the reader of a notification. Not part of alert deduplication. */
   location?: FindingLocation;
+  /** EPSS for the finding's CVE when `sources.epss` is on. Shown only; changes nothing. */
+  epss?: EpssScore;
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
   /**

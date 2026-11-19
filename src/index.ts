@@ -38,6 +38,7 @@ export type {
   NewsAnalysis,
   NewsSignals,
   NewsStatement,
+  EpssScore,
 } from './types.js';
 export {
   scorePilotResponses,

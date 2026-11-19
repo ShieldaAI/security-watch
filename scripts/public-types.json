@@ -24,6 +24,7 @@
   "EmailMessage",
   "EmailReceipt",
   "EmailSender",
+  "EpssScore",
   "Evidence",
   "ExternalHeartbeat",
   "FindingLocation",

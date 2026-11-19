@@ -309,6 +309,20 @@ function newsSignalLine(a: Assessment): string[] {
   return parts.length ? [single(`News signals: ${parts.join('; ')}`, 300)] : [];
 }
 
+/** FIRST's EPSS for the finding's CVE, when looked up. Numbers only. */
+function epssLine(a: Assessment): string[] {
+  const epss = a.epss;
+  if (!epss || !Number.isFinite(epss.probability) || !Number.isFinite(epss.percentile)) return [];
+  const percent = epss.probability * 100;
+  const shown = percent < 0.1 ? 'under 0.1%' : `${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`;
+  return [
+    single(
+      `EPSS: ${shown} chance of exploitation in the next 30 days; higher than ${Math.floor(epss.percentile * 100)}% of scored CVEs (FIRST, ${epss.date})`,
+      200,
+    ),
+  ];
+}
+
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
@@ -323,6 +337,7 @@ export function notificationText(job: Notification): { subject: string; text: st
     `Applicability: ${single(a.applicability, 40)}; source severity: ${single(a.source_severity, 40)}; priority: ${single(a.priority, 40)}`,
     ...(a.exploited ? ['Known exploitation reported.'] : []),
     ...newsSignalLine(a),
+    ...epssLine(a),
     `Summary: ${single(a.summary, 750)}`,
   ];
   // In the order they give way when the text is too long for one Slack section: the last of these
@@ -406,6 +421,7 @@ export function digestText(jobs: Notification[]): { subject: string; text: strin
       ...locationLines(a, 120),
       `Applicability: ${single(a.applicability, 40)}; source: ${single(a.source_severity, 40)}`,
       ...newsSignalLine(a),
+      ...epssLine(a),
       ...(a.news_analysis
         ? [
             `AI news: ${single(a.news_analysis.classification, 60)}; impact: ${single(a.news_analysis.impact, 60)}`,

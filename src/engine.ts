@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { cvssV4BaseScore } from './cvss4.js';
 import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
+import { attachEpss, readEpssCache, refreshEpss } from './epss.js';
 import { attachLocation, attachRemediation, compareInventories } from './inventory-evidence.js';
 import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
@@ -197,10 +198,13 @@ export async function runScan(options: {
   );
   const decisions: Record<string, Decision> = {};
   let remediationEvidence = store.evidence();
+  // EPSS is attached when a finding is saved, after its analysis basis is taken, and is left out of
+  // its revision and review: a score that changes daily must not re-send, reopen or re-analyse.
+  let epssCache = config.sources.epss ? readEpssCache(store.getMeta('epss:cache')) : {};
   const persist = (assessment: Assessment) => {
-    assessment = attachLocation(
-      attachRemediation(assessment, inventory, remediationEvidence, config, now),
-      inventory,
+    assessment = attachEpss(
+      attachLocation(attachRemediation(assessment, inventory, remediationEvidence, config, now), inventory),
+      epssCache,
     );
     const decision = decide(assessment, config);
     decisions[assessment.id] = decision;
@@ -367,6 +371,22 @@ export async function runScan(options: {
     notices.push(
       'AI is disabled. System news receives candidate matching only; enable an analysis model to distinguish vulnerability impact from general system coverage.',
     );
+  if (config.sources.epss && !options.fixture) {
+    const refreshed = await refreshEpss(
+      findings.filter((finding) => finding.category !== 'health').map((finding) => finding.event_id),
+      epssCache,
+      http,
+      now,
+    );
+    checkCancellation(signal);
+    epssCache = refreshed.cache;
+    store.setMeta('epss:cache', JSON.stringify(epssCache));
+    // Shown only, so a failed lookup is a notice, not degraded monitoring.
+    if (refreshed.failed)
+      notices.push(
+        'EPSS scores could not be refreshed from api.first.org; findings keep the scores of the last successful lookup.',
+      );
+  }
   for (const system of inventory.systems) {
     const updated = Date.parse(system.updated_at);
     if (
@@ -441,7 +461,8 @@ export async function runScan(options: {
       if (!errors.some((e) => e.source === 'models' && e.message === code))
         errors.push({ source: 'models', message: code });
     }
-    enriched = attachRemediation(enriched, inventory, evidence, config, now);
+    // After analysis, so a model never receives it and a new score never asks for a new one.
+    enriched = attachEpss(attachRemediation(enriched, inventory, evidence, config, now), epssCache);
     analyzed.push(enriched);
     persist(enriched);
     store.setMeta(`assessment-basis:${finding.id}`, bases.get(finding.id)!);
