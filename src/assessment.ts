@@ -15,6 +15,7 @@ import type {
 import { hash, highest, severityRank, timestamp } from './util.js';
 import { exactLibraryVersion, normalizeEcosystem, packageKey } from './ecosystems.js';
 import { mentions, packageMentioned } from './matching.js';
+import { newsSignals, signalLevel } from './news-signals.js';
 
 export function normalizeEventId(id: string): string {
   return /^(?:CVE-|GHSA-)/i.test(id) ? id.toUpperCase() : id;
@@ -276,6 +277,7 @@ export function assess(
     index.set(system, byKey);
   }
   for (const group of groupEvidence(evidence, knownEvents)) {
+    const firstOfGroup = output.length;
     const advisories = group.evidence.filter((item) => item.kind === 'advisory');
     const isNews = advisories.length === 0;
     const identifiedNews =
@@ -458,8 +460,58 @@ export function assess(
       result.summary = `Security news relevant to ${system.name}; review the linked evidence.`;
       output.push(result);
     }
+    if (config.policy?.news_signals !== false) applyNewsSignals(group, output.slice(firstOfGroup), inventory);
   }
   return output.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * Raises the priority of news findings that have no advisory severity by what the articles state
+ * about their subject: a CVSS score, a vendor's word rating or a report of exploitation. Never
+ * lowers anything; the source severity stays what advisory sources said.
+ */
+function applyNewsSignals(group: Group, results: Assessment[], inventory: Inventory): void {
+  const articles = group.evidence.filter((item) => item.kind === 'news');
+  if (!articles.length) return;
+  const ids = [
+    ...new Set(
+      [group.event, ...group.evidence.filter((item) => item.kind !== 'news').flatMap(identifiers)].filter(
+        advisoryIdentifier,
+      ),
+    ),
+  ];
+  const cache = new Map<string, ReturnType<typeof newsSignals>>();
+  for (const result of results) {
+    if (result.source_severity !== 'unknown' || !(result.news_candidate || result.news_only)) continue;
+    const system = inventory.systems.find((item) => item.id === result.system_id);
+    if (!system) continue;
+    const names = targetNames(result, system, articles);
+    const key = JSON.stringify(names);
+    if (!cache.has(key)) cache.set(key, newsSignals(articles, { identifiers: ids, names }));
+    const signals = cache.get(key);
+    if (!signals) continue;
+    const { level, reasons } = signalLevel(signals);
+    result.news_signals = signals;
+    result.reasons.push(...reasons);
+    if (level !== 'unknown')
+      result.priority = highest(result.priority, contextualPriority(level, system, false));
+  }
+}
+
+/** The inventory names a finding was matched by, for tying article statements to it. */
+function targetNames(result: Assessment, system: System, articles: Evidence[]): string[] {
+  const product = result.component_id?.startsWith('product:')
+    ? system.products.find((item) => `product:${item.name.toLowerCase()}` === result.component_id)
+    : undefined;
+  if (product) return [product.name, ...product.keywords];
+  const component = system.components.find((item) => item.id === result.component_id);
+  if (component) return [component.name];
+  // A system-level news finding: its keywords and the installed packages the news names.
+  const text = articles.map((item) => `${item.title}\n${item.description}`).join('\n');
+  return [
+    ...system.keywords,
+    ...system.components.filter((item) => packageMentioned(text, item)).map((item) => item.name),
+  ];
 }
 
 /** The source severity is always a floor; AI-proposed priority reductions cannot suppress it. */

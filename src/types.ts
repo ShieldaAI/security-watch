@@ -78,6 +78,20 @@ export interface Product {
   /** Operator's pointer to where this product runs. Shown in notifications; never sent to models or sources. */
   note?: string;
 }
+/**
+ * FIRST's EPSS for a finding's CVE: the estimated probability of exploitation in the next 30 days,
+ * and its rank among all scored CVEs. Shown only; not part of a finding's revision or review.
+ */
+export interface EpssScore {
+  /** The CVE it is for: the finding's event, or a CVE alias of its advisory when the event is a GHSA. */
+  cve: string;
+  /** 0 to 1. */
+  probability: number;
+  /** 0 to 1: the share of scored CVEs with a lower probability. */
+  percentile: number;
+  /** The day FIRST computed it, YYYY-MM-DD. */
+  date: string;
+}
 /** Where a reader should look to confirm a finding. Copied from the inventory; not security evidence. */
 export interface FindingLocation {
   system: string;
@@ -177,6 +191,8 @@ export interface Config {
     kev: boolean;
     feeds: string[];
     vendor_feeds?: ('nodejs' | 'python' | 'php')[];
+    /** Look up FIRST's EPSS for the CVEs of current findings (CVE identifiers only). Default false. */
+    epss?: boolean;
   };
   models: {
     enabled: boolean;
@@ -200,6 +216,11 @@ export interface Config {
     ai_dismissals?: 'review' | 'record';
     /** Deprecated configuration alias; true maps to review, false to record. */
     review_before_news_suppression?: boolean;
+    /**
+     * Read stated CVSS scores, vendor ratings and exploitation reports from news to raise the
+     * priority of findings without an advisory severity. Default true.
+     */
+    news_signals?: boolean;
     health_channels: Channel[];
   };
   notifications: {
@@ -252,6 +273,8 @@ export interface Assessment {
   remediation?: RemediationEvidence;
   /** Inventory names and notes for the reader of a notification. Not part of alert deduplication. */
   location?: FindingLocation;
+  /** EPSS for the finding's CVE when `sources.epss` is on. Shown only; changes nothing. */
+  epss?: EpssScore;
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
   /**
@@ -281,12 +304,37 @@ export interface Assessment {
   relevance?: 'relevant' | 'irrelevant' | 'unknown';
   /** Model assessment of the article, separate from version-range applicability. */
   news_analysis?: NewsAnalysis;
+  /** What articles state about a finding that has no advisory severity, read without a model. */
+  news_signals?: NewsSignals;
   ai?: {
     model: string;
     provider: string;
     prompt_version: string;
     status: 'complete' | 'unavailable' | 'conflicting';
   };
+}
+/** One statement an article makes about a finding's subject, with the sentence it was read from. */
+export interface NewsStatement {
+  /** The identifier or inventory name the statement is tied to. */
+  subject: string;
+  /** The sentence, shortened. Untrusted article text. */
+  excerpt: string;
+}
+/**
+ * What news articles state about a finding without an advisory severity, read without a model.
+ * Signals only raise priority; see the configuration guide for what is read.
+ */
+export interface NewsSignals {
+  /** The highest CVSS base score stated for the subject. */
+  cvss?: NewsStatement & { score: number; version?: string; level: Severity };
+  /** A vendor's word rating ("Severity: moderate", "rated Important"). */
+  rating?: NewsStatement & { level: Severity; word: string };
+  /** The article reports exploitation. Not a known-exploited catalog entry. */
+  exploitation?: NewsStatement;
+  /** The article says no exploitation is known. Shown only. */
+  no_known_exploitation?: NewsStatement;
+  /** The article reports public exploit code. Shown only. */
+  public_exploit?: NewsStatement;
 }
 export type AiReviewReason = 'ai_general_news' | 'ai_not_affected' | 'ai_irrelevant';
 export interface AiReview {

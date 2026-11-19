@@ -75,6 +75,9 @@ const kev = {
   exploited: true,
 };
 const loudness = { record: 0, digest: 1, notify: 2 };
+// The story reports exploitation in its title, which news signals read (1.2.0). The tests below
+// are about other rules, so they read it without signals; the last test covers signals.
+const noSignals = { ...config, policy: { ...config.policy, news_signals: false } };
 
 test('a validated AI impact claim is never quieter than an uncertain or unclassified news finding', () => {
   const targets = [
@@ -82,11 +85,11 @@ test('a validated AI impact claim is never quieter than an uncertain or unclassi
     system({ products: [{ name: 'qrlib-pad', version: '1.3.0', keywords: [] }] }),
     system({ keywords: ['qrlib-pad'] }),
   ];
-  const modelsOn = { ...config, models: { ...config.models, enabled: true } };
+  const modelsOn = { ...noSignals, models: { ...noSignals.models, enabled: true } };
   for (const target of targets) {
-    const [candidate] = assess({ systems: [target] }, [story], config, now);
+    const [candidate] = assess({ systems: [target] }, [story], noSignals, now);
     assert.equal(candidate.source_severity, 'unknown');
-    const unclassified = loudness[decide(candidate, config).action];
+    const unclassified = loudness[decide(candidate, noSignals).action];
     for (const classification of ['new_vulnerability', 'known_vulnerability_update'])
       for (const priority of ['low', 'medium', 'high', 'critical']) {
         const reviewed = (impact) =>
@@ -120,15 +123,15 @@ test('a validated AI impact claim is never quieter than an uncertain or unclassi
 test('an advisory record without package claims strengthens a news candidate instead of retiring it', async () => {
   for (const target of [system({ keywords: ['Ivanti'] }), system({ components: [leftPad] })]) {
     const inventory = { systems: [target] };
-    const [before] = assess(inventory, [story], config, now);
-    const after = assess(inventory, [story, advisory], config, now);
+    const [before] = assess(inventory, [story], noSignals, now);
+    const after = assess(inventory, [story, advisory], noSignals, now);
     assert.equal(after.length, 1);
     assert.equal(after[0].id, before.id);
-    assert.equal(decide(before, config).action, 'digest');
+    assert.equal(decide(before, noSignals).action, 'digest');
     assert.equal(after[0].source_severity, 'critical');
     assert.equal(after[0].exploited, true);
     assert.deepEqual(after[0].evidence_ids, [advisory.id, story.id]);
-    assert.equal(decide(after[0], config).action, 'notify');
+    assert.equal(decide(after[0], noSignals).action, 'notify');
   }
 
   // An advisory that names other packages settles which packages the event concerns.
@@ -143,11 +146,11 @@ test('an advisory record without package claims strengthens a news candidate ins
     throw new Error('no network');
   };
   store.saveEvidence([story], {});
-  const first = await runScan({ config, inventory, store, http, now });
+  const first = await runScan({ config: noSignals, inventory, store, http, now });
   const [finding] = first.findings.filter((item) => item.category !== 'health');
   assert.equal(first.decisions[finding.id].action, 'digest');
   store.saveEvidence([advisory], {});
-  const second = await runScan({ config, inventory, store, http, now: now + 60_000 });
+  const second = await runScan({ config: noSignals, inventory, store, http, now: now + 60_000 });
   const stored = store.findings().find((item) => item.id === finding.id);
   assert.notEqual(stored.active, false);
   assert.equal(second.decisions[finding.id].action, 'notify');
@@ -161,11 +164,11 @@ test('known exploitation applies to a cited CVE before any advisory record exist
   const inventory = {
     systems: [system({ products: [{ name: 'Ivanti Connect Secure', version: '22.7', keywords: [] }] })],
   };
-  const [plain] = assess(inventory, [story], config, now);
+  const [plain] = assess(inventory, [story], noSignals, now);
   assert.equal(plain.exploited, false);
-  assert.equal(decide(plain, config).action, 'digest');
+  assert.equal(decide(plain, noSignals).action, 'digest');
 
-  const [listed] = assess(inventory, [story, kev], config, now);
+  const [listed] = assess(inventory, [story, kev], noSignals, now);
   assert.equal(listed.id, plain.id);
   assert.equal(listed.exploited, true);
   assert.deepEqual(listed.evidence_ids, [story.id, kev.id]);
@@ -173,12 +176,12 @@ test('known exploitation applies to a cited CVE before any advisory record exist
   assert.equal(listed.news_only, true, 'a KEV entry does not turn a report into an advisory');
   assert.equal(listed.title, story.title);
   assert.equal(decide(listed, config).action, 'notify');
-  const quiet = { ...config, policy: { ...config.policy, exploited_override: false } };
+  const quiet = { ...noSignals, policy: { ...noSignals.policy, exploited_override: false } };
   assert.equal(decide(listed, quiet).action, 'digest');
 
   // A KEV entry for another CVE, or one with no report, creates nothing.
   const other = { ...kev, id: 'kev:CVE-2026-29999', aliases: ['CVE-2026-29999'] };
-  assert.equal(assess(inventory, [story, other], config, now)[0].exploited, false);
+  assert.equal(assess(inventory, [story, other], noSignals, now)[0].exploited, false);
   assert.deepEqual(assess(inventory, [kev], config, now), []);
 });
 

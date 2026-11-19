@@ -55,6 +55,7 @@ test('source defaults use cve.now and The Hacker News with legacy sources as exp
       kev: false,
       feeds: [],
       vendor_feeds: [],
+      epss: false,
     });
   }
   const migrated = parseConfig({ version: 1, sources: { osv: true, github: true, kev: true } });

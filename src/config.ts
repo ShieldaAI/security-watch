@@ -129,6 +129,7 @@ export const configSchema = z
           .max(3)
           .refine((values) => new Set(values).size === values.length, 'Duplicate vendor feed')
           .default([]),
+        epss: z.boolean().default(false),
       })
       .strict()
       .default({
@@ -140,6 +141,7 @@ export const configSchema = z
         kev: false,
         feeds: [],
         vendor_feeds: [],
+        epss: false,
       }),
     models: z
       .object({
@@ -172,6 +174,7 @@ export const configSchema = z
         malware_override: z.boolean().default(true),
         ai_dismissals: z.enum(['review', 'record']).optional(),
         review_before_news_suppression: z.boolean().optional(),
+        news_signals: z.boolean().default(true),
         health_channels: channels.default([]),
       })
       .strict()
@@ -183,6 +186,7 @@ export const configSchema = z
         exploited_override: true,
         malware_override: true,
         ai_dismissals: 'review',
+        news_signals: true,
         health_channels: [],
       })
       .superRefine((policy, ctx) => {

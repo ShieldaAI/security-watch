@@ -457,7 +457,7 @@ const STRONG_LIBRARY_CUE = new RegExp(
  * a common abbreviation ("e.g.", "i.e.", "incl.", "vs.") or a single lower-case letter. After "etc." and
  * initials ("the U.S. Package scams") it does end.
  */
-const SENTENCE_END =
+export const SENTENCE_END =
   /(?<=[.!?])(?<!(?:^|[^\p{L}])(?:e\.g|i\.e|incl|vs|approx|cf|al|ca|no|nr|ver|v|\p{Ll})\.)\s+(?=[\p{Lu}\p{N}])/u;
 /** Words that name a flaw. */
 const FLAW_NOUN = '(?:flaws?|bugs?|vulnerabilit(?:y|ies)|escapes?|bypass(?:es)?|injections?)';
