@@ -36,6 +36,8 @@ export type {
   SourceResult,
   AiAnalysis,
   NewsAnalysis,
+  NewsSignals,
+  NewsStatement,
 } from './types.js';
 export {
   scorePilotResponses,
