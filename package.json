@@ -58,7 +58,7 @@
     "@types/node": "24.10.1",
     "@types/nodemailer": "7.0.4",
     "@types/semver": "7.7.1",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "typescript": "7.0.2"
   },
   "publishConfig": {
