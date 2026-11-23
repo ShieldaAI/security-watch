@@ -216,7 +216,7 @@ function record(value: unknown): value is Record<string, unknown> {
 
 /** Imports metadata only. No install scripts or package manager commands are executed. */
 function importLockfile(path: string): { components: Component[]; warnings: string[] } {
-  const lock: unknown = JSON.parse(readBounded(path, 20 * 1024 * 1024));
+  const lock: unknown = JSON.parse(readBounded(path, 20 * 1024 * 1024).replace(/^\uFEFF/, ''));
   if (!record(lock) || (lock.lockfileVersion !== 2 && lock.lockfileVersion !== 3) || !record(lock.packages)) {
     throw new Error(`Expected package-lock v2 or v3 with a packages map: ${path}`);
   }

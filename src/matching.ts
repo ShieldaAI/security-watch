@@ -287,6 +287,11 @@ export function packageMentioned(text: string, component: { ecosystem: Ecosystem
   // coordinates. An artifact name that is not English is the library wherever it appears.
   const artifact = mavenArtifact(component);
   if (artifact && packageMentioned(text, { ecosystem: 'Maven', name: artifact })) return true;
+  // PyPI names are kept in their normalised form (`ruamel-yaml`); prose writes the published one,
+  // `ruamel.yaml` or `typing_extensions`.
+  if (component.ecosystem === 'PyPI' && name.includes('-'))
+    for (const separator of ['.', '_'])
+      if (packageMentioned(text, { ecosystem: 'PyPI', name: name.replaceAll('-', separator) })) return true;
   // One story is compared with every component, and a story that cites many advisories is
   // compared again for each of them: remember the answers for the texts seen last.
   let seen = recent.get(text);
