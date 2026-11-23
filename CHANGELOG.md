@@ -2,6 +2,20 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## Unreleased
+
+### Fixed
+
+- **Alerts sent again for analysed news.** With models on, a news finding the model had confirmed was sent again after any change to its analysis basis, such as one unrelated package added to the system: the scan saved it without its analysis first, and the same conclusion after analysis was a new revision. A known-exploited or critical one was sent twice more. Its queued alerts are now held until the analysis is redone and sent only if the conclusion changes or was not yet delivered; routing that does not depend on the model (an override, a source severity) still applies at once.
+- **A shorter suppression now releases the alert.** `suppress --hours 720` followed by `suppress --hours 1` kept the queued alert waiting 30 days while `explain` said it was not suppressed.
+- **Clock set back.** When the system clock stepped back (an NTP correction), the worker stopped scanning, writing its heartbeat, pinging the external monitor and running maintenance until the clock reached the old time again. Slack retry times and digest times are still wall-clock times.
+- **`pyproject.toml` beside a requirements file.** A folder with `pyproject.toml` and only `requirements-dev.txt` lost the pyproject's packages, so their advisories were missed. A requirements file no longer hides the pyproject; it adds what the requirements files lack. A real lockfile still does.
+- **go.mod `replace` with a version.** `replace golang.org/x/net v0.1.0 => golang.org/x/net v0.18.0` was applied to every version, so a required v0.17.0 was reported as the fixed v0.18.0. A replace that names a version now applies to that version only.
+- **News naming a Python package by its published spelling** (`ruamel.yaml`, `typing_extensions`) now matches the package, which is kept in its normalised form (`ruamel-yaml`).
+- Git and URL entries in an npm v1 lockfile, and Git, path and URL packages in `pdm.lock`, are no longer watched as registry packages of the same name.
+- A Yarn Berry resolution with archive parameters (`lodash@npm:4.17.20::__archiveUrl=…`) keeps its version.
+- An inventory `lockfile:` that starts with a byte order mark is read instead of failing the inventory.
+
 ## 1.2.0
 
 News that no advisory has scored yet gets a level from what the articles say, and findings can show EPSS. Existing configurations and inventories work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.2.0`.

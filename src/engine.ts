@@ -304,6 +304,36 @@ export async function runScan(options: {
     }
     return canRetainPriority(previous, finding) ? { ...finding, priority: previous.priority } : finding;
   };
+  // Before analysis, a news finding whose basis changed loses its previous analysis. Saving it so
+  // would make a new revision, and the same conclusion after analysis would be sent again.
+  const reconcile = (finding: Assessment, basisHash: string): void => {
+    const current = interim(finding, basisHash);
+    const previous = previousById.get(finding.id);
+    if (
+      !config.models.enabled ||
+      !previous?.ai ||
+      previous.active === false ||
+      current.ai ||
+      !(current.news_candidate || current.news_only) ||
+      current.applicability === 'not_affected' ||
+      current.withdrawn
+    )
+      return persist(current);
+    const decision = decide(current, config);
+    // Its routing waits for the model: hold its queued notifications, so that an old conclusion
+    // cannot escape meanwhile, and send them if analysis confirms it.
+    if (decision.action === 'record') return store.holdPending(finding.id);
+    // Routing that does not depend on the model (an override, a source severity) is applied at
+    // once; the previous analysis is shown until it is redone.
+    const kept: Assessment = {
+      ...current,
+      ...(previous.applicability === 'unknown' ? { applicability: 'unknown' } : {}),
+      ...(previous.relevance ? { relevance: previous.relevance } : {}),
+      ...(previous.news_analysis ? { news_analysis: previous.news_analysis } : {}),
+      ai: previous.ai,
+    };
+    persist(decide(kept, config).action === decision.action ? kept : current);
+  };
 
   const cached = store.evidence();
   if (!options.fixture && previousById.size) {
@@ -316,7 +346,7 @@ export async function runScan(options: {
     const current = assess(inventory, cached, config, now, collectedAt, knownEvents, knownFindings);
     const ids = new Set(current.map((a) => a.id));
     for (const finding of current)
-      if (previousById.has(finding.id)) persist(interim(finding, basis(finding, cachedById, collectedAt)));
+      if (previousById.has(finding.id)) reconcile(finding, basis(finding, cachedById, collectedAt));
     for (const previous of previousById.values())
       if (previous.category !== 'health' && previous.active !== false && !ids.has(previous.id))
         retire(previous);
@@ -409,7 +439,7 @@ export async function runScan(options: {
   }
   // Reconcile every finding before delivery, including exclusions, withdrawals and removals.
   // Otherwise an old pending alert could be sent while unrelated AI analysis is running.
-  findings.forEach((finding) => persist(interim(finding, bases.get(finding.id)!)));
+  findings.forEach((finding) => reconcile(finding, bases.get(finding.id)!));
   const currentIds = new Set(findings.map((a) => a.id));
   for (const previous of store.findings())
     if (previous.category !== 'health' && previous.active !== false && !currentIds.has(previous.id))

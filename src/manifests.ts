@@ -167,11 +167,10 @@ const npmPackageLock: Reader = (text) => {
     for (const [name, value] of Object.entries(dependencies)) {
       if (!record(value)) continue;
       const version = string(value.version) ? value.version : undefined;
-      if (version?.startsWith('npm:')) {
-        const target = npmSpecifier(name, version)!;
-        packages.push(found('npm', target.name, target.range, value.dev === true));
-      } else if (version && /^(?:file|link|git|git\+|https?):/.test(version)) skipped++;
-      else packages.push(found('npm', name, version, value.dev === true));
+      // `npm:` aliases, and Git (`github:user/repo#sha`), file and URL sources, as in package.json.
+      const target = version === undefined ? { name, range: undefined } : npmSpecifier(name, version);
+      if (!target) skipped++;
+      else packages.push(found('npm', target.name, target.range, value.dev === true));
       visit(value.dependencies, depth + 1);
     }
   };
@@ -191,7 +190,8 @@ const yarnLock: Reader = (text) => {
     if (fields.resolution !== undefined) {
       const resolution = unquote(fields.resolution);
       const match = /^((?:@[^@/]+\/)?[^@]+)@npm:(.+)$/.exec(resolution);
-      if (match) packages.push(found('npm', match[1]!, match[2]!));
+      // `lodash@npm:4.17.21::__archiveUrl=…`: the parameters after `::` are not the version.
+      if (match) packages.push(found('npm', match[1]!, match[2]!.split('::')[0]));
       else skipped++;
       return;
     }
@@ -383,7 +383,8 @@ const poetryLock: Reader = (text) => {
   for (const table of tomlPackages(text)) {
     if (!string(table.name)) continue;
     const source = table['source.type'];
-    if (source && source !== 'legacy') {
+    // pdm.lock writes these sources as keys of the package itself.
+    if ((source && source !== 'legacy') || table.git || table.path || table.url) {
       skipped++;
       continue;
     }
@@ -475,14 +476,15 @@ const pyprojectToml: Reader = (text) => {
 
 const goMod: Reader = (text) => {
   const required: Array<{ name: string; version: string }> = [];
+  // Keyed by module, or by module and version: `replace a v1.0.0 => b v1.1.0` applies to a v1.0.0 only.
   const replaced = new Map<string, { name: string; version: string } | null>();
   let block: 'require' | 'replace' | undefined;
   const replace = (line: string) => {
-    const match = /^(\S+)(?:\s+\S+)?\s*=>\s*(\S+)(?:\s+(\S+))?$/.exec(line);
+    const match = /^(\S+)(?:\s+(\S+))?\s*=>\s*(\S+)(?:\s+(\S+))?$/.exec(line);
     if (!match) return;
     replaced.set(
-      match[1]!,
-      /^(?:\.|\/)/.test(match[2]!) || !match[3] ? null : { name: match[2]!, version: match[3] },
+      match[2] ? `${match[1]!} ${match[2]}` : match[1]!,
+      /^(?:\.|\/)/.test(match[3]!) || !match[4] ? null : { name: match[3]!, version: match[4] },
     );
   };
   for (const raw of text.split(/\r?\n/)) {
@@ -507,7 +509,8 @@ const goMod: Reader = (text) => {
   const packages: Found[] = [];
   let skipped = 0;
   for (const module of required) {
-    const replacement = replaced.get(module.name);
+    const exact = `${module.name} ${module.version}`;
+    const replacement = replaced.has(exact) ? replaced.get(exact) : replaced.get(module.name);
     if (replacement === null) skipped++;
     else packages.push(found('Go', (replacement ?? module).name, (replacement ?? module).version));
   }
@@ -1004,6 +1007,13 @@ function discover(root: string, warnings: string[]): Candidate[] {
       .filter((file) => file.kind === 'lockfile')
       .map((file) => `${dirname(file.absolute)}\0${file.ecosystem}`),
   );
+  // A requirements file often lists only some packages (requirements-dev.txt), so it does not hide
+  // the pyproject.toml beside it: that is read like a workspace member, for what the file lacks.
+  const resolved = new Set(
+    candidates
+      .filter((file) => file.kind === 'lockfile' && file.read !== requirementsTxt)
+      .map((file) => `${dirname(file.absolute)}\0${file.ecosystem}`),
+  );
   const coveredBy = (file: Candidate) => {
     for (
       let folder = dirname(dirname(file.absolute));
@@ -1016,8 +1026,15 @@ function discover(root: string, warnings: string[]): Candidate[] {
     return false;
   };
   return candidates
-    .filter((file) => file.kind === 'lockfile' || !locked.has(`${dirname(file.absolute)}\0${file.ecosystem}`))
-    .map((file) => (file.kind === 'manifest' && coveredBy(file) ? { ...file, workspace: true } : file))
+    .filter(
+      (file) => file.kind === 'lockfile' || !resolved.has(`${dirname(file.absolute)}\0${file.ecosystem}`),
+    )
+    .map((file) =>
+      file.kind === 'manifest' &&
+      (coveredBy(file) || locked.has(`${dirname(file.absolute)}\0${file.ecosystem}`))
+        ? { ...file, workspace: true }
+        : file,
+    )
     .sort((a, b) => Number(a.kind === 'manifest') - Number(b.kind === 'manifest'));
 }
 
