@@ -1,6 +1,6 @@
 {
   "name": "@shieldaai/security-watch",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Self-hosted security alerts for the software you run: reads your lockfiles (npm, Python, Go, Rust, Java and 7 more ecosystems) or any SBOM, watches new advisories and security news, and alerts you on Slack or email.",
   "type": "module",
   "license": "Apache-2.0",

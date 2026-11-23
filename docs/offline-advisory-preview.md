@@ -4,7 +4,7 @@ Security Watch compares a system inventory with advisory evidence and records
 why a finding applies. Begin with its published fictional inventory and advisory
 fixture, then inspect the result before configuring real monitoring.
 
-This example uses `@shieldaai/security-watch@1.2.0`, an in-memory database,
+This example uses `@shieldaai/security-watch@1.2.1`, an in-memory database,
 no provider credentials and no notification delivery. It is a fixture check of
 matching behavior, not an audit of real dependencies.
 
@@ -16,7 +16,7 @@ Use Node.js 24.10 or newer in a new directory:
 mkdir watch-demo
 cd watch-demo
 npm init -y
-npm install --ignore-scripts --save-exact @shieldaai/security-watch@1.2.0
+npm install --ignore-scripts --save-exact @shieldaai/security-watch@1.2.1
 ```
 
 ## Run the fictional inventory

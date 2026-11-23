@@ -2,7 +2,9 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
-## Unreleased
+## 1.2.1
+
+Fixes from an edge-case review: alerts sent twice for analysed news, packages missed in Python and Go projects, and a worker that paused when the clock stepped back. No configuration change. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.2.1`.
 
 ### Fixed
 

@@ -86,7 +86,7 @@ intake:
 
 ```yaml
 # GitHub Actions: makes the SBOM and sends it; the job fails if the monitor refuses it
-- uses: ShieldaAI/security-watch@v1.2.0
+- uses: ShieldaAI/security-watch@v1.2.1
   with:
     system-id: my-app
     owner: Dana, platform team
@@ -96,7 +96,7 @@ intake:
 
 ```sh
 # Any other pipeline with Node.js 24 and SECURITY_WATCH_INTAKE_TOKEN set
-npx --yes @shieldaai/security-watch@1.2.0 sbom --system-id my-app --upload https://watch.example.com:8787
+npx --yes @shieldaai/security-watch@1.2.1 sbom --system-id my-app --upload https://watch.example.com:8787
 ```
 
 [Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, the receiver (tokens limited to some systems, TLS, Docker), other ways to deliver SBOMs, and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
@@ -130,7 +130,7 @@ If your list contains libraries that are not npm packages (Python, PHP, Java, Go
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.2.0.** This is `@shieldaai/security-watch` 1.2.0, a minor release of the first stable version (1.0.0). It reads CVSS scores, vendor ratings and exploitation reports from news for findings that no advisory has scored yet, and can show FIRST's EPSS for each CVE; 1.1 added SBOM generation from dependency files, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
+**Version 1.2.1.** This is `@shieldaai/security-watch` 1.2.1, a patch release of 1.2.0, the minor release of the first stable version (1.0.0) that reads CVSS scores, vendor ratings and exploitation reports from news for findings that no advisory has scored yet, and can show FIRST's EPSS for each CVE; 1.1 added SBOM generation from dependency files, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
@@ -170,7 +170,7 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.2.0.tgz
+npm install --global ./shieldaai-security-watch-1.2.1.tgz
 ```
 
 Choose one setup command below. To start from your own code, use `init --project` as in [step 2](#get-started-in-four-steps). For a fictional example with AI disabled:

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const image = process.argv[2] ?? 'shielda-security-watch:1.2.0';
+const image = process.argv[2] ?? 'shielda-security-watch:1.2.1';
 const name = `security-watch-check-${process.pid}`;
 const evidence = JSON.parse(
   readFileSync(fileURLToPath(new URL('../examples/advisories.json', import.meta.url)), 'utf8'),
