@@ -55,7 +55,7 @@ inputs:
     default: '30'
   security-watch-version:
     description: Version of @shieldaai/security-watch to run.
-    default: 1.2.0
+    default: 1.2.1
 outputs:
   sbom-file:
     description: Path of the SBOM.
