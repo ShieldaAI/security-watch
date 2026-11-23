@@ -22,7 +22,9 @@ export class HeartbeatMonitor {
     signal?: AbortSignal,
   ): Promise<ExternalHeartbeat | undefined> {
     const settings = config.monitoring;
-    if (!settings || signal?.aborted || now < this.nextAt) return undefined;
+    if (!settings || signal?.aborted) return undefined;
+    // A next time further away than one interval means the clock was set back.
+    if (now < this.nextAt && this.nextAt - now <= settings.interval_seconds * 1000) return undefined;
     this.nextAt = now + settings.interval_seconds * 1000;
     let lastSuccess: string | null = null;
     const saved = store.getMeta('external_heartbeat');

@@ -31,6 +31,9 @@ import {
 
 type Row = Record<string, unknown>;
 export const SCHEMA_VERSION = 7;
+/** A queued notification held back while its finding waits for a new analysis. */
+const HELD = 'Held for reassessment';
+const OPEN = `(status='pending' OR (status='failed' AND last_error='${HELD}'))`;
 function verifyFile(path: string): void {
   // Closing any descriptor for a live SQLite inode releases this process's POSIX locks.
   // Inspect existing files without opening them, including when another Store is already open.
@@ -491,7 +494,7 @@ export class Store {
       if (changed)
         this.#db
           .prepare(
-            "UPDATE notifications SET status='failed',last_error='Superseded by a newer assessment' WHERE finding_id=? AND status='pending'",
+            `UPDATE notifications SET status='failed',last_error='Superseded by a newer assessment' WHERE finding_id=? AND ${OPEN}`,
           )
           .run(assessment.id);
       // A changed routing configuration can stop a pending delivery without creating a duplicate in retained channels.
@@ -500,7 +503,7 @@ export class Store {
         if (!channels.includes(channel as 'slack' | 'email')) {
           this.#db
             .prepare(
-              "UPDATE notifications SET status='failed',last_error='Notification policy no longer selects this destination' WHERE finding_id=? AND channel=? AND status='pending'",
+              `UPDATE notifications SET status='failed',last_error='Notification policy no longer selects this destination' WHERE finding_id=? AND channel=? AND ${OPEN}`,
             )
             .run(assessment.id, channel);
         }
@@ -523,8 +526,9 @@ export class Store {
           .prepare(
             `INSERT INTO notifications(id,finding_id,revision,channel,payload,status,available_at)
         VALUES(?,?,?,?,?,'pending',?) ON CONFLICT(finding_id,revision,channel) DO UPDATE SET
-          payload=excluded.payload,status='pending',available_at=MAX(notifications.available_at,excluded.available_at),last_error=NULL
-          WHERE notifications.status='failed' AND notifications.last_error='Notification policy no longer selects this destination'`,
+          payload=excluded.payload,status='pending',last_error=NULL,available_at=CASE WHEN notifications.last_error='${HELD}'
+            THEN notifications.available_at ELSE MAX(notifications.available_at,excluded.available_at) END
+          WHERE notifications.status='failed' AND notifications.last_error IN ('Notification policy no longer selects this destination','${HELD}')`,
           )
           .run(randomUUID(), assessment.id, revision, channel, payload, availableAt);
     });
@@ -764,7 +768,7 @@ export class Store {
         `SELECT
       SUM(CASE WHEN n.status='failed' AND COALESCE(n.last_error,'') NOT IN (
         'Notification policy no longer selects this destination', 'Notification urgency changed under the current policy',
-        'Finding is no longer active', 'Superseded by a newer assessment', 'Finding acknowledged before delivery') THEN 1 ELSE 0 END) AS failed,
+        'Finding is no longer active', 'Superseded by a newer assessment', 'Finding acknowledged before delivery', '${HELD}') THEN 1 ELSE 0 END) AS failed,
       SUM(CASE WHEN n.status='unknown' THEN 1 ELSE 0 END) AS unknown,
       SUM(CASE WHEN n.status='pending' AND MAX(n.available_at,CASE WHEN n.channel='slack' THEN ? ELSE 0 END)<=? THEN 1 ELSE 0 END) AS overdue_pending
       FROM notifications n JOIN findings f ON f.id=n.finding_id
@@ -917,6 +921,18 @@ export class Store {
         .run(now, id);
     });
   }
+  /**
+   * Keep a finding's queued notifications from being sent until it is saved again. Saving the same
+   * revision queues them again with their schedule; a new revision supersedes them.
+   * @internal Used by the scan worker; not part of the public API.
+   */
+  holdPending(findingId: string): void {
+    this.#db
+      .prepare(
+        `UPDATE notifications SET status='failed',last_error=? WHERE finding_id=? AND status='pending'`,
+      )
+      .run(HELD, findingId);
+  }
   /** @internal Used by the scan and delivery workers; not part of the public API. */
   recoverSending(now = Date.now()): void {
     this.#db
@@ -966,17 +982,19 @@ export class Store {
     if (!Number.isSafeInteger(until) || until <= Date.now() || !reason.trim())
       throw new Error('Suppression needs a future expiry and a reason');
     this.#transaction(() => {
+      // A delivery held until an earlier expiry follows the new one, also when it is shorter.
+      this.#db
+        .prepare(
+          `UPDATE notifications SET available_at=MAX(?,CASE WHEN available_at=(SELECT suppressed_until FROM findings WHERE id=?)
+          THEN 0 ELSE available_at END) WHERE finding_id=? AND status='pending'`,
+        )
+        .run(until, id, id);
       if (
         !this.#db
           .prepare('UPDATE findings SET suppressed_until=?,suppression_reason=? WHERE id=?')
           .run(until, reason.trim(), id).changes
       )
         throw new Error('Finding not found');
-      this.#db
-        .prepare(
-          "UPDATE notifications SET available_at=MAX(available_at,?) WHERE finding_id=? AND status='pending'",
-        )
-        .run(until, id);
     });
   }
   /** @internal Used by the scan and delivery workers; not part of the public API. */

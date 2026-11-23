@@ -71,7 +71,8 @@ export class MaintenanceScheduler {
           attempted +
           (previous.ok ? settings.interval_hours : Math.min(settings.interval_hours, 1)) * 3_600_000;
     }
-    if (now < this.nextAt) return undefined;
+    // A next time further away than one interval means the clock was set back.
+    if (now < this.nextAt && this.nextAt - now <= settings.interval_hours * 3_600_000) return undefined;
     this.nextAt = now + Math.min(settings.interval_hours, 1) * 3_600_000;
     const report: MaintenanceRun = {
       ok: false,

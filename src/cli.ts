@@ -1384,9 +1384,12 @@ async function main(): Promise<void> {
     try {
       firstScanNotice(config, store, false);
       while (!stop) {
-        if (Date.now() - lastHeartbeat >= 15_000) heartbeat('running');
-        if (!scanning && !maintaining && Date.now() >= nextScan) {
-          nextScan = Date.now() + config.poll_interval_minutes * 60_000;
+        const tick = Date.now();
+        // A clock set back must not pause the worker until it reaches the old time again.
+        if (tick - lastHeartbeat >= 15_000 || tick < lastHeartbeat) heartbeat('running');
+        const interval = config.poll_interval_minutes * 60_000;
+        if (!scanning && !maintaining && (tick >= nextScan || nextScan - tick > interval)) {
+          nextScan = tick + interval;
           scanning = (async () => {
             try {
               const report = await runScan({
