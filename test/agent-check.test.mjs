@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -86,6 +87,28 @@ const RECORDS = {
     aliases: ['GHSA-Xy12-ab34-cd56'],
   }),
   'GHSA-mult-bbbb-2222': osvRecord('GHSA-mult-bbbb-2222', 'npm', 'multi', '0', '1.3.0'),
+  // A Python-style record whose GIT range lists a commit as its fix, beside a real version.
+  'PYSEC-2026-1': {
+    ...osvRecord('PYSEC-2026-1', 'npm', 'gitfix', '0', '9.3.0'),
+    affected: [
+      {
+        package: { ecosystem: 'npm', name: 'gitfix' },
+        ranges: [
+          {
+            type: 'GIT',
+            repo: 'https://github.com/x/gitfix',
+            events: [{ introduced: '0' }, { fixed: '2444cddab2f8aa' }],
+          },
+          { type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '9.3.0' }] },
+        ],
+      },
+    ],
+  },
+  // Many mirror IDs beside the CVE, as GitHub's Rapid Reset advisory.
+  'GHSA-mirr-aaaa-bbbb': osvRecord('GHSA-mirr-aaaa-bbbb', 'npm', 'mirrored', '0', '2.0.0', {
+    aliases: ['BIT-aaa-2023-1', 'BIT-bbb-2023-1', 'BIT-ccc-2023-1', 'CVE-2023-44487'],
+  }),
+  'GHSA-loww-aaaa-bbbb': osvRecord('GHSA-loww-aaaa-bbbb', 'npm', 'lowpkg', '0', '2.0.0', { severity: 'LOW' }),
   'MAL-2026-1': osvRecord('MAL-2026-1', 'npm', 'evil-pkg', '0', undefined, {
     summary: 'Malicious code in evil-pkg (npm)',
     severity: 'CRITICAL',
@@ -101,6 +124,12 @@ const RECORDS = {
 };
 
 function affects(record, query) {
+  record = {
+    ...record,
+    affected: [
+      { ...record.affected[0], ranges: record.affected[0].ranges.filter((range) => range.type !== 'GIT') },
+    ],
+  };
   const affected = record.affected[0];
   if (!affected.package || affected.package.ecosystem !== query.package.ecosystem) return false;
   if (affected.package.name.toLowerCase() !== query.package.name.toLowerCase()) return false;
@@ -386,7 +415,7 @@ test('dependency file paths follow the project reader', () => {
 test('fixed versions below the installed one are left out', () => {
   assert.equal(fixesAbove('0.2.4; 1.2.6', '1.2.5'), '1.2.6');
   assert.equal(fixesAbove('1.2.6', undefined), '1.2.6');
-  assert.equal(fixesAbove('abc; 2.0', '1.0.0'), 'abc; 2.0');
+  assert.equal(fixesAbove('abc; 2.0', '1.0.0'), '2.0; abc');
 });
 
 test('the GET cache serves static files once and passes POSTs through', async () => {
@@ -900,6 +929,126 @@ test('R12: the report names the project it read, and notes are not "not read"', 
     assert.equal(report.degraded, false);
     assert.doesNotMatch(text, /INCOMPLETE|not read/i);
     assert.match(text, /Notes:\n- package\.json: 1 of 1 dependencies have a version range/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regressions from the second review of 1.4.0.
+
+test('S1/S6: commit IDs are never fixed versions, and one upgrade is judged per release line', async () => {
+  const report = await checkPackages([{ ecosystem: 'npm', name: 'gitfix', version: '1.0.0' }], {
+    http: fakeHttp(),
+    now,
+  });
+  assert.equal(report.findings[0].fixed, '9.3.0');
+  assert.equal(
+    fixesAbove('2444cddab2f8, 9.3.0; 1.11.28, 2.2.10; 1.11.28', '1.11.0'),
+    '1.11.28; 2.2.10; 9.3.0',
+  );
+  assert.equal(fixesAbove('eb31d845, 0.2.4; 1.2.6', undefined), '0.2.4; 1.2.6');
+  const finding = (id, fixed) => ({
+    id,
+    aliases: [],
+    title: id,
+    severity: 'high',
+    priority: 'high',
+    applicability: 'affected',
+    exploited: false,
+    malware: false,
+    package: { ecosystem: 'npm', name: 'lib', version: '5.0.0' },
+    files: [],
+    fixed,
+    reasons: [],
+  });
+  // 5.1.0 fixes B but not A, whose fix on the 5.1 line is 5.1.14.
+  assert.deepEqual(upgradeSummary([finding('A', '4.2.26; 5.1.14; 5.2.8'), finding('B', '5.1.0')]), [
+    '- npm lib 5.0.0: upgrading to 5.1.14 or later fixes all 2.',
+  ]);
+  // A commit ID never becomes a version to upgrade to.
+  assert.deepEqual(upgradeSummary([finding('A', '2444cddab2f8'), finding('B', '5.1.0')]), [
+    '- npm lib 5.0.0: upgrading to 5.1.0 or later fixes 1 of 2; 1 name no fixed version.',
+  ]);
+});
+
+test('S2: the project’s git configuration runs nothing', { skip: noGit }, async () => {
+  const root = project({ lodash: '4.17.20' });
+  const marker = join(tmpdir(), `sw-fsmonitor-${process.pid}-${Date.now()}`);
+  try {
+    git(root, 'init', '-q');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'base');
+    git(root, 'config', 'core.fsmonitor', `touch ${marker}`);
+    await checkChange({ project: root, base: 'HEAD', http: fakeHttp(), now });
+    assert.equal(existsSync(marker), false, 'core.fsmonitor ran');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(marker, { force: true });
+  }
+});
+
+test(
+  'S3/S7: a linked folder that leads out is not read, and an unreadable file is skipped, not fatal',
+  { skip: noGit },
+  async () => {
+    const root = project(
+      { lodash: '4.17.21' },
+      {
+        'sub/package-lock.json': lockfile({ lodash: '4.17.21' }),
+        'svc/package-lock.json': lockfile({ lodash: '4.17.21' }),
+      },
+    );
+    const outside = mkdtempSync(join(tmpdir(), 'sw-outside-'));
+    try {
+      git(root, 'init', '-q');
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'base');
+      writeFileSync(join(outside, 'package-lock.json'), lockfile({ minimist: '1.2.5' }));
+      rmSync(join(root, 'sub'), { recursive: true });
+      symlinkSync(outside, join(root, 'sub'));
+      const linked = await checkChange({ project: root, base: 'HEAD', http: fakeHttp(), now });
+      assert.ok(!linked.added.some((item) => item.package.name === 'minimist'), 'read through a link');
+      if (process.getuid?.() !== 0) {
+        chmodSync(join(root, 'svc', 'package-lock.json'), 0o000);
+        const change = await checkChange({ project: root, base: 'HEAD', http: fakeHttp(), now });
+        assert.equal(change.head.degraded, true);
+        assert.match(formatChangeReport(change), /not read: svc\/package-lock\.json: could not be read/);
+        chmodSync(join(root, 'svc', 'package-lock.json'), 0o644);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  },
+);
+
+test('S4/S5/S9: CVE first among IDs, no severity sorts as medium, package checks speak of versions', async () => {
+  const report = await checkPackages(
+    [
+      { ecosystem: 'npm', name: 'mirrored', version: '1.0.0' },
+      { ecosystem: 'npm', name: 'lowpkg', version: '1.0.0' },
+      { ecosystem: 'npm', name: 'nosev', version: '1.0.0' },
+    ],
+    { http: fakeHttp(), now },
+  );
+  const mirrored = report.findings.find((finding) => finding.package.name === 'mirrored');
+  assert.equal(mirrored.aliases[0], 'CVE-2023-44487');
+  assert.match(formatCheckReport(report), /GHSA-mirr-aaaa-bbbb, CVE-2023-44487/);
+  const order = report.findings.map((finding) => finding.package.name);
+  assert.ok(order.indexOf('nosev') < order.indexOf('lowpkg'), order.join());
+  const text = formatCheckReport(report);
+  assert.match(text, /in these versions/);
+  assert.doesNotMatch(text, /installed versions|lockfile/);
+});
+
+test('S8: an advisory lookup stops when the call is cancelled', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const root = project();
+  try {
+    await assert.rejects(
+      checkAdvisory('CVE-2021-44906', { project: root, http: fakeHttp(), now, signal: controller.signal }),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

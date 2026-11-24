@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { coerce, gt, valid } from 'semver';
+import { coerce, gt, major, minor, valid } from 'semver';
 import {
   lstatSync,
   mkdirSync,
@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseConfig } from './config.js';
 import { runScan } from './engine.js';
 import { normalizeEcosystem, normalizePackageName, exactLibraryVersion, ECOSYSTEMS } from './ecosystems.js';
@@ -96,6 +96,8 @@ export interface CheckFinding {
 }
 
 export interface CheckReport {
+  /** A project's dependency files, an SBOM file, or packages named in the request. */
+  kind: 'project' | 'sbom' | 'packages';
   checked_at: string;
   /** What was checked: a project folder, a file, an SBOM or a package list. */
   target: string;
@@ -117,6 +119,7 @@ export interface CheckReport {
 }
 
 interface Target {
+  kind: CheckReport['kind'];
   label: string;
   system: System;
   files: DependencyFile[];
@@ -146,6 +149,7 @@ function projectTarget(options: ProjectCheckOptions): Target {
     const imported = importSbom(path);
     const loaded = systemFromSbom(path, basename(path), basename(path), imported);
     return {
+      kind: 'sbom',
       label: basename(path),
       system: loaded.system,
       files: [],
@@ -178,6 +182,7 @@ function projectTarget(options: ProjectCheckOptions): Target {
   const imported: SbomImport = importCycloneDxValue(generated.bom, digestOf(generated.bom));
   const loaded = systemFromSbom(project, basename(project), basename(project), imported);
   return {
+    kind: 'project',
     label: project,
     system: loaded.system,
     files: generated.files,
@@ -196,6 +201,7 @@ function projectTarget(options: ProjectCheckOptions): Target {
 
 function emptyTarget(label: string): Target {
   return {
+    kind: 'project',
     label,
     system: blankSystem(basename(label) || 'project', []),
     files: [],
@@ -253,6 +259,7 @@ async function run(target: Target, options: CheckOptions): Promise<CheckReport> 
   const epss = options.epss ?? false;
   const sources = ['osv', ...(kev ? ['kev'] : []), ...(epss ? ['epss'] : [])];
   const report: CheckReport = {
+    kind: target.kind,
     checked_at: new Date(now).toISOString(),
     target: target.label,
     packages: target.packages,
@@ -356,22 +363,47 @@ function toFinding(
   };
 }
 
+/** CVE first (what people search for), then GHSA, then ecosystem IDs; BIT- mirrors last. */
+function idOrder(id: string): number {
+  return /^CVE-/i.test(id) ? 0 : /^GHSA-/i.test(id) ? 1 : /^BIT-/i.test(id) ? 3 : 2;
+}
+
 function uniqueIds(ids: readonly string[]): string[] {
   const seen = new Map<string, string>();
   for (const id of ids) if (!seen.has(id.toUpperCase())) seen.set(id.toUpperCase(), id);
-  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+  return [...seen.values()].sort((a, b) => idOrder(a) - idOrder(b) || a.localeCompare(b));
+}
+
+/** A version that compares, or undefined: commit IDs and other text never pass for a version. */
+export function comparable(version: string): string | undefined {
+  const text = version.trim();
+  if (!/^v?\d/.test(text) || /^[0-9a-f]{7,64}$/i.test(text)) return undefined;
+  return valid(text) ?? coerce(text)?.version ?? undefined;
 }
 
 /**
- * The fixed versions above the installed one: an advisory for several release lines lists a fix per
- * line, and "upgrade to 0.2.4" is no advice for 1.2.5. Versions that do not compare are all kept.
+ * The fixed versions worth showing, from an advisory's fix list ("1.2.6; 0.2.4, 1.2.6"): each once,
+ * in version order, without commit IDs, and, when the installed version is known, only those above
+ * it (an advisory for several release lines lists a fix per line, and "upgrade to 0.2.4" is no
+ * advice for 1.2.5). Versions that do not compare are kept as they are.
  */
 export function fixesAbove(fix: string, installed: string | undefined): string | undefined {
-  const versions = fix.split(/;\s*/).filter(Boolean);
-  const current = installed ? (valid(installed) ?? coerce(installed)?.version) : undefined;
+  const seen = new Set<string>();
+  const versions: string[] = [];
+  for (const raw of fix.split(/[;,]/)) {
+    const version = raw.trim();
+    if (!version || /^[0-9a-f]{7,64}$/i.test(version) || seen.has(version)) continue;
+    seen.add(version);
+    versions.push(version);
+  }
+  versions.sort((a, b) => {
+    const [x, y] = [comparable(a), comparable(b)];
+    return x && y ? (gt(x, y) ? 1 : gt(y, x) ? -1 : 0) : x ? -1 : y ? 1 : a.localeCompare(b);
+  });
+  const current = installed ? comparable(installed) : undefined;
   if (!current) return versions.join('; ') || undefined;
   const kept = versions.filter((version) => {
-    const candidate = valid(version) ?? coerce(version)?.version;
+    const candidate = comparable(version);
     return !candidate || gt(candidate, current);
   });
   return (kept.length ? kept : versions).join('; ') || undefined;
@@ -381,7 +413,7 @@ function rank(finding: CheckFinding): number {
   return (
     (finding.malware ? 200 : 0) +
     (finding.exploited ? 100 : 0) +
-    SEVERITY_ORDER.indexOf(finding.priority) * 10 +
+    level(finding) * 10 +
     SEVERITY_ORDER.indexOf(finding.severity)
   );
 }
@@ -428,6 +460,7 @@ export async function checkPackages(
     } as Component;
   });
   const target: Target = {
+    kind: 'packages',
     label: packages.map((item) => `${item.name}${item.version ? `@${item.version}` : ''}`).join(', '),
     system: blankSystem('packages', components),
     files: [],
@@ -457,18 +490,29 @@ export interface ChangeReport {
 }
 
 function git(root: string, args: string[], maxBuffer = 64 * 1024 * 1024): Buffer {
-  return execFileSync('git', ['-C', root, ...args], {
-    maxBuffer,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // The check makes no requests besides its sources: a partial clone must not fetch from its remote.
-    env: { ...process.env, GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0' },
-  });
+  // A project's own .git/config can name programs git runs for some commands (core.fsmonitor runs
+  // on ls-files): those are switched off, so no project code runs.
+  return execFileSync(
+    'git',
+    ['-C', root, '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', ...args],
+    {
+      maxBuffer,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // The check makes no requests besides its sources: a partial clone must not fetch from its remote.
+      env: { ...process.env, GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0' },
+    },
+  );
 }
 
 function gitError(error: unknown): string {
   if ((error as { code?: string }).code === 'ENOENT') return 'git is not installed here';
   const stderr = (error as { stderr?: Buffer }).stderr?.toString().trim();
   return cleanText(stderr || (error instanceof Error ? error.message : 'git failed'), 300);
+}
+
+function isInside(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 interface GitProject {
@@ -481,7 +525,7 @@ interface GitProject {
 }
 
 function gitProject(project: string): GitProject {
-  const root = realpathSync(resolve(project));
+  const root = realpathSync.native(resolve(project));
   if (!statSync(root).isDirectory()) throw new Error('A change can only be checked for a project folder.');
   try {
     const top = git(root, ['rev-parse', '--show-toplevel']).toString().trim();
@@ -542,9 +586,16 @@ function stage(
       }
       total += file.size;
       if (total > MAX_GIT_TOTAL) throw new Error(`Dependency files in ${what} exceed 200 MiB.`);
+      let content: Buffer;
+      try {
+        content = file.read();
+      } catch (error) {
+        skipped.push(`${file.path}: could not be read (${gitError(error)}); skipped.`);
+        continue;
+      }
       const destination = join(project, ...file.path.split('/'));
       mkdirSync(dirname(destination), { recursive: true });
-      writeFileSync(destination, file.read());
+      writeFileSync(destination, content);
     }
     return { folder, project, skipped };
   } catch (error) {
@@ -637,6 +688,8 @@ export function dependencyFilesInWorkingTree(project: string): {
       continue; // tracked but deleted in the working tree
     }
     if (!stat.isFile()) continue; // a link, or a submodule's folder
+    // A folder on the way can be a link that leads out of the project, as the file itself cannot.
+    if (!isInside(realpathSync.native(absolute), gp.root)) continue;
     files.push({ path, size: stat.size, read: () => readFileSync(absolute) });
     if (files.length > MAX_GIT_FILES)
       throw new Error(
@@ -742,7 +795,13 @@ export interface AdvisoryReport {
   project: CheckReport;
 }
 
-async function osvRecordById(http: HttpClient, id: string, now: number): Promise<Evidence | undefined> {
+async function osvRecordById(
+  http: HttpClient,
+  id: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<Evidence | undefined> {
+  signal?.throwIfAborted();
   const response = await http(`${OSV}/vulns/${encodeURIComponent(id)}`, { maxBytes: 8_000_000 });
   if (response.status === 404) return undefined;
   if (response.status !== 200) throw new Error(`OSV answered HTTP ${response.status} for ${id}.`);
@@ -799,17 +858,18 @@ export async function checkAdvisory(
   const http = options.http ?? cachingHttp();
   const target = projectTarget(options);
   const lookup = async () =>
-    (await osvRecordById(http, id, now)) ??
+    (await osvRecordById(http, id, now, options.signal)) ??
     // OSV identifiers are case-sensitive (openSUSE-SU-..., GHSA-xxxx): try the upper-case form too.
-    (id.toUpperCase() !== id ? await osvRecordById(http, id.toUpperCase(), now) : undefined);
+    (id.toUpperCase() !== id ? await osvRecordById(http, id.toUpperCase(), now, options.signal) : undefined);
   const [project, record] = await Promise.all([run(target, { ...options, http }), lookup()]);
   const records: Evidence[] = record ? [record] : [];
   if (record && !(record.packages ?? []).length)
     for (const alias of (record.aliases ?? []).filter((alias) => alias.toUpperCase() !== id).slice(0, 4))
       try {
-        const other = await osvRecordById(http, alias, now);
+        const other = await osvRecordById(http, alias, now, options.signal);
         if (other) records.push(other);
-      } catch {
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
         /* The first record still answers; an alias that fails only loses package detail. */
       }
   const names = new Set(
@@ -903,30 +963,43 @@ export function failsAt(finding: CheckFinding, failOn: Severity | 'none'): boole
   return finding.exploited || level(finding) >= SEVERITY_ORDER.indexOf(failOn);
 }
 
-export function findingLine(finding: CheckFinding): string {
+export function findingLine(finding: CheckFinding, kind: CheckReport['kind'] = 'project'): string {
   const name = `${finding.package.ecosystem} ${finding.package.name}${finding.package.version ? ` ${finding.package.version}` : ''}`;
   const flags = [
     finding.malware ? 'MALWARE' : '',
     finding.exploited ? 'known exploited (CISA KEV)' : '',
-    finding.applicability === 'unknown' ? 'no exact version: check by hand' : '',
+    finding.applicability === 'unknown'
+      ? kind === 'packages'
+        ? 'no version given'
+        : 'no exact version: check by hand'
+      : '',
     finding.priority === 'unknown' ? 'the advisory gives no severity' : '',
     finding.epss ? `EPSS ${(finding.epss.probability * 100).toFixed(1)}%` : '',
   ].filter(Boolean);
   const ids = [finding.id, ...finding.aliases.slice(0, 3)].join(', ');
   return [
     `- [${finding.priority}] ${name}: ${finding.title} (${ids})${flags.length ? ` [${flags.join('; ')}]` : ''}`,
-    `  ${finding.malware ? 'Fix: remove this package and rotate any credentials it could reach.' : finding.fixed ? `Fix: upgrade to ${finding.fixed}.` : 'Fix: no fixed version listed.'}${finding.files.length ? ` In: ${finding.files.slice(0, 4).join(', ')}${finding.files.length > 4 ? ` and ${finding.files.length - 4} more` : ''}.` : ''}${finding.url ? ` ${finding.url}` : ''}`,
+    `  ${finding.malware ? 'Fix: remove this package and rotate any credentials it could reach.' : finding.fixed ? (finding.applicability === 'affected' ? `Fix: upgrade to ${finding.fixed}.` : `Fixed in ${finding.fixed}: use at least the one on the release line you run.`) : 'Fix: no fixed version listed.'}${finding.files.length ? ` In: ${finding.files.slice(0, 4).join(', ')}${finding.files.length > 4 ? ` and ${finding.files.length - 4} more` : ''}.` : ''}${finding.url ? ` ${finding.url}` : ''}`,
   ].join('\n');
 }
 
-function comparable(version: string): string | undefined {
-  return valid(version) ?? coerce(version)?.version ?? undefined;
+/** The release line a version belongs to: major.minor, the unit projects backport fixes to. */
+function line(version: string): string {
+  return `${major(version)}.${minor(version)}`;
+}
+
+/** Whether `candidate` is fixed for an advisory that lists these fixed versions, one per line. */
+function fixedBy(candidate: string, fixes: readonly string[]): boolean {
+  const same = fixes.filter((fix) => line(fix) === line(candidate));
+  if (same.length) return same.some((fix) => !gt(fix, candidate));
+  // A line the advisory does not mention is fixed only if it is newer than every fix it lists.
+  return fixes.every((fix) => !gt(fix, candidate));
 }
 
 /**
- * One line per package with several findings: the lowest version that fixes all of them, when every
- * finding names a fix that compares. An agent upgrading one finding at a time would otherwise
- * upgrade, check, and upgrade again.
+ * One line per package with several findings: the lowest listed fixed version that fixes all of
+ * them, each judged on its own release line, so that an agent upgrades once instead of once per
+ * finding. Nothing is said when no listed version fixes them all.
  */
 export function upgradeSummary(findings: readonly CheckFinding[]): string[] {
   const groups = new Map<string, CheckFinding[]>();
@@ -938,23 +1011,24 @@ export function upgradeSummary(findings: readonly CheckFinding[]): string[] {
   const out: string[] = [];
   for (const [key, group] of groups) {
     if (group.length < 2) continue;
-    let target: string | undefined;
-    let open = 0;
-    for (const finding of group) {
-      const fixes = (finding.fixed ?? '')
-        .split(/;\s*/)
-        .map(comparable)
-        .filter((value) => value !== undefined);
-      if (!fixes.length) {
-        open++;
-        continue;
-      }
-      const lowest = fixes.reduce((a, b) => (gt(a, b) ? b : a));
-      if (!target || gt(lowest, target)) target = lowest;
-    }
+    const installed = comparable(group[0]!.package.version!);
+    if (!installed) continue;
+    const fixLists = group.map((finding) =>
+      (finding.fixed ?? '')
+        .split(/[;,]/)
+        .map((fix) => comparable(fix))
+        .filter((fix): fix is string => fix !== undefined),
+    );
+    const open = fixLists.filter((fixes) => !fixes.length).length;
+    const lists = fixLists.filter((fixes) => fixes.length);
+    if (!lists.length) continue;
+    const candidates = [...new Set(lists.flat())]
+      .filter((fix) => gt(fix, installed))
+      .sort((a, b) => (gt(a, b) ? 1 : -1));
+    const target = candidates.find((candidate) => lists.every((fixes) => fixedBy(candidate, fixes)));
     if (!target) continue;
     out.push(
-      `- ${key}: ${open ? `upgrading to ${target} or later fixes ${group.length - open} of ${group.length}; ${open} name no fixed version` : `upgrading to ${target} or later fixes all ${group.length}`}.`,
+      `- ${key}: upgrading to ${target} or later fixes ${open ? `${lists.length} of ${group.length}; ${open} name no fixed version` : `all ${group.length}`}.`,
     );
   }
   return out;
@@ -1003,7 +1077,9 @@ export function formatCheckReport(report: CheckReport, min: Severity = 'low'): s
     );
   if (report.unversioned)
     out.push(
-      `${plural(report.unversioned, 'package')} had no exact version${report.files.length ? ' (a manifest without its lockfile)' : ''} and could only be checked by name.`,
+      report.kind === 'packages'
+        ? `${plural(report.unversioned, 'package')} named without a version: every advisory for ${report.unversioned === 1 ? 'it is' : 'them is'} listed.`
+        : `${plural(report.unversioned, 'package')} had no exact version${report.files.length ? ' (a manifest without its lockfile)' : ''} and could only be checked by name.`,
     );
   const affected = report.findings.filter((finding) => finding.applicability === 'affected');
   const byHand = report.findings.length - affected.length;
@@ -1011,12 +1087,12 @@ export function formatCheckReport(report: CheckReport, min: Severity = 'low'): s
   if (report.packages)
     out.push(
       report.findings.length
-        ? `${plural(affected.length, 'known vulnerability')} in installed versions${byHand ? `, ${byHand} to check by hand (no exact version)` : ''}${noSeverity ? `; ${noSeverity} without a severity in the advisory` : ''}${hiddenText(report.findings, shown, min)}:`
+        ? `${plural(affected.length, 'known vulnerability')} in ${report.kind === 'packages' ? 'these versions' : 'installed versions'}${byHand ? `, ${byHand} ${report.kind === 'packages' ? 'for packages named without a version' : 'to check by hand (no exact version)'}` : ''}${noSeverity ? `; ${noSeverity} without a severity in the advisory` : ''}${hiddenText(report.findings, shown, min)}:`
         : report.degraded
           ? 'No known vulnerabilities in the packages that could be checked.'
           : 'No known vulnerabilities in these versions.',
     );
-  out.push(...shown.map(findingLine));
+  out.push(...shown.map((finding) => findingLine(finding, report.kind)));
   const upgrades = upgradeSummary(shown);
   if (upgrades.length) out.push('', 'Upgrades that fix several at once:', ...upgrades);
   out.push(...notes(report));
@@ -1044,7 +1120,7 @@ export function formatChangeReport(change: ChangeReport, min: Severity = 'low'):
     change.added.length
       ? `The change brings in ${plural(change.added.length, 'known vulnerability')}${hiddenText(change.added, added, min)}:`
       : 'The change brings in no known vulnerabilities.',
-    ...added.map(findingLine),
+    ...added.map((finding) => findingLine(finding)),
   );
   const upgrades = upgradeSummary(added);
   if (upgrades.length) out.push('', 'Upgrades that fix several at once:', ...upgrades);
@@ -1095,11 +1171,12 @@ export function formatAdvisoryReport(report: AdvisoryReport): string {
   out.push('', `Project: ${report.project.target}`, ...incomplete(report.project));
   const affected = report.findings.filter((finding) => finding.applicability === 'affected');
   const unknown = report.findings.filter((finding) => finding.applicability !== 'affected');
-  if (affected.length) out.push('This project IS affected:', ...affected.map(findingLine));
+  if (affected.length)
+    out.push('This project IS affected:', ...affected.map((finding) => findingLine(finding)));
   if (unknown.length)
     out.push(
       `This project MAY be affected: it has the package without an exact version (no lockfile), so the version in use cannot be compared. Check the installed version against the ranges above:`,
-      ...unknown.map(findingLine),
+      ...unknown.map((finding) => findingLine(finding)),
     );
   if (!report.findings.length) {
     if (report.present_not_affected.length)

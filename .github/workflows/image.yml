@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to publish again, such as v1.4.0
+        description: Existing release tag to publish again, v1.4.0 or later (earlier versions have no MCP server or labels)
         required: true
 permissions:
   contents: read
@@ -89,6 +89,19 @@ jobs:
           build-args: VERSION=${{ steps.version.outputs.version }}
           sbom: true
           provenance: mode=max
+      - name: Run the pushed image on both architectures before attesting and signing it
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            test "$(docker run --rm --platform "$platform" "$IMAGE@$DIGEST" --version)" = "$VERSION"
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_dependencies","arguments":{}}}' |
+              timeout 120 docker run -i --rm --platform "$platform" -v "$PWD:/project:ro" "$IMAGE@$DIGEST" mcp /project > "mcp-${platform#linux/}.jsonl" || true
+            grep -q '"id":2' "mcp-${platform#linux/}.jsonl"
+            echo "$platform: $VERSION, MCP server answers"
+          done
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
