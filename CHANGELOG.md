@@ -2,6 +2,27 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## 1.4.0
+
+Security Watch answers now what the monitor answers over time, for people and for AI coding agents, and is published as a signed container image. Existing configurations, inventories and databases work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.4.0`.
+
+### Added
+
+- **`security-watch check`.** One command, no configuration, nothing stored: reads a project's dependency files (or `--sbom FILE`), asks OSV about every package version, marks CISA known-exploited entries and, with `--epss`, adds EPSS. Findings are sorted malware first, then known exploited, then by priority, each with the fixed versions above the installed one and the files the package came from. `--base REF` reads the dependency files at a git commit with `git cat-file` (nothing is checked out, and a partial clone fetches nothing) and reports what the working tree added, what it fixed, and which packages were added, removed or changed. `--package ecosystem:name@version` (repeatable) checks packages before they are added; `--advisory ID` says whether a CVE, GHSA, PYSEC, RUSTSEC, GO or MAL record affects the project, following a CVE record's aliases to the records that name packages. `--base REF...` compares with the point where the branch left REF. Both sides are the files git knows (the working tree: tracked files and untracked ones that are not ignored), so submodules and ignored folders are left out. `--json`, `--production`, `--fail-on`. Exit code 1 when an installed version is affected at or above `--fail-on` (high; malware and known-exploited always count; an advisory without a severity counts as medium; a package without an exact version never fails), 2 when the check is incomplete: a source failed or a dependency file could not be read, which is said first in the output. A package with several findings gets one version that fixes them all. It runs the monitor's own engine on an in-memory database, so a check and the monitor agree. Library functions `checkProject`, `checkPackages`, `checkChange` and `checkAdvisory` in `dist/check.js` (not yet part of the stable exports).
+- **MCP server for AI agents.** `security-watch mcp [PROJECT]` and the `security-watch-mcp` bin serve seven tools over stdio: `check_project_vulnerabilities`, `check_dependency_change`, `check_package`, `check_advisory`, `list_dependencies`, `write_sbom` (the only tool that writes: inside the project, never replacing a file unasked) and `list_watch_findings` (read-only, listed only when `SECURITY_WATCH_CONFIG` names a monitor configuration). Paths must stay inside the project, links that lead out are refused, and a server started in a filesystem root or the home folder asks the client for its roots (a tool call waits for the answer). A cancelled call stops before its next request to a source and sends no reply. `write_sbom` writes only outside hidden folders, never through a link that leads out, and replaces only an existing SBOM, with `overwrite: true`. Protocol versions 2024-11-05 to 2025-11-25. See [Security Watch for AI agents](docs/agents.md).
+- **Plugin for Claude Code, Codex, ChatGPT and Antigravity.** `plugins/security-watch`: the MCP server through a launcher that runs npm's own npx for the pinned version from outside the project (so the project's `.npmrc` and `node_modules` cannot choose the checker), and two skills, one for checking dependencies before and after a change and one for setting up the monitor. Marketplace `shielda-security-watch` (`/plugin marketplace add ShieldaAI/security-watch`). `npm run pack:plugins` builds the archives for OpenAI's portal.
+- **Container image.** Every release tag publishes `ghcr.io/shieldaai/security-watch` (`x.y.z`, `x.y` and `latest` for stable releases) for linux/amd64 and linux/arm64, after the test suite and the container checks pass, with an SBOM and build provenance attached and a keyless Sigstore signature. `compose.yaml` uses it. The image carries the OCI source label and the MCP Registry label.
+- **MCP Registry entry.** `server.json` lists the npm package and the image as `io.github.ShieldaAI/security-watch`; `package.json` carries the matching `mcpName`.
+
+### Changed
+
+- The published package includes `npm-shrinkwrap.json`, written from `package-lock.json` at pack time with runtime packages only, so `npx` and global installs get exactly the dependency tree the release was tested with, sub-dependencies included. `npm run check:package` installs the packed tarball and checks every runtime package version.
+- `compose.yaml` pulls the published image instead of building one.
+
+### Fixed
+
+- The README no longer lists EPSS among the integrations Security Watch lacks; it has had EPSS since 1.2.0.
+
 ## 1.3.0
 
 Security Watch hands findings to whoever writes temporary mitigations (runtime shields, blocking policies, firewall rules), shows which hosts a mitigation covers, works with [Shirudo](docs/shirudo.md), writes OpenVEX for other scanners, and reads CycloneDX up to 1.7. Existing configurations and inventories work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.3.0`.

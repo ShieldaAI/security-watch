@@ -955,6 +955,20 @@ interface Candidate extends Kind {
 }
 
 /** Walks a project for dependency files without following links or entering installed-package folders. */
+/**
+ * Whether a path relative to a project (with `/` separators) is a dependency file that reading the
+ * project would pick up: a supported name, not inside a hidden or skipped folder, not too deep.
+ * Used to take the dependency files of a git commit without checking out the whole tree.
+ */
+export function isDependencyFilePath(path: string, projectFolder = ''): boolean {
+  const parts = path.split('/');
+  if (!parts.length || parts.some((part) => part === '' || part === '.' || part === '..')) return false;
+  if (parts.length - 1 > MAX_DEPTH) return false;
+  for (const folder of parts.slice(0, -1))
+    if (folder.startsWith('.') || SKIPPED_FOLDERS.has(folder)) return false;
+  return classify(parts.at(-1)!, parts.length > 1 ? parts.at(-2)! : projectFolder) !== undefined;
+}
+
 function discover(root: string, warnings: string[]): Candidate[] {
   const stat = statSync(root);
   // A link named like a dependency file can point at any file on the machine. The folder given as

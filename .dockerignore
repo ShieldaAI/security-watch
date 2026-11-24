@@ -8,3 +8,4 @@ data
 security-watch.yaml
 systems.yaml
 .docker-check-*/
+artifacts

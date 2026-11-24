@@ -1,0 +1,94 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ShieldaAI/security-watch",
+  "title": "Security Watch",
+  "description": "Checks a project's dependencies for known vulnerabilities and malware (OSV, CISA KEV); writes SBOMs.",
+  "version": "1.4.0",
+  "websiteUrl": "https://github.com/ShieldaAI/security-watch/blob/main/docs/agents.md",
+  "repository": {
+    "url": "https://github.com/ShieldaAI/security-watch",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/ShieldaAI/security-watch/main/plugins/security-watch/assets/logo.png",
+      "mimeType": "image/png",
+      "sizes": ["400x400"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@shieldaai/security-watch",
+      "version": "1.4.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Run the MCP server. Must come first."
+        },
+        {
+          "type": "positional",
+          "valueHint": "project",
+          "format": "filepath",
+          "description": "The project to check. Default: the folder the client starts the server in, or the first root the client names when that is the home folder.",
+          "isRequired": false
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "SECURITY_WATCH_CONFIG",
+          "description": "Path to a Security Watch monitor configuration, to add the list_watch_findings tool.",
+          "isRequired": false,
+          "format": "filepath"
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/shieldaai/security-watch:1.4.0",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "-i"
+        },
+        {
+          "type": "positional",
+          "value": "--rm"
+        },
+        {
+          "type": "named",
+          "name": "--mount",
+          "value": "type=bind,src={project},dst=/project,readonly",
+          "description": "Mounts the project read-only. check_dependency_change needs git, which the image does not have; write_sbom needs a writable mount.",
+          "variables": {
+            "project": {
+              "description": "Absolute path of the project to check.",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "/project"
+        }
+      ]
+    }
+  ]
+}

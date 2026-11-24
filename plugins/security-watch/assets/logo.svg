@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E1A2B"/>
+      <stop offset="1" stop-color="#070D17"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFC94D"/>
+      <stop offset="1" stop-color="#F08A24"/>
+    </linearGradient>
+  </defs>
+  <!-- Transparent margin of 10% on each side, then the rounded tile. Same family as Agent Guard. -->
+  <rect x="40" y="40" width="320" height="320" rx="64" fill="url(#bg)"/>
+  <g transform="translate(200 200) scale(0.8) translate(-200 -198)">
+    <path d="M200 74 L292 108 V196 C292 254 254 298 200 322 C146 298 108 254 108 196 V108 Z"
+          fill="none" stroke="url(#shield)" stroke-width="16" stroke-linejoin="round"/>
+    <!-- A watch: an eye that is also a radar sweep. -->
+    <path d="M140 200 C162 168 182 156 200 156 C218 156 238 168 260 200 C238 232 218 244 200 244 C182 244 162 232 140 200 Z"
+          fill="none" stroke="#E8F1FA" stroke-width="12" stroke-linejoin="round"/>
+    <circle cx="200" cy="200" r="20" fill="#FFC94D"/>
+  </g>
+</svg>

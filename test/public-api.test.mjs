@@ -48,9 +48,9 @@ test('the version is defined once and the documents agree with it', () => {
   const lock = JSON.parse(read('../package-lock.json'));
   assert.equal(lock.version, version);
   assert.equal(lock.packages[''].version, version);
-  const images = [...read('../compose.yaml').matchAll(/image: shielda-security-watch:(\S+)/g)].map(
-    ([, tag]) => tag,
-  );
+  const images = [
+    ...read('../compose.yaml').matchAll(/image: ghcr\.io\/shieldaai\/security-watch:(\S+)/g),
+  ].map(([, tag]) => tag);
   assert.ok(images.length >= 2, 'both services name the image');
   for (const tag of images) assert.equal(tag, version, 'compose.yaml');
   assert.ok(read('../CHANGELOG.md').includes(`## ${version}`));

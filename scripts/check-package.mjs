@@ -12,19 +12,25 @@ function run(args, cwd = temp) {
   if (result.status !== 0) throw new Error(result.stderr || result.stdout || 'Package check failed');
   return result.stdout;
 }
+// The published package carries npm-shrinkwrap.json (prepack writes it); --ignore-scripts skips
+// prepack, so it is written here the same way and removed afterwards.
+run([join(root, 'scripts', 'shrinkwrap.mjs')], root);
 try {
   const [packed] = JSON.parse(
     run([npmCli, 'pack', '--ignore-scripts', '--json', '--pack-destination', temp], root),
   );
   for (const file of packed.files)
     if (
-      !/^(dist\/|examples\/|docs\/|package.json$|README.md$|CHANGELOG.md$|LICENSE$|SECURITY.md$|CONTRIBUTING.md$)/.test(
+      !/^(dist\/|examples\/|docs\/|package.json$|npm-shrinkwrap.json$|README.md$|CHANGELOG.md$|LICENSE$|SECURITY.md$|CONTRIBUTING.md$)/.test(
         file.path,
       )
     )
       throw new Error(`Unexpected packed file: ${file.path}`);
   for (const required of [
     'dist/cli.js',
+    'dist/mcp-server.js',
+    'dist/check.js',
+    'npm-shrinkwrap.json',
     'dist/index.js',
     'dist/index.d.ts',
     'dist/sbom.js',
@@ -73,6 +79,19 @@ try {
   const cli = join(consumer, 'node_modules/@shieldaai/security-watch/dist/cli.js');
   if (run([cli, '--version'], consumer).trim() !== packed.version)
     throw new Error('CLI version does not match the packed package');
+  // The shrinkwrap fixes every runtime package, sub-dependencies included, to the tested version.
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8')).packages;
+  for (const [path, entry] of Object.entries(lock)) {
+    if (!path || entry.dev) continue;
+    const installed = join(consumer, 'node_modules', path.replace(/^node_modules\//, ''), 'package.json');
+    const nested = join(consumer, 'node_modules/@shieldaai/security-watch', path, 'package.json');
+    const file = existsSync(installed) ? installed : nested;
+    if (!existsSync(file) || JSON.parse(readFileSync(file, 'utf8')).version !== entry.version)
+      throw new Error(`Packed install did not use the shrinkwrapped ${path}@${entry.version}`);
+  }
+  const mcp = join(consumer, 'node_modules/@shieldaai/security-watch/dist/mcp-server.js');
+  if (run([mcp, '--version'], consumer).trim() !== packed.version)
+    throw new Error('MCP server version does not match the packed package');
   const providers = JSON.parse(run([cli, 'providers'], consumer));
   if (providers.length !== 22 || !providers.some((provider) => provider.id === 'anthropic'))
     throw new Error('Packed CLI provider catalog is incomplete');
@@ -671,4 +690,5 @@ try {
   );
 } finally {
   rmSync(temp, { recursive: true, force: true });
+  rmSync(join(root, 'npm-shrinkwrap.json'), { force: true });
 }

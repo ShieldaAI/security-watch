@@ -18,6 +18,18 @@ import { parse as parseYaml, stringify } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, parseConfig, missingCredentials } from './config.js';
 import { loadInventory } from './inventory.js';
+import {
+  checkAdvisory,
+  checkChange,
+  checkPackages,
+  checkProject,
+  formatAdvisoryReport,
+  formatChangeReport,
+  formatCheckReport,
+  failsAt,
+  type CheckFinding,
+  type PackageQuery,
+} from './check.js';
 import { shieldCandidates } from './shield-candidates.js';
 import { openVex } from './vex.js';
 import { exportProblems, maxAges, readMitigationExport, withCurrentMitigations } from './mitigations.js';
@@ -45,7 +57,7 @@ function heartbeatProblem(address: string, allowPrivate: boolean | undefined): b
 import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
 import { catchingUpFrom, checkHealth } from './health.js';
-import type { Assessment, Config } from './types.js';
+import type { Assessment, Config, Severity } from './types.js';
 import { PROVIDERS, providerDefinition } from './providers.js';
 import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
 import { ECOSYSTEMS, parseLibraryList } from './ecosystems.js';
@@ -82,6 +94,13 @@ const VERSION = (
   JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
 ).version;
 const help = `Shielda Security Watch ${VERSION}
+
+  security-watch check [PROJECT] [--production] [--epss] [--fail-on high] [--json]
+  security-watch check [PROJECT] --base REF        (only what a change since REF brings in)
+  security-watch check --sbom FILE.json
+  security-watch check --package npm:lodash@4.17.21 [--package pypi:requests@2.31.0 ...]
+  security-watch check [PROJECT] --advisory CVE-2021-44906
+  security-watch mcp [PROJECT]                     (MCP server on stdio, for AI agents)
 
   security-watch sbom [--project PATH] [--output FILE.cdx.json] [--name NAME] [--system-id ID]
     [--owner TEXT] [--environment TEXT] [--note TEXT] [--exposure internet|internal|unknown]
@@ -126,6 +145,13 @@ const help = `Shielda Security Watch ${VERSION}
   security-watch prune [--apply]    (shows the retention plan unless --apply is given)
   security-watch unlock             (only removes a stopped worker's lock)
   security-watch test-notification --channel slack|email
+
+check asks OSV about every package in a project now and marks CISA known-exploited entries; it
+sends package names and versions (and, with --epss, CVE IDs to FIRST), stores nothing and needs no
+configuration. Exit code 1: an installed version affected at or above --fail-on (high; malware and
+known-exploited always count, an advisory without a severity counts as medium, a package without an
+exact version never does; none never fails); 2: the check is incomplete (a source failed or a
+dependency file could not be read). --base REF... compares with the point where the branch left REF.
 
 sbom reads the lockfiles and manifests in a project (npm, Python, Go, Rust, PHP, Ruby, Java,
 .NET, Dart, Elixir, Swift, Haskell) and writes a CycloneDX SBOM. It runs nothing and sends nothing.
@@ -216,6 +242,13 @@ function argumentsFromCommandLine() {
       system: { type: 'string' },
       store: { type: 'string' },
       running: { type: 'string' },
+      sbom: { type: 'string' },
+      base: { type: 'string' },
+      package: { type: 'string', multiple: true },
+      advisory: { type: 'string' },
+      epss: { type: 'boolean' },
+      'fail-on': { type: 'string' },
+      json: { type: 'boolean' },
     },
   });
 }
@@ -669,6 +702,75 @@ async function initialize(): Promise<void> {
     `Created ${configPath} and ${inventoryPath}. ${sbomFiles.length ? 'Each SBOM in sboms/ is one system; add owners and notes with security-watch sbom --owner/--note, or describe more systems in systems.yaml.' : 'Add installed versions and deployment details to systems.yaml.'} Copy .env.example to .env and fill in any required credentials. Then run:\n  security-watch doctor --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))}\n  security-watch scan --config ${shellArgument(configPath)} --credentials-file ${shellArgument(resolve(directory, '.env'))} --dry-run\nNo messages were sent.`,
   );
 }
+/** `ecosystem:name@version`, such as npm:lodash@4.17.21, npm:@scope/pkg@1.0.0 or maven:org.x:lib@2.1. */
+function packageArgument(value: string): PackageQuery {
+  const colon = value.indexOf(':');
+  if (colon < 1)
+    throw new Error(`--package ${value}: write it as ecosystem:name@version, such as npm:lodash@4.17.21.`);
+  const rest = value.slice(colon + 1).replace('==', '@');
+  const at = rest.lastIndexOf('@');
+  return at > 0
+    ? { ecosystem: value.slice(0, colon), name: rest.slice(0, at), version: rest.slice(at + 1) }
+    : { ecosystem: value.slice(0, colon), name: rest };
+}
+
+async function runCheck(): Promise<void> {
+  if ((values.project?.length ?? 0) + (id ? 1 : 0) > 1) throw new Error('check reads one project at a time.');
+  const project = id ?? values.project?.[0];
+  const failOn = values['fail-on'] ?? 'high';
+  if (!['critical', 'high', 'medium', 'low', 'none'].includes(failOn))
+    throw new Error('--fail-on must be critical, high, medium, low or none.');
+  if (values.package && (project || values.sbom || values.base || values.advisory))
+    throw new Error(
+      '--package checks the named packages only; leave out the project, --sbom, --base and --advisory.',
+    );
+  if (values.base && (values.sbom || values.advisory))
+    throw new Error(
+      '--base compares a project folder with git; it cannot be combined with --sbom or --advisory.',
+    );
+  if (values.sbom && project) throw new Error('Give a project or --sbom, not both.');
+  const common = {
+    ...(values.epss ? { epss: true } : {}),
+    ...(values.production ? { production: true } : {}),
+  };
+  const target = {
+    ...common,
+    ...(project ? { project } : {}),
+    ...(values.sbom ? { sbom: values.sbom } : {}),
+  };
+  let failing: CheckFinding[];
+  let degraded: boolean;
+  let result: unknown;
+  let text: string;
+  if (values.package) {
+    const report = await checkPackages(values.package.map(packageArgument), common);
+    [failing, degraded, result, text] = [report.findings, report.degraded, report, formatCheckReport(report)];
+  } else if (values.advisory) {
+    const report = await checkAdvisory(values.advisory, target);
+    [failing, degraded, result, text] = [
+      report.findings,
+      report.project.degraded,
+      report,
+      formatAdvisoryReport(report),
+    ];
+  } else if (values.base) {
+    const report = await checkChange({ ...target, base: values.base });
+    [failing, degraded, result, text] = [
+      report.added,
+      report.head.degraded,
+      report,
+      formatChangeReport(report),
+    ];
+  } else {
+    const report = await checkProject(target);
+    [failing, degraded, result, text] = [report.findings, report.degraded, report, formatCheckReport(report)];
+  }
+  if (values.json) output(result);
+  else console.log(text);
+  const fails = failing.some((finding) => failsAt(finding, failOn as Severity | 'none'));
+  process.exitCode = fails ? 1 : degraded ? 2 : 0;
+}
+
 async function main(): Promise<void> {
   if (values.version) {
     console.log(VERSION);
@@ -679,6 +781,8 @@ async function main(): Promise<void> {
     return;
   }
   const commandFlags: Record<string, string[]> = {
+    check: ['project', 'sbom', 'base', 'package', 'advisory', 'production', 'epss', 'fail-on', 'json'],
+    mcp: [],
     sbom: [
       'project',
       'output',
@@ -760,8 +864,26 @@ async function main(): Promise<void> {
   if (!commandFlags[command]) throw new Error(`Unknown command ${command}. Use --help.`);
   for (const flag of Object.keys(values))
     if (!commandFlags[command]!.includes(flag)) throw new Error(`--${flag} is not supported by ${command}.`);
-  const needsId = ['explain', 'history', 'review', 'acknowledge', 'suppress', 'retry'].includes(command);
+  const needsId = [
+    'explain',
+    'history',
+    'review',
+    'acknowledge',
+    'suppress',
+    'retry',
+    'check',
+    'mcp',
+  ].includes(command);
   if (positionals.length > (needsId ? 2 : 1)) throw new Error('Unexpected positional arguments. Use --help.');
+  if (command === 'check') {
+    await runCheck();
+    return;
+  }
+  if (command === 'mcp') {
+    const { mcpMain } = await import('./mcp-server.js');
+    mcpMain(id ? [id] : []);
+    return;
+  }
   if (command === 'init') {
     await initialize();
     return;
@@ -1694,5 +1816,6 @@ main().catch((error) => {
   else if (error instanceof Error && /YAML/i.test(error.name))
     console.error('Invalid YAML; check configuration/inventory syntax.');
   else console.error(error instanceof Error ? error.message : 'Operation failed');
-  process.exitCode = 1;
+  // check uses 1 for "found something"; a check that could not run is 2, like an incomplete one.
+  process.exitCode = command === 'check' ? 2 : 1;
 });
