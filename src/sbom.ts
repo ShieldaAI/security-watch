@@ -10,6 +10,8 @@ export interface SbomImport {
   warnings: string[];
   dependencies: DependencyRelationship[];
   source: { format: 'CycloneDX' | 'SPDX'; spec_version: string; digest: string };
+  /** Things to read once that do not make the import incomplete, such as a newer CycloneDX 1.x. */
+  notices?: string[];
   /**
    * What the document says about the system it describes: its name, when it was created, and the
    * `security-watch:*` properties written by `security-watch sbom`. Used by an SBOM folder.
@@ -43,7 +45,7 @@ export function importCycloneDx(path: string): SbomImport {
 }
 
 /**
- * Imports a CycloneDX (1.4 to 1.6) or SPDX (2.2, 2.3) JSON document, whichever the file is. This
+ * Imports a CycloneDX (1.2 to 1.7, and later 1.x) or SPDX (2.2, 2.3) JSON document, whichever the file is. This
  * accepts the output of `security-watch sbom`, Trivy, Syft, cdxgen and GitHub's dependency-graph
  * export ("Export SBOM", or the REST API's `{ "sbom": ... }` response) without conversion.
  */
@@ -53,7 +55,7 @@ export function importSbom(path: string): SbomImport {
     return importCycloneDxDocument(document, digest);
   const spdx = object(document) && object(document.sbom) ? document.sbom : document;
   if (object(spdx) && typeof spdx.spdxVersion === 'string') return importSpdxDocument(spdx, digest);
-  throw new Error('Expected a CycloneDX JSON (1.4 to 1.6) or SPDX JSON (2.2, 2.3) SBOM');
+  throw new Error('Expected a CycloneDX JSON (1.2 or later 1.x) or SPDX JSON (2.2, 2.3) SBOM');
 }
 
 const SPDX_RELATIONSHIPS = 100_000;
@@ -155,19 +157,52 @@ function importSpdxDocument(spdx: Record<string, unknown>, digest: string): Sbom
   return result;
 }
 
+/** The newest CycloneDX version this release was checked against. */
+export const CYCLONEDX_KNOWN_MINOR = 7;
+/**
+ * The CycloneDX 1.x minor version, or nothing. 1.2 is the first with `metadata` and `dependencies`.
+ * Minor versions add fields and deprecate, they do not remove what is read here (components, package
+ * URLs, references, dependencies, metadata, properties), so a later 1.x is read by the 1.7 rules.
+ * A 2.x is a different format and is refused.
+ */
+export function cycloneDxMinor(specVersion: unknown): number | undefined {
+  // Only text or a number: String(['1.6']) is '1.6', and a one-element array is not a version.
+  const match =
+    typeof specVersion === 'string' || typeof specVersion === 'number'
+      ? // No leading zero: no generator writes "1.07", and "1.07" is not "1.7".
+        /^1\.(0|[1-9]\d{0,2})$/.exec(String(specVersion))
+      : null;
+  const minor = match ? Number(match[1]) : undefined;
+  return minor !== undefined && minor >= 2 ? minor : undefined;
+}
+
+/** @internal Checks a CycloneDX document held in memory, as a scan will read it. */
+export function importCycloneDxValue(bom: unknown, digest: string): SbomImport {
+  return importCycloneDxDocument(bom, digest);
+}
+
 function importCycloneDxDocument(bom: unknown, digest: string, provenance = 'CycloneDX'): SbomImport {
+  const minor = object(bom) ? cycloneDxMinor(bom.specVersion) : undefined;
+  // `components` is optional in CycloneDX: an image with no packages is a valid, empty list.
   if (
     !object(bom) ||
     bom.bomFormat !== 'CycloneDX' ||
-    !['1.4', '1.5', '1.6'].includes(String(bom.specVersion)) ||
-    !Array.isArray(bom.components)
+    minor === undefined ||
+    (bom.components !== undefined && !Array.isArray(bom.components))
   )
-    throw new Error('Expected CycloneDX JSON 1.4, 1.5 or 1.6 with components');
+    throw new Error('Expected CycloneDX JSON 1.2 or later 1.x');
   const result: SbomImport = {
     components: [],
     warnings: [],
     dependencies: [],
-    source: { format: 'CycloneDX', spec_version: String(bom.specVersion), digest },
+    source: { format: 'CycloneDX', spec_version: `1.${minor}`, digest },
+    ...(minor > CYCLONEDX_KNOWN_MINOR
+      ? {
+          notices: [
+            `CycloneDX 1.${minor} is newer than this release knows (1.${CYCLONEDX_KNOWN_MINOR}); it was read by the 1.${CYCLONEDX_KNOWN_MINOR} rules.`,
+          ],
+        }
+      : {}),
   };
   const ids = new Set<string>();
   const componentIds = new Set<string>();
@@ -311,7 +346,7 @@ function importCycloneDxDocument(bom: unknown, digest: string, provenance = 'Cyc
       result.components.push(component);
     }
   };
-  visit(bom.components, 0);
+  visit((bom.components as unknown[] | undefined) ?? [], 0);
   if (bom.dependencies !== undefined) {
     if (!Array.isArray(bom.dependencies) || bom.dependencies.length > 20_000)
       throw new Error('Invalid SBOM dependencies');

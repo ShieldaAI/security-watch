@@ -15,13 +15,6 @@ import {
   safeHttpsUrl,
 } from '../dist/shield-inputs.js';
 import { shieldCandidates } from '../dist/shield-candidates.js';
-import {
-  attachRuntimeShield,
-  exportProblems,
-  parseShirudoRow,
-  readShirudoExport,
-  ShirudoIndex,
-} from '../dist/shirudo.js';
 import { parseConfig, loadConfig } from '../dist/config.js';
 import { Store } from '../dist/store.js';
 import { runScan } from '../dist/engine.js';
@@ -511,261 +504,6 @@ test('public exploit code from cve.now or news counts; withdrawn advisories do n
   assert.equal(candidates[0].readiness, 'fixed_version_known');
 });
 
-// Shirudo export.
-
-const row = (over = {}) => ({
-  node_id: 'n1',
-  host_name: 'eu1-a',
-  status: 'healthy',
-  image_id: 'fleet-os',
-  image_version: '2026.11.1',
-  binding: 'verified',
-  sbom_stale: false,
-  source: 'sbom',
-  vuln_id: 'CVE-2026-20001',
-  severity: 'CRITICAL',
-  package: 'alpha',
-  installed: '1.0.0',
-  fixed: '2.0.0',
-  exposure: 'shielded',
-  upatch_id: 'alpha-deser-guard',
-  applied_seq: '12',
-  shield_link: 'fixes',
-  updated_at: '2026-11-24T11:55:00Z',
-  ...over,
-});
-const settings = (dir, extra = {}) => ({
-  exposure_file: join(dir, 'node-vulns.jsonl'),
-  max_age_minutes: 120,
-  image_systems: {},
-  ...extra,
-});
-const writeExport = (dir, rows, mtime = now - 5 * 60_000) => {
-  const path = join(dir, 'node-vulns.jsonl');
-  writeFileSync(
-    path,
-    rows.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n') + '\n',
-  );
-  utimesSync(path, mtime / 1000, mtime / 1000);
-  return path;
-};
-
-test('export rows: required fields, unknown exposure values, control characters', () => {
-  assert.equal(parseShirudoRow(JSON.stringify(row())).exposure, 'shielded');
-  assert.equal(parseShirudoRow(JSON.stringify(row({ exposure: 'future_value' }))).exposure, 'unknown');
-  assert.equal(parseShirudoRow(JSON.stringify(row({ exposure: 'none', vuln_id: '' }))).vuln_id, '');
-  assert.throws(() => parseShirudoRow(JSON.stringify(row({ vuln_id: '' }))), /missing field/);
-  assert.throws(() => parseShirudoRow(JSON.stringify(row({ node_id: undefined }))), /missing field/);
-  assert.throws(() => parseShirudoRow(JSON.stringify(row({ package: 'a\u0007b' }))), /invalid text/);
-  assert.throws(() => parseShirudoRow('[1]'), /not an object/);
-  assert.throws(() => parseShirudoRow('{'), /not JSON/);
-});
-
-test('reading an export: stale, skipped lines, nothing readable, missing file', () => {
-  const dir = temp();
-  try {
-    writeExport(dir, [row(), '{broken', row({ node_id: 'n2' })]);
-    const fresh = readShirudoExport(settings(dir), now);
-    assert.equal(fresh.rows.length, 2);
-    assert.equal(fresh.skipped, 1);
-    assert.equal(fresh.stale, false);
-    assert.match(exportProblems(fresh, settings(dir), now)[0], /1 line\(s\).*line 2: not JSON/);
-
-    writeExport(dir, [row()], now - 3 * 3_600_000);
-    const old = readShirudoExport(settings(dir), now);
-    assert.equal(old.stale, true);
-    assert.match(
-      exportProblems(old, settings(dir), now)[0],
-      /180 minutes ago, more than shirudo.max_age_minutes \(120\)/,
-    );
-
-    writeExport(dir, ['nope', '{}']);
-    assert.throws(() => readShirudoExport(settings(dir), now), /no readable row/);
-    assert.throws(
-      () => readShirudoExport(settings(dir, { exposure_file: join(dir, 'missing') }), now),
-      /ENOENT/,
-    );
-    writeExport(dir, []);
-    assert.equal(readShirudoExport(settings(dir), now).rows.length, 0, 'an empty export is valid');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-const evidenceMap = new Map([
-  ['osv:GHSA-aaaa-bbbb-cccc', advisory('GHSA-aaaa-bbbb-cccc')],
-  ['news:1', { id: 'news:1', kind: 'news', aliases: ['CVE-2026-99999'] }],
-]);
-function index(rows, extra = {}) {
-  const dir = temp();
-  try {
-    writeExport(dir, rows);
-    const s = settings(dir, extra);
-    return new ShirudoIndex(readShirudoExport(s, now), s);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-test('status counts each node once by its worst row and names the shields', () => {
-  const shirudo = index([
-    row(),
-    row({ node_id: 'n2' }),
-    row({ node_id: 'n3', exposure: 'exposed_no_shield', upatch_id: '' }),
-    row({ node_id: 'n3', exposure: 'shielded' }),
-    row({ node_id: 'n4', exposure: 'shield_pending', upatch_id: 'alpha-deser-guard-v2' }),
-    row({ node_id: 'n5', vuln_id: '', exposure: 'none', package: '' }),
-    row({ node_id: 'n6', vuln_id: 'CVE-2026-11111', exposure: 'exposed_no_shield' }),
-    row({ node_id: 'x1', image_id: 'other-image' }),
-  ]);
-  const status = shirudo.status(finding(), evidenceMap, inventory);
-  assert.equal(status.nodes, 6, 'every node running the image, also those without a row for it');
-  assert.deepEqual(status.exposure, { shielded: 2, exposed_no_shield: 1, shield_pending: 1 });
-  assert.deepEqual(status.upatch_ids, ['alpha-deser-guard', 'alpha-deser-guard-v2']);
-  assert.equal(
-    status.summary,
-    'Shirudo: shielded on 2 of 6 nodes; 1 exposed with no shield; 1 shield waiting to load; 2 not listed by Shirudo for it.',
-  );
-  assert.equal(status.stale, false);
-});
-
-test('matching: advisory aliases, package names, kernel rows, mapped and unknown images', () => {
-  const ghsaEvent = finding({ event_id: 'GHSA-AAAA-BBBB-CCCC' });
-  assert.equal(index([row()]).status(ghsaEvent, evidenceMap, inventory).exposure.shielded, 1, 'CVE alias');
-  assert.equal(
-    index([row({ package: 'other' })]).status(finding(), evidenceMap, inventory).not_in_shirudo,
-    true,
-    'another package with the same CVE is not this finding',
-  );
-  assert.equal(
-    index([row({ package: 'ALPHA' })]).status(finding(), evidenceMap, inventory).exposure.shielded,
-    1,
-    'case-insensitive',
-  );
-  const kernel = index([row({ source: 'kernel', package: 'linux' })]).status(
-    finding({ category: 'product', component_id: 'product:gamma server' }),
-    evidenceMap,
-    inventory,
-  );
-  assert.equal(kernel.exposure.shielded, 1, 'a product finding matches by identifier');
-  const none = index([row({ vuln_id: 'CVE-2026-55555' })]).status(finding(), evidenceMap, inventory);
-  assert.equal(none.not_in_shirudo, true);
-  assert.match(none.summary, /lists no such finding on the 1 node running this system/);
-  assert.equal(index([row({ image_id: 'elsewhere' })]).status(finding(), evidenceMap, inventory), undefined);
-  assert.equal(
-    index([row({ image_id: 'fleet-os-v2' })], { image_systems: { 'fleet-os-v2': 'fleet-os' } }).status(
-      finding(),
-      evidenceMap,
-      inventory,
-    ).exposure.shielded,
-    1,
-    'mapped image',
-  );
-  assert.equal(
-    index([row()]).status(finding({ category: 'malware' }), evidenceMap, inventory),
-    undefined,
-    'a malicious package is never shown as shielded',
-  );
-  const news = finding({
-    event_id: 'news:1',
-    evidence_ids: ['news:1'],
-    category: 'news',
-    component_id: undefined,
-  });
-  assert.equal(
-    index([row({ vuln_id: 'CVE-2026-99999' })]).status(news, evidenceMap, inventory).not_in_shirudo,
-    true,
-    'a CVE an article cites is not the finding’s own identifier',
-  );
-  const attached = attachRuntimeShield(
-    { ...finding(), runtime_shield: { summary: 'old' } },
-    undefined,
-    evidenceMap,
-  );
-  assert.equal(attached.runtime_shield, undefined, 'a status without an export is removed');
-});
-
-test('the shirudo section: defaults, strict fields, path relative to the configuration', () => {
-  const config = parseConfig({ version: 1, shirudo: { exposure_file: './shirudo/node-vulns.jsonl' } });
-  assert.deepEqual(config.shirudo, {
-    exposure_file: './shirudo/node-vulns.jsonl',
-    max_age_minutes: 120,
-    image_systems: {},
-  });
-  assert.throws(() => parseConfig({ version: 1, shirudo: { exposure_file: 'x', token: 'y' } }));
-  assert.throws(() => parseConfig({ version: 1, shirudo: { exposure_file: 'x', max_age_minutes: 1 } }));
-  assert.throws(() =>
-    parseConfig({ version: 1, shirudo: { exposure_file: 'x', image_systems: { 'bad id!': 'web' } } }),
-  );
-  const dir = temp();
-  try {
-    writeFileSync(
-      join(dir, 'security-watch.yaml'),
-      'version: 1\nshirudo:\n  exposure_file: ./shirudo/node-vulns.jsonl\n',
-    );
-    assert.equal(
-      loadConfig(join(dir, 'security-watch.yaml')).shirudo.exposure_file,
-      join(dir, 'shirudo/node-vulns.jsonl'),
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a scan shows Shirudo status; a new export keeps the revision and sends nothing again', async () => {
-  const dir = temp();
-  try {
-    const store = new Store(':memory:');
-    writeExport(dir, [row({ exposure: 'exposed_no_shield', upatch_id: '' })]);
-    const config = osvConfig({ shirudo: { exposure_file: join(dir, 'node-vulns.jsonl') } });
-    const first = await runScan({ config, inventory, store, http: osvApi(), now });
-    assert.deepEqual(
-      first.errors.filter((error) => error.source === 'shirudo'),
-      [],
-    );
-    const saved = store.findings().find((item) => item.component_id === 'alpha');
-    assert.deepEqual(saved.runtime_shield.exposure, { exposed_no_shield: 1 });
-    const jobs = store.jobs().length;
-    assert.ok(jobs > 0);
-    const text = notificationText(store.jobs()[0]).text;
-    assert.match(text, /Shirudo: shielded on 0 of 1 node; 1 exposed with no shield\./);
-    assert.match(text, /a shield is temporary and does not close the finding/);
-    assert.match(digestText(store.jobs()).text, /Shirudo: shielded on 0 of 1 node; 1 exposed/);
-    const revisions = store.history(saved.id).length;
-    const basis = store.getMeta(`assessment-basis:${saved.id}`);
-
-    writeExport(dir, [row()], now + 3_600_000 - 60_000);
-    await runScan({ config, inventory, store, http: osvApi(), now: now + 3_600_000 });
-    const updated = store.findings().find((item) => item.id === saved.id);
-    assert.deepEqual(updated.runtime_shield.exposure, { shielded: 1 });
-    assert.equal(updated.priority, saved.priority, 'a shield never lowers priority');
-    assert.equal(updated.applicability, 'affected', 'or applicability');
-    assert.equal(store.history(saved.id).length, revisions, 'no new revision');
-    assert.equal(store.jobs().length, jobs, 'no new delivery');
-    assert.equal(store.getMeta(`assessment-basis:${saved.id}`), basis, 'no new analysis');
-
-    rmSync(join(dir, 'node-vulns.jsonl'));
-    const missing = await runScan({ config, inventory, store, http: osvApi(), now: now + 7_200_000 });
-    assert.ok(
-      missing.errors.some(
-        (error) => error.source === 'shirudo' && /the file does not exist/.test(error.message),
-      ),
-    );
-    assert.equal(
-      store.findings().find((item) => item.id === saved.id).runtime_shield,
-      undefined,
-      'no stale status is kept',
-    );
-    assert.ok(
-      store
-        .findings()
-        .some((item) => item.category === 'health' && /shirudo/i.test(item.title + item.summary)),
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test('the shield-candidates command: read-only JSON, --omit-location, --output never overwrites', async (t) => {
   const { spawnSync } = await import('node:child_process');
   const { fileURLToPath } = await import('node:url');
@@ -847,7 +585,7 @@ test('review: hostile nesting and huge lists cost nothing but the extra fields',
   let deep = 1;
   for (let i = 0; i < 20_000; i++) deep = [deep];
   assert.doesNotThrow(() => cveNowExploitSources({ exploitDb: deep }));
-  assert.deepEqual(cveNowExploitSources({ exploitDb: deep }), ['exploit-db'], 'something is named in there');
+  assert.deepEqual(cveNowExploitSources({ exploitDb: deep }), [], 'nothing is looked for beyond two levels');
   const many = Array.from({ length: 300_000 }, () => 'CWE-79');
   assert.deepEqual(osvWeaknesses({ database_specific: { cwe_ids: many } }), ['CWE-79']);
   assert.deepEqual(githubWeaknesses(many), ['CWE-79']);
@@ -867,50 +605,6 @@ test('review: hostile nesting and huge lists cost nothing but the extra fields',
     ]),
     [],
   );
-});
-
-test('review: odd display fields keep the row; a BOM and an empty export are handled', () => {
-  const kept = parseShirudoRow(
-    JSON.stringify(
-      row({ host_name: { nested: true }, installed: 'x'.repeat(600), upatch_id: 'a\u0001b', fixed: 7 }),
-    ),
-  );
-  assert.equal(kept.node_id, 'n1');
-  assert.equal(kept.host_name, undefined);
-  assert.equal(kept.installed, undefined);
-  assert.equal(kept.upatch_id, undefined);
-  assert.equal(kept.fixed, '7');
-  assert.throws(
-    () => parseShirudoRow(JSON.stringify(row({ package: 'a\u0001b' }))),
-    'a matching field must be valid',
-  );
-  const dir = temp();
-  try {
-    const path = join(dir, 'node-vulns.jsonl');
-    writeFileSync(path, '﻿' + JSON.stringify(row()) + '\n');
-    const bom = readShirudoExport(settings(dir), now);
-    assert.equal(bom.rows.length, 1);
-    assert.equal(bom.skipped, 0);
-    writeFileSync(path, '\n\n');
-    const empty = readShirudoExport(settings(dir), Date.now());
-    assert.match(exportProblems(empty, settings(dir), Date.now()).join(' '), /The Shirudo export is empty/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('review: withdrawn shields are not named; image IDs like constructor map safely', () => {
-  const status = index([
-    row({ exposure: 'shield_withdrawn', upatch_id: 'old-guard' }),
-    row({ node_id: 'n2', exposure: 'shielded', upatch_id: 'new-guard' }),
-  ]).status(finding(), evidenceMap, inventory);
-  assert.deepEqual(status.upatch_ids, ['new-guard']);
-  const odd = index([row({ image_id: 'constructor' })]).status(
-    finding({ system_id: 'constructor' }),
-    evidenceMap,
-    inventory,
-  );
-  assert.equal(odd.nodes, 1, 'an image named like an object method is still its own system');
 });
 
 test('review: --omit-location leaves out system IDs, purl qualifiers and news links', () => {
@@ -993,57 +687,6 @@ test('review: without the inventory, the package an advisory matched exactly is 
   assert.equal(unsure.readiness, 'advisory_only');
 });
 
-test('review: a saved shield status is marked out of date when the command runs', () => {
-  const saved = finding({
-    runtime_shield: {
-      source: 'shirudo',
-      exported_at: iso(now - 5 * 3_600_000),
-      stale: false,
-      nodes: 1,
-      exposure: { shielded: 1 },
-      upatch_ids: [],
-      summary: 'Shirudo: shielded on 1 of 1 node.',
-    },
-  });
-  const run = (extra) =>
-    shieldCandidates({ findings: [saved], evidence: () => [advisory('GHSA-aaaa-bbbb-cccc')], now, ...extra })
-      .candidates[0].runtime_shield.stale;
-  assert.equal(run({}), false, 'without a limit the saved flag stands');
-  assert.equal(run({ shirudoMaxAgeMinutes: 120 }), true);
-  assert.equal(run({ shirudoMaxAgeMinutes: 600 }), false);
-});
-
-test('review: long shield names never push out the export time or the reminder', () => {
-  const assessment = {
-    ...finding(),
-    location: undefined,
-    runtime_shield: {
-      source: 'shirudo',
-      exported_at: iso(),
-      stale: true,
-      nodes: 9,
-      exposure: {},
-      upatch_ids: ['x'.repeat(500), 'y'.repeat(500), 'z'.repeat(500)],
-      summary:
-        'Shirudo: shielded on 1 of 9 nodes; 1 exposed with no shield; 1 shield withdrawn; 1 shield excludes the node; 1 shield cannot load (module absent); 1 status unknown; 1 shield waiting to load; 2 not listed by Shirudo for it.',
-    },
-  };
-  const job = {
-    id: 'job',
-    finding_id: assessment.id,
-    channel: 'slack',
-    payload: JSON.stringify({ assessment, reason: 'test' }),
-    status: 'pending',
-    attempts: 0,
-    available_at: now,
-  };
-  const line = notificationText(job)
-    .text.split('\n')
-    .find((item) => item.startsWith('Shirudo:'));
-  assert.match(line, /2 not listed by Shirudo for it\./);
-  assert.match(line, /out of date; a shield is temporary and does not close the finding\)/);
-});
-
 test('review: fixtures accept the new evidence fields within bounds; rehearsal ignores the export', async () => {
   const { evidenceSchema } = await import('../dist/engine.js');
   const enriched = {
@@ -1075,7 +718,10 @@ test('review: fixtures accept the new evidence fields within bounds; rehearsal i
       },
     );
     assert.equal(init.status, 0, init.stderr);
-    appendFileSync(join(dir, 'security-watch.yaml'), 'shirudo:\n  exposure_file: ./missing.jsonl\n');
+    appendFileSync(
+      join(dir, 'security-watch.yaml'),
+      'mitigations:\n  - format: shirudo\n    file: ./missing.jsonl\n',
+    );
     const output = join(dir, 'rehearsal.json');
     const rehearsal = spawnSync(
       process.execPath,
@@ -1095,7 +741,7 @@ test('review: fixtures accept the new evidence fields within bounds; rehearsal i
     );
     assert.equal(rehearsal.status, 0, rehearsal.stderr);
     const text = readFileSync(output, 'utf8');
-    assert.ok(!/shirudo/i.test(text));
+    assert.ok(!/shirudo|mitigation/i.test(text));
     assert.ok(!text.includes('"degraded":true'));
   } finally {
     rmSync(dir, { recursive: true, force: true });

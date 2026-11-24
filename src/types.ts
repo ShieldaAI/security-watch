@@ -1,6 +1,6 @@
 import type { ModelProvider, OutputFormat } from './providers.js';
 import type { Ecosystem } from './ecosystems.js';
-import type { RuntimeShieldStatus } from './shirudo.js';
+import type { MitigationSource, MitigationStatus } from './mitigations.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
@@ -270,16 +270,10 @@ export interface Config {
     allow_plain_http: boolean;
   };
   /**
-   * Runtime shield status read from a JSON Lines export of Shirudo's `node_vulns` table. Shown in
-   * alerts and `shield-candidates`; never changes applicability, priority or routing.
+   * Runtime mitigation status read from JSON Lines exports (Shirudo's `node_vulns`, or the generic
+   * format). Shown in alerts and `shield-candidates`; never changes applicability, priority or routing.
    */
-  shirudo?: {
-    exposure_file: string;
-    /** An older export is reported to monitoring health and its status is marked stale. */
-    max_age_minutes: number;
-    /** Shirudo image ID to Security Watch system ID; an unmapped image ID is a system ID. */
-    image_systems: Record<string, string>;
-  };
+  mitigations?: MitigationSource[];
   maintenance?: {
     interval_hours: number;
     retention?: {
@@ -311,8 +305,8 @@ export interface Assessment {
   location?: FindingLocation;
   /** EPSS for the finding's CVE when `sources.epss` is on. Shown only; changes nothing. */
   epss?: EpssScore;
-  /** Runtime shield status from a Shirudo export when `shirudo` is configured. Shown only; changes nothing. */
-  runtime_shield?: RuntimeShieldStatus;
+  /** Runtime mitigation status, one per configured source that covers the system. Shown only; changes nothing. */
+  mitigations?: MitigationStatus[];
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
   /**

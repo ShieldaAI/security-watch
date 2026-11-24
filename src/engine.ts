@@ -5,7 +5,13 @@ import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
 import { attachEpss, findingCves, readEpssCache, refreshEpss } from './epss.js';
 import { evidenceContent } from './shield-inputs.js';
-import { attachRuntimeShield, exportProblems, readShirudoExport, ShirudoIndex } from './shirudo.js';
+import {
+  attachMitigations,
+  exportProblems,
+  MitigationIndex,
+  readMitigationExport,
+  unmatchedSystems,
+} from './mitigations.js';
 import { attachLocation, attachRemediation, compareInventories } from './inventory-evidence.js';
 import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
@@ -240,31 +246,45 @@ export async function runScan(options: {
   // its revision and review: a score that changes daily must not re-send, reopen or re-analyse.
   let epssCache = config.sources.epss ? readEpssCache(store.getMeta('epss:cache')) : {};
   let epssEvidence = new Map(remediationEvidence.map((item) => [item.id, item]));
-  // Runtime shield status is read from the operator's Shirudo export and, like EPSS, is shown only.
-  const shirudoProblems: string[] = [];
-  let shirudo: ShirudoIndex | undefined;
-  if (config.shirudo)
+  // Runtime mitigation status is read from the operator's export files and, like EPSS, is shown only.
+  const mitigationProblems: { source: string; message: string }[] = [];
+  const mitigationIndexes: MitigationIndex[] = [];
+  for (const source of config.mitigations ?? [])
     try {
-      const exported = readShirudoExport(config.shirudo, now);
-      shirudo = new ShirudoIndex(exported, config.shirudo);
-      shirudoProblems.push(...exportProblems(exported, config.shirudo, now));
+      const exported = readMitigationExport(source, now);
+      mitigationIndexes.push(new MitigationIndex(exported, source));
+      const messages = exportProblems(exported, source, now);
+      // Rows that all miss the inventory are a mapping mistake (an image watched under another
+      // system ID, a typo in systems:), not a fleet without findings.
+      const missed = unmatchedSystems(
+        exported,
+        source,
+        new Set(inventory.systems.map((system) => system.id)),
+      );
+      if (exported.rows.length && missed.length === new Set(exported.rows.map((row) => row.system)).size)
+        messages.push(
+          `${source.name}: no system key in the export is a system in the inventory (${missed.slice(0, 5).join(', ')}${missed.length > 5 ? ', …' : ''}); map them with systems: or watch those systems.`,
+        );
+      for (const message of messages)
+        mitigationProblems.push({ source: `mitigations:${source.name}`, message });
     } catch (error) {
-      shirudoProblems.push(
-        `The Shirudo export could not be read, so runtime shield status is not shown: ${
+      mitigationProblems.push({
+        source: `mitigations:${source.name}`,
+        message: `${source.name}: the export could not be read, so its mitigation status is not shown: ${
           (error as NodeJS.ErrnoException).code === 'ENOENT'
             ? 'the file does not exist'
             : (error as Error).message
-        }`,
-      );
+        }.`,
+      });
     }
   const persist = (assessment: Assessment) => {
-    assessment = attachRuntimeShield(
+    assessment = attachMitigations(
       attachEpss(
         attachLocation(attachRemediation(assessment, inventory, remediationEvidence, config, now), inventory),
         epssCache,
         findingCves(assessment, epssEvidence),
       ),
-      shirudo,
+      mitigationIndexes,
       epssEvidence,
       inventory,
     );
@@ -286,7 +306,7 @@ export async function runScan(options: {
   };
   const retire = (previous: Assessment) => {
     // A retired finding is not looked up any more; an ageing score or shield status would only mislead.
-    const { epss: _epss, runtime_shield: _shield, ...assessment } = previous;
+    const { epss: _epss, mitigations: _mitigations, ...assessment } = previous;
     store.saveAssessment(
       {
         ...assessment,
@@ -435,7 +455,7 @@ export async function runScan(options: {
     ...result.errors,
     ...(inventory.import_warnings ?? []).map((message) => ({ source: 'inventory:sbom', message })),
   ];
-  for (const message of shirudoProblems) errors.push({ source: 'shirudo', message });
+  errors.push(...mitigationProblems);
   const notices: string[] = [...(inventory.name_notices ?? [])];
   if (!options.fixture && missingCredentials(config).length)
     errors.push({

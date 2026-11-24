@@ -9,7 +9,7 @@ import type {
   Inventory,
   Severity,
 } from './types.js';
-import type { RuntimeShieldStatus } from './shirudo.js';
+import { currentStatus, mitigatedEverywhere, type MitigationStatus } from './mitigations.js';
 import { severityRank, timestamp } from './util.js';
 
 /**
@@ -63,7 +63,10 @@ export interface ShieldCandidate {
   prerequisites?: string[];
   advisories: { id: string; source: string; url: string }[];
   /** Runtime shield status read from Shirudo, when configured. */
-  runtime_shield?: RuntimeShieldStatus;
+  /** Runtime mitigation status per configured source, when any covers the system. */
+  mitigations?: MitigationStatus[];
+  /** With `omitLocation`, in place of `mitigations`: whether every source proves every host mitigated. */
+  mitigated_everywhere?: boolean;
   acknowledged?: boolean;
   suppressed_until?: string;
 }
@@ -92,8 +95,13 @@ export interface ShieldCandidateInput {
   controls?: (id: string) => FindingControls | undefined;
   all?: boolean;
   omitLocation?: boolean;
-  /** `shirudo.max_age_minutes`: a saved shield status older than this is marked out of date. */
-  shirudoMaxAgeMinutes?: number;
+  /**
+   * Each configured mitigation source's `max_age_minutes`, by name: an older saved status, or one of a
+   * source no longer configured, is marked out of date.
+   */
+  mitigationMaxAge?: Record<string, number>;
+  /** Leave out findings that a fresh status shows mitigated on every host. */
+  unmitigatedOnly?: boolean;
   now?: number;
 }
 
@@ -135,7 +143,15 @@ export function shieldCandidates(input: ShieldCandidateInput): ShieldCandidateRe
     if (!eligible(finding)) continue;
     const controls = input.controls?.(finding.id);
     if (!input.all && (!urgent(finding) || controls?.suppressed)) continue;
-    candidates.push(candidate(finding, input.evidence(finding.evidence_ids), input, controls));
+    const item = candidate(finding, input.evidence(finding.evidence_ids), input, controls);
+    // Left out only when every source that covers the system proves every host mitigated now.
+    if (
+      input.unmitigatedOnly &&
+      item.mitigations?.length &&
+      item.mitigations.every((status) => mitigatedEverywhere(status, input.now ?? Date.now()))
+    )
+      continue;
+    candidates.push(item);
   }
   candidates.sort(
     (a, b) =>
@@ -211,13 +227,48 @@ function candidate(
       : undefined;
   const identity =
     component ?? (fallback ? { ecosystem: fallback.ecosystem, name: fallback.name } : undefined);
-  const matchedVersion = claims.find((claim) => identity && claim.name === identity.name)
-    ?.matched_versions?.[0];
+  const matchedVersion = claims.find(
+    (claim) => identity && claim.ecosystem === identity.ecosystem && claim.name === identity.name,
+  )?.matched_versions?.[0];
   const installed = component?.version ?? matchedVersion;
   const packageConfirmed =
     finding.category === 'library' && finding.applicability === 'affected' && installed !== undefined;
   const hasAdvisory = advisories.length > 0;
-  const fixKnown = fixLinks.length > 0 || commits.size > 0;
+  // An advisory that names several packages (a Python and a Java library under one CVE) publishes the
+  // fixes of all of them: its fix links count for this finding only when they name this package.
+  const shortName = identity?.name.split(/[/:]/).pop()?.toLowerCase();
+  // An advisory is about this package alone when it claims no package or only this one.
+  const own = (item: Evidence) => {
+    const claimed = new Set(item.packages.map((claim) => `${claim.ecosystem}\u0000${claim.name}`));
+    return (
+      claimed.size === 0 ||
+      (claimed.size === 1 && (!identity || claimed.has(`${identity.ecosystem}\u0000${identity.name}`)))
+    );
+  };
+  // A link names the package when a path segment is its name (a repository, a directory), not when
+  // the name is part of another word: `core` is not named by `other-core-utils`.
+  const mentions = (url: string) => {
+    if (!shortName) return false;
+    try {
+      return new URL(url).pathname
+        .toLowerCase()
+        .split('/')
+        .some((segment) => segment.replace(/\.git$/, '') === shortName);
+    } catch {
+      return false;
+    }
+  };
+  let ambiguousFix = false;
+  let fixKnown = false;
+  for (const item of advisories) {
+    const links = [
+      ...(item.references ?? []).filter((r) => r.type === 'fix').map((r) => r.url),
+      ...(item.fix_commits ?? []).map((commit) => commit.repo),
+    ];
+    if (!links.length) continue;
+    if (own(item) || links.some(mentions)) fixKnown = true;
+    else ambiguousFix = true;
+  }
 
   const readiness: ShieldReadiness = !hasAdvisory
     ? 'news_only'
@@ -246,7 +297,11 @@ function candidate(
         'Matched by product or keyword, not by package and version: the installed version is not confirmed affected.',
       );
   }
-  if (hasAdvisory && !fixKnown)
+  if (hasAdvisory && !fixKnown && ambiguousFix)
+    missing.push(
+      `The advisory covers several packages and its fix links do not name ${identity?.name ?? 'this package'}; check which of them fixes it.`,
+    );
+  else if (hasAdvisory && !fixKnown)
     missing.push(
       finding.fix
         ? 'No fix commit or patch link in the advisories; compare the installed and fixed releases, or find the fix in the project history.'
@@ -265,15 +320,10 @@ function candidate(
   const omit = Boolean(input.omitLocation);
   // A package URL's qualifiers can name a private registry (`?repository_url=...`).
   const purl = component?.purl ? (omit ? component.purl.split(/[?#]/)[0] : component.purl) : undefined;
-  let shield = finding.runtime_shield;
-  if (shield && input.shirudoMaxAgeMinutes !== undefined) {
-    // The saved status is as old as the last scan: when scans have stopped, it is out of date now.
-    const exported = Date.parse(shield.exported_at);
-    const stale =
-      !Number.isFinite(exported) ||
-      (input.now ?? Date.now()) - exported > input.shirudoMaxAgeMinutes * 60_000;
-    if (stale !== shield.stale) shield = { ...shield, stale };
-  }
+  // A saved status is as old as the last scan: when scans have stopped, it is out of date now.
+  const mitigations = finding.mitigations?.map((status) =>
+    currentStatus(status, input.mitigationMaxAge, input.now ?? Date.now()),
+  );
   return {
     finding_id: finding.id,
     ...(controls ? { revision: controls.revision } : {}),
@@ -315,7 +365,17 @@ function candidate(
     advisories: current
       .filter((item) => !omit || item.kind === 'advisory' || item.kind === 'kev')
       .map((item) => ({ id: item.id, source: item.source, url: item.url })),
-    ...(shield ? { runtime_shield: shield } : {}),
+    // Source names, host counts and mitigation names describe the fleet: with --omit-location only
+    // whether every host is proven mitigated is kept.
+    ...(mitigations?.length
+      ? omit
+        ? {
+            mitigated_everywhere: mitigations.every((status) =>
+              mitigatedEverywhere(status, input.now ?? Date.now()),
+            ),
+          }
+        : { mitigations }
+      : {}),
     ...(controls?.acknowledged ? { acknowledged: true } : {}),
     ...(controls?.suppressed && controls.suppressed_until
       ? { suppressed_until: timestamp(controls.suppressed_until) }

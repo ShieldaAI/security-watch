@@ -103,7 +103,7 @@ systems: [] # systems you describe by hand can sit beside them
 - **A file that cannot be read** is reported as an import warning (`doctor`, and a monitoring-health finding at scan time) and left out; the other systems are still watched.
 - **Operating-system packages** (deb, rpm, apk and similar, found in container-image SBOMs) are not matched against advisories. They are listed once as a notice, which does not degrade monitoring. Use your image scanner for them.
 
-CycloneDX JSON 1.4 to 1.6 and SPDX JSON 2.2 and 2.3 are accepted, including GitHub's REST response (`{"sbom": {...}}`). Each file is bounded to 20 MiB and 20,000 packages, and the folder to 1,000 files. For Docker, mount the folder read-only beside the inventory, for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`.
+CycloneDX JSON 1.2 to 1.7 and SPDX JSON 2.2 and 2.3 are accepted; a later CycloneDX 1.x is read by the 1.7 rules and named once as a notice, and 2.x is refused. `security-watch sbom` writes 1.6, which more tools read. GitHub's REST response is accepted too (`{"sbom": {...}}`). Each file is bounded to 20 MiB and 20,000 packages, and the folder to 1,000 files. For Docker, mount the folder read-only beside the inventory, for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`.
 
 ## From a CI pipeline
 

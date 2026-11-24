@@ -34,17 +34,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** An https URL without credentials, of bounded length, or nothing. */
+/** Names that only resolve inside a network: never a public advisory link. */
+const PRIVATE_NAME =
+  /(?:^|\.)(?:localhost|localdomain|local|internal|intranet|lan|home|corp|private|test|invalid|example|arpa)$/i;
+/** Names that resolve to the address written inside them (10.0.0.1.nip.io), or to this machine. */
+const ADDRESS_NAME =
+  /(?:^|[.-])(?:\d{1,3}[.-]){3}\d{1,3}(?:[.-]|$)|(?:^|\.)(?:nip\.io|sslip\.io|xip\.io|localtest\.me|lvh\.me)$/i;
+
+/**
+ * An https URL to a public name, without credentials, of bounded length, or nothing. These links are
+ * handed to people and agents that may open them, so an address inside a network (an IP literal in any
+ * notation, a private name) is dropped, and so is a value with whitespace or control characters
+ * inside it, which a URL parser would silently remove, keeping a different address.
+ */
 export function safeHttpsUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value || value.length > MAX_URL) return undefined;
+  const text = value.trim();
+  if (/[\s\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(text)) return undefined;
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(text);
   } catch {
     return undefined;
   }
-  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.includes('.'))
+  // The parser normalises 0x7f.1, 2130706433 and [::1] to literal addresses; a trailing dot is dropped.
+  const host = url.hostname.replace(/\.$/, '');
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    !host.includes('.') ||
+    host.startsWith('[') ||
+    /^[\d.]+$/.test(host) ||
+    PRIVATE_NAME.test(host) ||
+    ADDRESS_NAME.test(host)
+  )
     return undefined;
+  url.hostname = host;
+  // A fragment points inside the same page: one link, not two.
+  url.hash = '';
   return url.href.length > MAX_URL ? undefined : url.href;
 }
 
@@ -89,7 +117,8 @@ export function codeChangeUrl(url: string): boolean {
     /\/-\/merge_requests\/\d+(?:\/diffs)?\/?$/i.test(path) ||
     // Bitbucket pull requests and commits.
     /\/pull-requests\/\d+(?:\/(?:diff|commits))?\/?$/i.test(path) ||
-    /\/compare\/[^/]+\.\.\.?[^/]+$/i.test(path) ||
+    // A compare of two releases or commits, not of two branches.
+    /\/compare\/[^/]*\d[^/]*\.\.\.?[^/]*\d[^/]*$/i.test(path) ||
     /\.(?:patch|diff)$/i.test(path) ||
     // googlesource (Android, Chromium): /+/<commit>.
     /\/\+\/[0-9a-f]{7,64}(?:%5E!)?\/?$/i.test(path) ||
@@ -97,7 +126,8 @@ export function codeChangeUrl(url: string): boolean {
     /\/rev\/[0-9a-f]{12,40}\/?$/i.test(path) ||
     // cgit and gitweb, as used by kernel.org, sourceware and savannah, and kernel.org's short links.
     (/\/commit\/?$/i.test(path) && /^[0-9a-f]{7,64}$/i.test(parsed.searchParams.get('id') ?? '')) ||
-    /(?:^\?|;|&)a=commit(?:diff)?(?:;|&|$)/i.test(query) ||
+    (/(?:^\?|;|&)a=commit(?:diff)?(?:;|&|$)/i.test(query) &&
+      /(?:^\?|;|&)h=[0-9a-f]{7,64}(?:;|&|$)/i.test(query)) ||
     (parsed.hostname === 'git.kernel.org' && /^\/(?:stable|linus)\/c\/[0-9a-f]{7,64}\/?$/i.test(path))
   );
 }
@@ -148,7 +178,19 @@ export const osvReferences = neverThrows((raw: unknown): AdvisoryReference[] => 
     const url = safeHttpsUrl(item.url);
     if (!url) continue;
     const given = typeof item.type === 'string' ? OSV_TYPES[item.type.toUpperCase()] : undefined;
-    const type = (given === undefined || given === 'web') && codeChangeUrl(url) ? 'fix' : (given ?? 'web');
+    const code = codeChangeUrl(url);
+    // A fix link is a code change. A page typed FIX that is not one (a vendor bulletin, release notes,
+    // a change to an advisory database) describes the fix; it is kept as an advisory.
+    const type: ReferenceType =
+      given === 'fix'
+        ? code
+          ? 'fix'
+          : 'advisory'
+        : given === undefined || given === 'web'
+          ? code
+            ? 'fix'
+            : 'web'
+          : given;
     references.push({ type, url });
   }
   return merged(references);
@@ -229,16 +271,25 @@ const CVE_NOW_EXPLOITS: [key: string, label: string][] = [
   ['nuclei', 'nuclei'],
   ['githubPoc', 'github-poc'],
 ];
+const PLACEHOLDER = /^(?:false|no|none|null|n\/a|na|0|-|unknown)$/i;
 /**
- * Whether an entry names something. An entry with an empty list, such as `{"ids": []}`, names no
- * exploit. cve.now nests at most two levels (`{"ids": [...]}`); deeper values count as named.
+ * Whether a cve.now entry names an exploit: a non-empty list (`{"ids": [...]}`, `{"modules": [...]}`),
+ * a link or name, or a positive count. A flag or a date beside an empty list (`{"ids": [], "checked":
+ * true}`) names nothing, and neither do placeholders such as "none". cve.now nests two levels; deeper
+ * values are not looked at.
  */
 function present(value: unknown, depth = 0): boolean {
-  if (value === undefined || value === null || value === false || value === 0 || value === '') return false;
-  if (depth >= 3) return true;
-  if (Array.isArray(value)) return firstItems(value).some((item) => present(item, depth + 1));
-  if (isRecord(value)) return Object.values(value).some((item) => present(item, depth + 1));
-  return true;
+  if (typeof value === 'string') return value.trim() !== '' && !PLACEHOLDER.test(value.trim());
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  if (value === true) return depth === 0;
+  if (depth >= 3) return false;
+  if (Array.isArray(value))
+    return firstItems(value).some((item) => present(item, depth + 1) || isRecord(item));
+  if (isRecord(value))
+    return Object.values(value).some((item) =>
+      Array.isArray(item) || typeof item === 'number' ? present(item, depth + 1) : false,
+    );
+  return false;
 }
 /**
  * cve.now's public exploit entries: Exploit-DB, Metasploit, Nuclei and GitHub proof-of-concept code.

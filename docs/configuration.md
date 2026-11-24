@@ -267,22 +267,24 @@ For an existing installation, configuration fields set to `true` stay enabled. T
 
 References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The Hacker News](https://thehackernews.com/), [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
 
-## Runtime shields (Shirudo)
+## Temporary mitigations
 
 Advisories from OSV and GitHub keep their typed links (fix commits, pull requests and patches first), OSV's fix commits and both sources' CWE identifiers; cve.now records keep their Exploit-DB, Metasploit, Nuclei and GitHub proof-of-concept entries. Only https links without credentials are kept, at most 40 links, 20 commits and 20 weaknesses per advisory. They are never sent to models and are not part of an advisory's revision. `explain` shows them per advisory.
 
-`security-watch shield-candidates [--all] [--omit-location] [--output NEW.json]` lists the findings worth a temporary runtime shield, with a `readiness` from `fix_known` to `news_only` and what is still `missing`. It reads the database and changes nothing.
+`security-watch shield-candidates [--all] [--unmitigated] [--omit-location] [--output NEW.json]` lists the findings worth a temporary mitigation, with a `readiness` from `fix_known` to `news_only` and what is still `missing`. `security-watch vex [--system ID] [--include-not-affected] [--omit-mitigations] [--author TEXT] [--output NEW.json]` writes an OpenVEX document. Both read the database and change nothing.
 
-An optional `shirudo` section shows the shield status of your machines from a [Shirudo](https://shirudo.dev) export:
+An optional `mitigations` list (at most ten) shows how many hosts of an affected system a mitigation covers, read from JSON Lines files that your tools write:
 
 ```yaml
-shirudo:
-  exposure_file: ./shirudo/node-vulns.jsonl # JSON Lines export of shirudo.node_vulns; relative to this file
-  max_age_minutes: 120 # 5 to 10080; an older export is a monitoring-health error
-  image_systems: {} # Shirudo image ID -> system ID; an unmapped image ID is the system ID
+mitigations:
+  - format: shirudo # shirudo (Shirudo's node_vulns export) or generic
+    file: ./shirudo/node-vulns.jsonl # relative to this file
+    name: Shirudo # optional; default Shirudo or Mitigations; unique
+    max_age_minutes: 120 # 5 to 10080; an older file is a monitoring-health error
+    systems: {} # the file's system key -> system ID; an unmapped key is the system ID
 ```
 
-The status is shown in alerts, digests, `explain`, `findings` and `shield-candidates` as `runtime_shield`. Like EPSS it is shown only: it changes no applicability, priority, rule or decision, creates no revision and never closes a finding. The export is limited to 64 MiB and 500,000 rows. See [Temporary runtime shields with Shirudo](shirudo.md) for the export query, the SBOM copy and the readiness levels.
+The status is shown in alerts, digests, `explain`, `findings`, `shield-candidates` and `vex` as `mitigations`. Like EPSS it is shown only: it changes no applicability, priority, rule or decision, creates no revision and never closes a finding. Files are limited to 64 MiB and 500,000 rows. See [temporary mitigations](mitigations.md) for the generic format, and [Security Watch with Shirudo](shirudo.md) for the export query and `shirudo-sboms`.
 
 ## Model configuration
 
@@ -639,7 +641,7 @@ systems:
       LANGFLOW_WEBHOOK_AUTH_ENABLE: true
 ```
 
-`sbom` imports a local CycloneDX JSON 1.4, 1.5 or 1.6 file, or an SPDX JSON 2.2 or 2.3 file (including
+`sbom` imports a local CycloneDX JSON 1.2 to 1.7 file (a later 1.x is read by the 1.7 rules, with a notice), or an SPDX JSON 2.2 or 2.3 file (including
 GitHub's `{"sbom": ...}` API response). To have every SBOM in a folder become a system of its own, set
 `sbom_directory` at the top of the inventory instead; see [the SBOM folder](sbom.md#the-sbom-folder).
 `security-watch sbom` writes such a file from a project's lockfiles ([guide](sbom.md)). A component's

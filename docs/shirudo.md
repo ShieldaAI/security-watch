@@ -1,18 +1,17 @@
-# Temporary runtime shields with Shirudo
+# Security Watch with Shirudo
 
-A fix takes time to test and roll out. A runtime shield blocks the vulnerable code path on running machines in the meantime, without a restart. [Shirudo](https://shirudo.dev), an open-source project from OpenAI and Cisco announced in November 2026, does this on Linux with signed eBPF programs it calls upatches. Its documented shield types are for the kernel and for Java (JVM) applications. It is pre-release, and production machines need its kernel patches and a TPM 2.0.
+[Shirudo](https://shirudo.dev), an open-source project from OpenAI and Cisco announced in November 2026, blocks one vulnerable code path on running Linux machines with signed eBPF programs it calls upatches (shields), without a restart, while the real fix is prepared. Its documented shield types are for the kernel and for Java (JVM) applications. It is pre-release, and production machines need its kernel patches and a TPM 2.0.
 
-Security Watch and Shirudo do different jobs:
+The two do different jobs:
 
 - **Security Watch** finds out early that something you run is affected: advisories, the known-exploited catalog, news before a CVE exists, and who has to act.
 - **Shirudo** knows which machines run which image, and whether a shield covers them.
 
-Security Watch does not write, sign or load shields. It runs nothing on your machines and needs no privileges there, and a shield that blocks the wrong code path can take production down. Writing a shield is a job for a person or an agent, and approving it is the operator's, with Shirudo's own signing and trial-run steps.
-
 ```text
 Advisories, news, KEV, EPSS ──┐
                               ├──► Security Watch ──► alert to the owner (Slack, email)
-Your SBOMs (CI, image store) ─┘          │
+Shirudo's SBOM store ─────────┘          │      ▲
+     (shirudo-sboms)                     │      └── Shirudo's node_vulns export (mitigations)
                                          ▼
                       shield-candidates: critical or exploited findings,
                       with what is known for writing a shield
@@ -23,90 +22,51 @@ Your SBOMs (CI, image store) ─┘          │
                  ▼                                               │
    Approval, signing, Shirudo trial run, then block              ▼
                  │                                       Fix deployed, new SBOM
-                 └──► Shirudo status back in alerts ◄────────────┘
-                      (shielded, waiting, exposed)        finding gone, shield withdrawn
+                 └──► status back in alerts ◄────────────────────┘
+                      (mitigated, waiting, exposed)       finding gone, shield withdrawn
 ```
 
-## What a shield needs
+Security Watch does not write, sign or load shields, and does not connect to Shirudo: it reads files. Setup takes three steps.
 
-A shield blocks one code path, so someone has to find that code path first. These help, best first:
+## 1. Watch your images: `shirudo-sboms`
 
-1. **The fix itself**: a fix commit or patch link. Its diff shows the vulnerable function.
-2. **The package, the installed version and the fixed version.** The difference between the two releases contains the fix, with more noise.
-3. **Public exploit code**, to test that the shield stops the attack and nothing else.
-4. **The weakness type** (CWE) and the conditions for exploitation, to keep the shield narrow.
-
-A news story that says something is being exploited usually has none of the first three. News alone is therefore never enough: such a finding is listed as `news_only`, with "wait for an advisory".
-
-Security Watch keeps these inputs from the sources it already reads: links with their type from OSV and GitHub advisories, fix commits from OSV, CWE identifiers from OSV and GitHub, and Exploit-DB, Metasploit, Nuclei and GitHub proof-of-concept entries from cve.now. Only https links without credentials are kept. They are not sent to models, and they are not part of an advisory's revision, so upgrading creates no new revisions, alerts or analyses. OSV advisories gain them at the next scan; GitHub and cve.now advisories when the source next sends them.
-
-## 1. Give Security Watch your images' SBOMs
-
-Shirudo's backend keeps one CycloneDX SBOM per image in an SBOM store, at `<image_id>/<image_version>/<root>/sbom.cdx.json`. Copy the newest version of each into the [SBOM folder](sbom.md#the-sbom-folder) under the image ID, so that the system ID is the image ID:
+Shirudo's backend keeps one CycloneDX SBOM per image build in an SBOM store, at `<image_id>/<image_version>/<root>/sbom.cdx.json`. `shirudo-sboms` copies them into Security Watch's [SBOM folder](sbom.md#the-sbom-folder), one file per image:
 
 ```sh
-# A file:// store; for an s3:// store, first run: aws s3 sync s3://fleet-sboms ./sbom-store
-STORE=./sbom-store
-DEST=./watch/sboms
-for image in "$STORE"/*/; do
-  id=$(basename "$image")
-  version=$(ls "$image" | sort -V | tail -n 1)
-  for sbom in "$image$version"/*/sbom.cdx.json; do
-    cp "$sbom" "$DEST/$id.cdx.json.tmp" && mv "$DEST/$id.cdx.json.tmp" "$DEST/$id.cdx.json"
-    break
-  done
-done
+# For an s3:// store, first copy it to a folder: aws s3 sync s3://fleet-sboms ./sbom-store
+security-watch shirudo-sboms --store ./sbom-store --directory ./watch/sboms --running ./watch/shirudo/node-vulns.jsonl
+security-watch shirudo-sboms --store ./sbom-store --directory ./watch/sboms --running ./watch/shirudo/node-vulns.jsonl --config ./watch/security-watch.yaml --apply
 ```
 
-Security Watch reads CycloneDX 1.4 to 1.6. It does not match operating-system packages (deb, rpm, apk); Shirudo's own scan covers those. What it adds for an image is the application libraries inside it, such as the JARs of a Java service, which are also what Shirudo's JVM shields protect.
+The first command prints what it would do and writes nothing; `--apply` writes it. Run the second on the same timer as the export below.
 
-The layout above is taken from Shirudo's documentation of November 2026. Check it against your store.
+- **The system ID is the image ID**, so it stays the same when a new version rolls out, and a finding is not reported again for every version.
+- **With `--running`** (the export of step 3), only images that machines run are watched, with the versions they run. When several versions run at once (a rolling upgrade, a canary), their SBOMs are merged into one, so the old version stays watched until no machine runs it. The note on the system says which versions run on how many hosts. A running version whose SBOM is not in the store yet is named in the plan; the other versions are still watched.
+- **Without `--running`**, the newest version of every image in the store is taken (natural order: 2026.11.10 is newer than 2026.11.9).
+- **The file's time is the time of the sync**, refreshed at least daily even when nothing changed: the store (and the export) confirm the list is current, so a stable image does not turn stale seven days after it was built. Run the sync on a timer.
+- **When a version has several builds** (roots), the most recently stored one is used, and the plan says so.
+- **It writes only its own files.** Each file it writes is marked with a property; a file of the same name that it did not write is never replaced, and is reported. An image whose ID another SBOM in the folder already uses as its system ID is not written; with `--config`, the systems described by hand in the inventory are checked too. Files are written compactly under a hidden temporary name and renamed into place, so a scan never reads half of one, and one that would be larger than the 20 MiB a scan reads is not written.
+- **It removes a file only when its image is gone**: no machine in a complete export runs it, or, without an export, it is no longer in the store. When an image's SBOMs cannot be read, the store holds no image (not mounted, a failed copy), the export is empty, or a row of the export is unusable, every file is kept as it was, so a scan never loses a system because the sync could not see it. When a running version's SBOM is missing or unreadable, an earlier list is kept rather than replaced by one without that version. A run that would remove more than half of the images it watches removes nothing unless `--allow-removals` is given. Rows of machines bound to no image are skipped without a problem.
+- Links (symbolic links) in the store are not followed (an image replaced by one keeps its file), names that are not Shirudo image IDs are ignored, an image ID too long for a file name is reported, and the SBOM folder and the store must be separate folders, neither inside the other. The plan's `problems` list everything left out or kept, and the command then exits with code 2.
+
+Security Watch does not match operating-system packages (deb, rpm, apk); Shirudo's own scan covers those. What it adds for an image is the application libraries inside it, such as the JARs of a Java service, which are also what Shirudo's JVM shields protect. Add owners and notes for these systems by hand if you want them in alerts, in `systems.yaml` beside the folder.
 
 ## 2. List the shield candidates
 
 ```sh
-security-watch shield-candidates --config ./watch/security-watch.yaml
+security-watch shield-candidates --config ./watch/security-watch.yaml --unmitigated --omit-location
 ```
 
-The command reads the database and changes nothing. By default it lists active findings that are critical, or known or reported to be exploited, and leaves out suppressed ones; `--all` lists every finding that may affect you. A malicious package is never listed: it is removed, not shielded. `--output NEW.json` writes the list to a new private file and never replaces one.
-
-Each candidate has a `readiness`, most ready first:
-
-| Readiness             | Means                                                                                                |
-| --------------------- | ---------------------------------------------------------------------------------------------------- |
-| `fix_known`           | The installed version is affected, and an advisory links the fix commit or patch.                    |
-| `fixed_version_known` | The installed version is affected and a fixed version is published, but no fix link.                 |
-| `advisory_only`       | An advisory exists, but the installed version is not confirmed affected (no version, product match). |
-| `news_only`           | Only news so far. Wait for an advisory or a vendor bulletin.                                         |
-
-`missing` lists in plain words what is not known yet, for example that no public exploit code is reported, so the shield has to be tested against the fix instead. A candidate also carries its identifiers, the package with its installed and fixed versions, `fix_links`, `fix_commits`, other `references`, `weaknesses`, `public_exploit`, EPSS, the advisories it rests on, the Shirudo status (below), and where to look.
-
-```json
-{
-  "finding_id": "1e35fbcd…",
-  "readiness": "fix_known",
-  "missing": [
-    "No public exploit code reported by the sources read, so a shield cannot be tested against a real attack; test it against the fix instead."
-  ],
-  "identifiers": ["CVE-2026-20001", "GHSA-aaaa-bbbb-cccc"],
-  "package": { "ecosystem": "Maven", "name": "org.example:parser", "installed": "2.4.1", "fixed": "2.4.2" },
-  "fix_links": ["https://github.com/example/parser/commit/abcdef1234"],
-  "weaknesses": ["CWE-502"],
-  "exploited": true,
-  "runtime_shield": { "summary": "Shirudo: shielded on 0 of 4 nodes; 4 exposed with no shield." }
-}
-```
-
-**Before you hand the list to an agent or a service outside your network**, add `--omit-location`. Without it the list includes system IDs, names, owners and the notes from your inventory, package URLs with their qualifiers, and links to news articles. With it, those are left out (a candidate is then known by its `finding_id`); advisory identifiers, package names and versions stay, because they are what a shield is written from.
+The list, its readiness levels and the privacy options are described in [shield candidates](mitigations.md#shield-candidates). `fix_known` candidates carry the fix commit, the best input for writing a shield, by hand or with an agent such as Codex. A shield still goes through Shirudo's approval, signing and trial run.
 
 ## 3. Show Shirudo's status in Security Watch
 
-Shirudo's backend keeps a `shirudo.node_vulns` table in ClickHouse: one row per machine and finding, with an `exposure` value. Security Watch does not connect to ClickHouse. Export the table to a file on a timer instead, and point Security Watch at the file:
+Shirudo's backend keeps a `shirudo.node_vulns` table in ClickHouse: one row per machine and finding, with an `exposure` value. Export it to a file on a timer, with the credentials you already use:
 
 ```sh
-# Every 5 to 15 minutes, from cron or a systemd timer, with the credentials you already use.
+# Every 5 to 15 minutes, from cron or a systemd timer.
 clickhouse-client --query "
-  SELECT node_id, host_name, image_id, image_version, toString(source) AS source,
+  SELECT node_id, host_name, toString(status) AS status, image_id, image_version, toString(source) AS source,
          vuln_id, package, installed, fixed, toString(exposure) AS exposure, upatch_id
   FROM shirudo.node_vulns
   FORMAT JSONEachRow" > ./watch/shirudo/node-vulns.jsonl.tmp \
@@ -115,37 +75,39 @@ clickhouse-client --query "
 
 ```yaml
 # watch/security-watch.yaml
-shirudo:
-  exposure_file: ./shirudo/node-vulns.jsonl # relative to this file
-  max_age_minutes: 120 # an older file is reported to monitoring health; default 120
-  image_systems: # optional: Shirudo image ID -> Security Watch system ID
-    fleet-os: web-shop # without an entry, the image ID is the system ID
+mitigations:
+  - format: shirudo
+    file: ./shirudo/node-vulns.jsonl # relative to this file
+    # max_age_minutes: 120             (default)
+    # systems: { fleet-os: web-shop }  (only if an image is watched under another system ID)
 ```
 
-The file's modification time is the export time, so write it with the temporary name and `mv` shown above. At each scan Security Watch matches the rows to findings by image (the system), by advisory ID (the finding's identifier or any CVE or GHSA alias of its advisories) and, for a library, by package name. A kernel row matches by identifier alone. Each machine counts once, by its worst row. Alerts, digests, `explain`, `findings` and `shield-candidates` then show, for example:
+The same export feeds `shirudo-sboms --running`. Shirudo's words are shown in the shared [mitigation status](mitigations.md#mitigation-status) words:
+
+| Shirudo `exposure`     | Shown as                                             |
+| ---------------------- | ---------------------------------------------------- |
+| `shielded`             | mitigated                                            |
+| `shield_pending`       | mitigation waiting to load                           |
+| `shield_module_absent` | mitigation failed to load                            |
+| `shield_excludes_node` | mitigation excludes the host                         |
+| `shield_withdrawn`     | mitigation withdrawn                                 |
+| `exposed_no_shield`    | not mitigated                                        |
+| `none`                 | (a machine with no finding, counted among the hosts) |
+| anything else          | status unknown                                       |
 
 ```text
-Shirudo: shielded on 3 of 4 nodes; 1 exposed with no shield. (export 2026-11-24 11:55 UTC; a shield is temporary and does not close the finding) Shield: parser-deser-guard
+Shirudo: mitigated on 3 of 4 hosts; 1 not mitigated. (export 2026-11-24 11:55 UTC; a mitigation is temporary and does not close the finding) In place: parser-deser-guard
 ```
 
-| Shirudo `exposure`     | Shown as                           |
-| ---------------------- | ---------------------------------- |
-| `shielded`             | shielded                           |
-| `shield_pending`       | shield waiting to load             |
-| `shield_module_absent` | shield cannot load (module absent) |
-| `shield_excludes_node` | shield excludes the node           |
-| `shield_withdrawn`     | shield withdrawn                   |
-| `exposed_no_shield`    | exposed with no shield             |
-| anything else          | status unknown                     |
+A machine whose `status` is `stale` (it stopped reporting) proves nothing about its shields: its rows count as status unknown. Rows of machines bound to no image (an empty `image_id`) belong to no system and are left out without a warning. When the machines running an image have no row for a finding at all, the status says that Shirudo lists no such finding there. That is common for findings Security Watch learned from news or from an advisory that Shirudo's scanner does not have yet. Link a shield to it in Shirudo's `upatch_fixes` table, or add the kernel advisory to `kernel_vulns`, as its documentation describes.
 
-`Shield:` names up to three shields that are in place or waiting to load; a withdrawn one is not named. When the machines running a system have no row for a finding at all, the status says that Shirudo lists no such finding there, so no shield is linked. That is common for findings Security Watch learned from news or an advisory that Shirudo's scanner does not have yet. Link a shield to it in Shirudo's `upatch_fixes` table, or add the kernel advisory to `kernel_vulns`, as its documentation describes.
-
-**The status is shown only.** It does not change applicability, priority or routing. A change in it creates no new revision, re-sends nothing and asks no model for a new analysis. A shielded finding stays open until the fix is deployed and the next SBOM shows the fixed version. A missing, unreadable or empty export is a monitoring-health error, as a failed source is, and findings then show no status rather than an old one. An export older than `max_age_minutes` is reported the same way, and its status is marked out of date. Lines that cannot be read are skipped, counted and reported; the rest are used.
+`doctor` checks the export: that it can be read, how old it is, and which image IDs match no system.
 
 ## Limits
 
-- Built from Shirudo's documentation of November 2026 and tested against files in that format, not against a running Shirudo deployment. Shirudo is pre-release and its tables may change.
+- Built from Shirudo's documentation of November 2026 and tested against files in that format, not against a running Shirudo deployment. Shirudo is pre-release and its tables and store layout may change.
+- `shirudo-sboms` reads a store in a folder (`file://`); copy an `s3://` store first. It does not read `image.json`, whose fields are not documented.
 - Rows are matched to library findings by package name, so Shirudo's `package` column must use the names Security Watch uses (Maven `group:artifact`, as Trivy reports them). A name written differently makes the status say that Shirudo lists no such finding.
-- Security Watch does not fill Shirudo's `kernel_vulns`: it has no kernel version-range matching.
+- Security Watch does not fill Shirudo's `kernel_vulns` or `upatch_fixes`: it has no kernel version-range matching, and those tables are Shirudo's to change.
 - Fix links and exploit entries are only as complete as the advisories. Many have neither.
 - `readiness` describes the information available, not whether a shield is possible or safe.
