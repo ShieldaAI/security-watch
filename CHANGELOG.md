@@ -2,6 +2,22 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## 1.3.0
+
+Security Watch can hand findings to whoever writes temporary runtime shields, and show the shield status of your machines from [Shirudo](docs/shirudo.md). Existing configurations and inventories work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.3.0`.
+
+### Added
+
+- **Fix links, fix commits, weaknesses and exploit code are kept.** OSV and GitHub advisories keep their typed links, with code changes (commits, pull and merge requests, compare views, patches, kernel.org commits) marked `fix`; OSV keeps the commits its `GIT` ranges name as fixes; both keep their CWE identifiers; cve.now keeps its Exploit-DB, Metasploit, Nuclei and GitHub proof-of-concept entries. Only https links without credentials, at most 40 links, 20 commits and 20 weaknesses per advisory. They are never sent to models and are left out of an advisory's content hash and a finding's analysis basis, so the upgrade records no new evidence revision, re-sends nothing and asks no model again. `explain` shows them. New `Evidence` fields `references`, `fix_commits`, `weaknesses` and `exploit_sources`, and exported types `AdvisoryReference`, `FixCommit` and `ReferenceType`.
+- **`security-watch shield-candidates`.** Lists active findings that are critical or known or reported to be exploited (`--all` for every finding that may affect you), with a `readiness`: `fix_known` (the installed version is affected and an advisory links the fix), `fixed_version_known`, `advisory_only` or `news_only`, and a `missing` list in plain words. News alone is never enough to write a shield, and is listed as such. Each candidate carries the identifiers, package with installed and fixed versions, fix links and commits, other links, weaknesses, public exploit code, EPSS and where to look. Malicious packages and suppressed findings are left out. `--omit-location` leaves out system IDs, names, owners, notes, package URL qualifiers and news links; `--output NEW.json` writes a new private file. Read-only. Library function `shieldCandidates` and its types.
+- **Shirudo status, optional.** A `shirudo` section reads a JSON Lines export of Shirudo's `node_vulns` table that you write on a timer (the query is in the guide), and shows per finding how many of the machines running that system are shielded, waiting for a shield, or exposed with no shield, and which shields: in alerts, digests, `explain`, `findings` and `shield-candidates` (`Assessment.runtime_shield`, exported types `RuntimeShieldStatus` and `ShirudoExposure`). Like EPSS it is shown only: it changes no applicability, priority or routing, creates no revision and never closes a finding. A missing, unreadable, empty or out-of-date export is a monitoring-health error; odd lines are skipped and counted. Security Watch never connects to Shirudo or ClickHouse.
+- [Temporary runtime shields with Shirudo](docs/shirudo.md): how the two fit, the SBOM copy from Shirudo's store, the export, the readiness levels and the limits.
+
+### Not verified
+
+- The Shirudo integration follows Shirudo's documentation of 24 November 2026 and is tested against files in that format, not against a running Shirudo deployment, which needs Shirudo's kernel patches and a TPM. Shirudo is pre-release.
+- How often advisories carry fix links and exploit entries was not measured on live data.
+
 ## 1.2.1
 
 Fixes from an edge-case review: alerts sent twice for analysed news, packages missed in Python and Go projects, and a worker that paused when the clock stepped back. No configuration change. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.2.1`.

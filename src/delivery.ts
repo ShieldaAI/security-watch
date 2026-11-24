@@ -323,6 +323,27 @@ function epssLine(a: Assessment): string[] {
   ];
 }
 
+/** Runtime shield status from the operator's Shirudo export, when configured. Shown only. */
+function shieldLine(a: Assessment): string[] {
+  const shield = a.runtime_shield;
+  if (!shield || typeof shield.summary !== 'string') return [];
+  const when = Date.parse(shield.exported_at);
+  const at = Number.isFinite(when)
+    ? new Date(when).toISOString().slice(0, 16).replace('T', ' ')
+    : 'unknown time';
+  // The export time, an out-of-date mark and the reminder come before the shield names, which are the
+  // operator's free text and are shortened on their own, so they can never push those out.
+  const ids = (Array.isArray(shield.upatch_ids) ? shield.upatch_ids.slice(0, 3) : [])
+    .filter((id): id is string => typeof id === 'string')
+    .map((id) => single(id, 40));
+  return [
+    single(
+      `${single(shield.summary, 260)} (export ${at} UTC${shield.stale ? ', out of date' : ''}; a shield is temporary and does not close the finding)${ids.length ? ` Shield: ${ids.join(', ')}` : ''}`,
+      480,
+    ),
+  ];
+}
+
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
@@ -338,6 +359,7 @@ export function notificationText(job: Notification): { subject: string; text: st
     ...(a.exploited ? ['Known exploitation reported.'] : []),
     ...newsSignalLine(a),
     ...epssLine(a),
+    ...shieldLine(a),
     `Summary: ${single(a.summary, 750)}`,
   ];
   // In the order they give way when the text is too long for one Slack section: the last of these
@@ -422,6 +444,7 @@ export function digestText(jobs: Notification[]): { subject: string; text: strin
       `Applicability: ${single(a.applicability, 40)}; source: ${single(a.source_severity, 40)}`,
       ...newsSignalLine(a),
       ...epssLine(a),
+      ...shieldLine(a),
       ...(a.news_analysis
         ? [
             `AI news: ${single(a.news_analysis.classification, 60)}; impact: ${single(a.news_analysis.impact, 60)}`,

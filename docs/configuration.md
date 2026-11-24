@@ -267,6 +267,23 @@ For an existing installation, configuration fields set to `true` stay enabled. T
 
 References: [cve.now machine-readable API guide](https://cve.now/llms.txt), [The Hacker News](https://thehackernews.com/), [OSV batch queries](https://google.github.io/osv.dev/post-v1-querybatch/), [GitHub global advisory API](https://docs.github.com/en/rest/security-advisories/global-advisories), [CISA KEV data](https://github.com/cisagov/kev-data).
 
+## Runtime shields (Shirudo)
+
+Advisories from OSV and GitHub keep their typed links (fix commits, pull requests and patches first), OSV's fix commits and both sources' CWE identifiers; cve.now records keep their Exploit-DB, Metasploit, Nuclei and GitHub proof-of-concept entries. Only https links without credentials are kept, at most 40 links, 20 commits and 20 weaknesses per advisory. They are never sent to models and are not part of an advisory's revision. `explain` shows them per advisory.
+
+`security-watch shield-candidates [--all] [--omit-location] [--output NEW.json]` lists the findings worth a temporary runtime shield, with a `readiness` from `fix_known` to `news_only` and what is still `missing`. It reads the database and changes nothing.
+
+An optional `shirudo` section shows the shield status of your machines from a [Shirudo](https://shirudo.dev) export:
+
+```yaml
+shirudo:
+  exposure_file: ./shirudo/node-vulns.jsonl # JSON Lines export of shirudo.node_vulns; relative to this file
+  max_age_minutes: 120 # 5 to 10080; an older export is a monitoring-health error
+  image_systems: {} # Shirudo image ID -> system ID; an unmapped image ID is the system ID
+```
+
+The status is shown in alerts, digests, `explain`, `findings` and `shield-candidates` as `runtime_shield`. Like EPSS it is shown only: it changes no applicability, priority, rule or decision, creates no revision and never closes a finding. The export is limited to 64 MiB and 500,000 rows. See [Temporary runtime shields with Shirudo](shirudo.md) for the export query, the SBOM copy and the readiness levels.
+
 ## Model configuration
 
 Before enabling real delivery, [offline rehearsal](offline-rehearsal.md) can replay a bounded sequence of normalized evidence and optional inventory snapshots through the existing policy, queue and simulated delivery transports. It preserves configured channel selection while replacing destinations with in-process sinks, forces models/sources off, and verifies a temporary SQLite backup/restore. The command does not load credentials or open the configured database. Its private report omits raw identifiers, source text and destinations; it does not measure live coverage or model/analyst quality.

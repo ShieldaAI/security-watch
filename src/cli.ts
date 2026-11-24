@@ -18,6 +18,7 @@ import { stringify } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, parseConfig, missingCredentials } from './config.js';
 import { loadInventory } from './inventory.js';
+import { shieldCandidates } from './shield-candidates.js';
 import { importSbom } from './sbom.js';
 import { DEPENDENCY_FILES, generateSbom, type GeneratedSbom, type SbomOptions } from './manifests.js';
 import { intakeDirectory, startIntake } from './intake.js';
@@ -101,6 +102,7 @@ const help = `Shielda Security Watch ${VERSION}
   security-watch rehearse --config PATH --input SCENARIO.json [--sink disabled|accepted|failed|unknown] [--output NEW.json]
   security-watch start [--config PATH]
   security-watch findings | status | deliveries | budget
+  security-watch shield-candidates [--all] [--omit-location] [--output NEW.json]
   security-watch pilot-report (--database PATH | --backup PATH) --from YYYY-MM-DD --until YYYY-MM-DD [--output NEW.json]
   security-watch pilot-recall --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --input INCIDENTS.json [--responses RESPONSES.json] [--output NEW.json]
   security-watch pilot-cases --backup PATH --from YYYY-MM-DD --until YYYY-MM-DD --output NEW.json
@@ -125,6 +127,9 @@ sbom reads the lockfiles and manifests in a project (npm, Python, Go, Rust, PHP,
 init --project creates a monitor for that project in one step. With an intake section in the
 configuration, start also receives SBOMs from CI (sbom --upload, upload); intake runs only that.
 Upload tokens are read from SECURITY_WATCH_INTAKE_TOKEN unless --token-env names another variable.
+
+shield-candidates lists critical and exploited findings with what is known for writing a temporary
+runtime shield (fix links, versions, exploit code) and what is missing; it changes nothing.
 
 Default config: ./security-watch.yaml. scan records findings; --dry-run writes no state,
 disables models and sends nothing. --notify sends due jobs. start runs the foreground scheduler and
@@ -195,6 +200,7 @@ function argumentsFromCommandLine() {
       url: { type: 'string' },
       'token-env': { type: 'string' },
       'allow-http': { type: 'boolean' },
+      'omit-location': { type: 'boolean' },
     },
   });
 }
@@ -715,6 +721,7 @@ async function main(): Promise<void> {
     'pilot-report': ['database', 'backup', 'from', 'until', 'output'],
     start: ['config', 'no-ai'],
     findings: ['config'],
+    'shield-candidates': ['config', 'all', 'omit-location', 'output'],
     status: ['config'],
     deliveries: ['config'],
     budget: ['config'],
@@ -1008,6 +1015,7 @@ async function main(): Promise<void> {
     'scan',
     'start',
     'findings',
+    'shield-candidates',
     'status',
     'coverage',
     'inventory-drift',
@@ -1033,6 +1041,7 @@ async function main(): Promise<void> {
     (command === 'prune' && !values.apply) ||
     [
       'findings',
+      'shield-candidates',
       'status',
       'coverage',
       'inventory-drift',
@@ -1133,6 +1142,36 @@ async function main(): Promise<void> {
       output(store.findings());
       return;
     }
+    if (command === 'shield-candidates') {
+      // The inventory as it is now gives package versions; a stored location is the fallback.
+      let inventory;
+      try {
+        inventory = loadInventory(config.inventory);
+      } catch {
+        inventory = undefined;
+      }
+      const report = shieldCandidates({
+        findings: store.findings(),
+        evidence: (ids) => store.getEvidence(ids),
+        ...(inventory ? { inventory } : {}),
+        controls: (findingId) => store.controls(findingId),
+        all: Boolean(values.all),
+        omitLocation: Boolean(values['omit-location']),
+        ...(config.shirudo ? { shirudoMaxAgeMinutes: config.shirudo.max_age_minutes } : {}),
+      });
+      if (!inventory)
+        report.notes.push(
+          'The inventory could not be read: a package and its installed version are shown only where an advisory matched exactly one package by version.',
+        );
+      if (values.output) {
+        writeFileSync(resolve(values.output), JSON.stringify(report, null, 2) + '\n', {
+          flag: 'wx',
+          mode: 0o600,
+        });
+        console.log(`${report.candidates.length} shield candidate(s) saved.`);
+      } else output(report);
+      return;
+    }
     if (command === 'deliveries') {
       output(store.jobs().map(({ payload, ...job }) => job));
       return;
@@ -1183,6 +1222,10 @@ async function main(): Promise<void> {
           fetched_at: e.fetched_at,
           withdrawn: e.withdrawn ?? false,
           ...(e.cvss_v4 ? { cvss_v4: e.cvss_v4 } : {}),
+          ...(e.references ? { references: e.references } : {}),
+          ...(e.fix_commits ? { fix_commits: e.fix_commits } : {}),
+          ...(e.weaknesses ? { weaknesses: e.weaknesses } : {}),
+          ...(e.exploit_sources ? { exploit_sources: e.exploit_sources } : {}),
         })),
         note: 'Applicability reflects the cited evidence as last fetched. Inspect monitoring health for source outages.',
       });

@@ -288,6 +288,20 @@ export const configSchema = z
           ctx.addIssue({ code: 'custom', message: 'Each token needs its own token_env', path: ['tokens'] });
       })
       .optional(),
+    shirudo: z
+      .object({
+        exposure_file: z.string().trim().min(1).max(4096),
+        max_age_minutes: z.number().int().min(5).max(10080).default(120),
+        image_systems: z
+          .record(
+            z.string().regex(/^[A-Za-z0-9._~+-]{1,255}$/, 'Use a Shirudo image ID'),
+            z.string().trim().min(1).max(200),
+          )
+          .refine((map) => Object.keys(map).length <= 1000, 'At most 1,000 image mappings')
+          .default({}),
+      })
+      .strict()
+      .optional(),
     maintenance: z
       .object({
         interval_hours: z.number().int().min(1).max(168).default(24),
@@ -469,6 +483,8 @@ export function loadConfig(path: string): Config {
     config.intake.tls_cert_file = resolve(dirname(resolve(path)), config.intake.tls_cert_file);
   if (config.intake?.tls_key_file)
     config.intake.tls_key_file = resolve(dirname(resolve(path)), config.intake.tls_key_file);
+  if (config.shirudo)
+    config.shirudo.exposure_file = resolve(dirname(resolve(path)), config.shirudo.exposure_file);
   if (config.maintenance?.backup)
     config.maintenance.backup.directory = resolve(
       dirname(resolve(path)),

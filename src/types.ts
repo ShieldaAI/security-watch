@@ -1,5 +1,6 @@
 import type { ModelProvider, OutputFormat } from './providers.js';
 import type { Ecosystem } from './ecosystems.js';
+import type { RuntimeShieldStatus } from './shirudo.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
@@ -161,6 +162,30 @@ export interface Evidence {
   withdrawn?: boolean;
   exploited?: boolean;
   malware?: boolean;
+  /**
+   * Links the advisory publishes, most specific first. Inputs for whoever writes a fix or a runtime
+   * shield. Never sent to models; not part of the evidence content hash.
+   */
+  references?: AdvisoryReference[];
+  /** Commits the advisory records as fixing the problem (OSV `GIT` ranges). Same rules as references. */
+  fix_commits?: FixCommit[];
+  /** Weakness identifiers such as CWE-502. Same rules as references. */
+  weaknesses?: string[];
+  /**
+   * Public exploit code the source reports, such as `exploit-db` or `github-poc` (cve.now). Published
+   * code, not exploitation in the wild. Same rules as references.
+   */
+  exploit_sources?: string[];
+}
+export type ReferenceType =
+  'fix' | 'evidence' | 'advisory' | 'report' | 'detection' | 'introduced' | 'package' | 'source' | 'web';
+export interface AdvisoryReference {
+  type: ReferenceType;
+  url: string;
+}
+export interface FixCommit {
+  repo: string;
+  commit: string;
 }
 export interface ModelSpec {
   provider: ModelProvider;
@@ -244,6 +269,17 @@ export interface Config {
     /** Required to listen beyond loopback without TLS, for example behind a TLS proxy. */
     allow_plain_http: boolean;
   };
+  /**
+   * Runtime shield status read from a JSON Lines export of Shirudo's `node_vulns` table. Shown in
+   * alerts and `shield-candidates`; never changes applicability, priority or routing.
+   */
+  shirudo?: {
+    exposure_file: string;
+    /** An older export is reported to monitoring health and its status is marked stale. */
+    max_age_minutes: number;
+    /** Shirudo image ID to Security Watch system ID; an unmapped image ID is a system ID. */
+    image_systems: Record<string, string>;
+  };
   maintenance?: {
     interval_hours: number;
     retention?: {
@@ -275,6 +311,8 @@ export interface Assessment {
   location?: FindingLocation;
   /** EPSS for the finding's CVE when `sources.epss` is on. Shown only; changes nothing. */
   epss?: EpssScore;
+  /** Runtime shield status from a Shirudo export when `shirudo` is configured. Shown only; changes nothing. */
+  runtime_shield?: RuntimeShieldStatus;
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
   /**

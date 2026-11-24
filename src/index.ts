@@ -39,7 +39,19 @@ export type {
   NewsSignals,
   NewsStatement,
   EpssScore,
+  AdvisoryReference,
+  FixCommit,
+  ReferenceType,
 } from './types.js';
+export { shieldCandidates } from './shield-candidates.js';
+export type {
+  ShieldCandidate,
+  ShieldCandidateReport,
+  ShieldCandidateInput,
+  ShieldReadiness,
+  FindingControls,
+} from './shield-candidates.js';
+export type { RuntimeShieldStatus, ShirudoExposure } from './shirudo.js';
 export {
   scorePilotResponses,
   type PilotResponseRegister,

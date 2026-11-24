@@ -4,6 +4,8 @@ import { cvssV4BaseScore } from './cvss4.js';
 import { assess, decide } from './assessment.js';
 import { collectSources } from './sources.js';
 import { attachEpss, findingCves, readEpssCache, refreshEpss } from './epss.js';
+import { evidenceContent } from './shield-inputs.js';
+import { attachRuntimeShield, exportProblems, readShirudoExport, ShirudoIndex } from './shirudo.js';
 import { attachLocation, attachRemediation, compareInventories } from './inventory-evidence.js';
 import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
@@ -91,6 +93,42 @@ export const evidenceSchema = z
     withdrawn: z.boolean().optional(),
     exploited: z.boolean().optional(),
     malware: z.boolean().optional(),
+    references: z
+      .array(
+        z.strictObject({
+          type: z.enum([
+            'fix',
+            'evidence',
+            'advisory',
+            'report',
+            'detection',
+            'introduced',
+            'package',
+            'source',
+            'web',
+          ]),
+          url: z.url({ protocol: /^https$/ }).max(2048),
+        }),
+      )
+      .max(40)
+      .optional(),
+    fix_commits: z
+      .array(
+        z.strictObject({
+          repo: z.url({ protocol: /^https$/ }).max(2048),
+          commit: z.string().regex(/^[0-9a-f]{7,64}$/),
+        }),
+      )
+      .max(20)
+      .optional(),
+    weaknesses: z
+      .array(z.string().regex(/^CWE-\d{1,5}$/))
+      .max(20)
+      .optional(),
+    exploit_sources: z
+      .array(z.enum(['exploit-db', 'metasploit', 'nuclei', 'github-poc']))
+      .max(4)
+      .optional(),
   })
   .strict();
 export function readFixture(path: string): Evidence[] {
@@ -202,11 +240,33 @@ export async function runScan(options: {
   // its revision and review: a score that changes daily must not re-send, reopen or re-analyse.
   let epssCache = config.sources.epss ? readEpssCache(store.getMeta('epss:cache')) : {};
   let epssEvidence = new Map(remediationEvidence.map((item) => [item.id, item]));
+  // Runtime shield status is read from the operator's Shirudo export and, like EPSS, is shown only.
+  const shirudoProblems: string[] = [];
+  let shirudo: ShirudoIndex | undefined;
+  if (config.shirudo)
+    try {
+      const exported = readShirudoExport(config.shirudo, now);
+      shirudo = new ShirudoIndex(exported, config.shirudo);
+      shirudoProblems.push(...exportProblems(exported, config.shirudo, now));
+    } catch (error) {
+      shirudoProblems.push(
+        `The Shirudo export could not be read, so runtime shield status is not shown: ${
+          (error as NodeJS.ErrnoException).code === 'ENOENT'
+            ? 'the file does not exist'
+            : (error as Error).message
+        }`,
+      );
+    }
   const persist = (assessment: Assessment) => {
-    assessment = attachEpss(
-      attachLocation(attachRemediation(assessment, inventory, remediationEvidence, config, now), inventory),
-      epssCache,
-      findingCves(assessment, epssEvidence),
+    assessment = attachRuntimeShield(
+      attachEpss(
+        attachLocation(attachRemediation(assessment, inventory, remediationEvidence, config, now), inventory),
+        epssCache,
+        findingCves(assessment, epssEvidence),
+      ),
+      shirudo,
+      epssEvidence,
+      inventory,
     );
     const decision = decide(assessment, config);
     decisions[assessment.id] = decision;
@@ -225,8 +285,8 @@ export async function runScan(options: {
     );
   };
   const retire = (previous: Assessment) => {
-    // A retired finding is not looked up any more; an ageing score would only mislead.
-    const { epss: _epss, ...assessment } = previous;
+    // A retired finding is not looked up any more; an ageing score or shield status would only mislead.
+    const { epss: _epss, runtime_shield: _shield, ...assessment } = previous;
     store.saveAssessment(
       {
         ...assessment,
@@ -273,7 +333,8 @@ export async function runScan(options: {
       evidence: finding.evidence_ids.map((id) => {
         const item = evidenceById.get(id);
         if (!item) return null;
-        const { fetched_at: _fetched, ...content } = item;
+        // Shield inputs (links, commits, weaknesses) are never analysed, so they never ask for analysis.
+        const content = evidenceContent(item);
         const fetched = Date.parse(item.fetched_at);
         return {
           ...content,
@@ -374,6 +435,7 @@ export async function runScan(options: {
     ...result.errors,
     ...(inventory.import_warnings ?? []).map((message) => ({ source: 'inventory:sbom', message })),
   ];
+  for (const message of shirudoProblems) errors.push({ source: 'shirudo', message });
   const notices: string[] = [...(inventory.name_notices ?? [])];
   if (!options.fixture && missingCredentials(config).length)
     errors.push({
