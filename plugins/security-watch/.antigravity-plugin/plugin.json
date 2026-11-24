@@ -1,0 +1,21 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "security-watch",
+  "displayName": "Security Watch",
+  "version": "1.4.0",
+  "description": "Checks a project's dependencies for known vulnerabilities and malicious packages before and after changes, says whether a CVE affects you, and writes SBOMs.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Does this project have dependencies with known vulnerabilities?",
+    "Is it safe to add this package, and which version should I use?",
+    "Does CVE-2021-44906 affect this project?"
+  ],
+  "author": {
+    "name": "Shielda",
+    "url": "https://shielda.ai"
+  },
+  "homepage": "https://github.com/ShieldaAI/security-watch/tree/main/plugins/security-watch#readme",
+  "repository": "https://github.com/ShieldaAI/security-watch",
+  "license": "Apache-2.0",
+  "keywords": ["security", "vulnerabilities", "dependencies", "sbom", "supply-chain", "osv", "cve", "mcp"]
+}

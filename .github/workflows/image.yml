@@ -1,0 +1,145 @@
+name: Container image
+run-name: Container image ${{ inputs.tag || github.ref_name }}
+# Publishes ghcr.io/shieldaai/security-watch for each release tag: tested, multi-architecture,
+# with an SBOM and build provenance, and signed with a keyless Sigstore signature.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again, v1.4.0 or later (earlier versions have no MCP server or labels)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: image-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/shieldaai/security-watch
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - name: Check the tag against package.json
+        id: version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match package.json version $version."
+            exit 1
+          fi
+          tags="$IMAGE:$version"
+          # A pre-release (1.4.0-rc.1) gets only its own tag. A release moves x.y when it is the newest
+          # of its line, and latest when it is the newest of all, so publishing an older tag again
+          # (workflow_dispatch) never moves them back.
+          stable="$(git ls-remote --tags --refs origin 'refs/tags/v*' | sed 's#.*refs/tags/v##' | grep -Ev -- '-' | sort -V)"
+          case "$version" in
+            *-*) ;;
+            *)
+              [ "$(printf '%s\n' "$stable" | grep -E "^${version%.*}\." | tail -1)" = "$version" ] && tags="$tags,$IMAGE:${version%.*}"
+              [ "$(printf '%s\n' "$stable" | tail -1)" = "$version" ] && tags="$tags,$IMAGE:latest"
+              ;;
+          esac
+          echo "Tags: $tags"
+          {
+            echo "version=$version"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Run the test suite in the build image
+        run: docker build --target test -t security-watch:tests .
+      - name: Build for this runner and check it before anything is pushed
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker build --build-arg VERSION="$VERSION" -t security-watch:candidate .
+          node scripts/check-docker.mjs security-watch:candidate
+          test "$(docker run --rm security-watch:candidate --version)" = "$VERSION"
+          test "$(docker image inspect --format '{{ index .Config.Labels "io.modelcontextprotocol.server.name" }}' security-watch:candidate)" = io.github.ShieldaAI/security-watch
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' |
+            timeout 30 docker run -i --rm -v "$PWD:/project:ro" security-watch:candidate mcp /project > mcp.jsonl || true
+          grep -q '"check_project_vulnerabilities"' mcp.jsonl
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Pushed by digest only: no tag points at the image until it has run on both architectures and
+      # is attested and signed, so a failed check never leaves :latest on an unchecked image.
+      - name: Build and push linux/amd64 and linux/arm64 by digest
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          sbom: true
+          provenance: mode=max
+      - name: Run the pushed image on both architectures before attesting and signing it
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            test "$(docker run --rm --platform "$platform" "$IMAGE@$DIGEST" --version)" = "$VERSION"
+            printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_dependencies","arguments":{}}}' |
+              timeout 120 docker run -i --rm --platform "$platform" -v "$PWD:/project:ro" "$IMAGE@$DIGEST" mcp /project > "mcp-${platform#linux/}.jsonl" || true
+            grep -q '"id":2' "mcp-${platform#linux/}.jsonl"
+            echo "$platform: $VERSION, MCP server answers"
+          done
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Sign the image (keyless, Sigstore)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Tag the checked, signed image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.version.outputs.tags }}
+        run: |
+          args=()
+          for tag in ${TAGS//,/ }; do args+=(--tag "$tag"); done
+          # One source is copied as it is, so every tag names the same digest that was signed.
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+          for tag in ${TAGS//,/ }; do
+            test "$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest.Digest}}' | tr -d '"')" = "$DIGEST"
+          done
+      - name: Summary
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "### $IMAGE:$VERSION"
+            echo
+            echo "Digest: \`$DIGEST\`"
+            echo
+            echo '```sh'
+            echo "docker pull $IMAGE:$VERSION"
+            echo "gh attestation verify oci://$IMAGE:$VERSION --repo $GITHUB_REPOSITORY"
+            echo "cosign verify $IMAGE@$DIGEST --certificate-identity-regexp '^https://github.com/$GITHUB_REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

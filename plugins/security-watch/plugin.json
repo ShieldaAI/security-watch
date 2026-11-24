@@ -1,0 +1,40 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "security-watch",
+  "version": "1.4.0",
+  "description": "Checks a project's dependencies for known vulnerabilities and malicious packages before and after changes, says whether a CVE affects you, and writes SBOMs.",
+  "author": {
+    "name": "Shielda",
+    "email": "support@shielda.ai",
+    "url": "https://shielda.ai"
+  },
+  "homepage": "https://github.com/ShieldaAI/security-watch/tree/main/plugins/security-watch#readme",
+  "repository": "https://github.com/ShieldaAI/security-watch",
+  "license": "Apache-2.0",
+  "keywords": ["security", "vulnerabilities", "dependencies", "sbom", "supply-chain", "osv", "cve", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Security Watch",
+        "shortDescription": "Check dependencies for CVEs",
+        "longDescription": "Security Watch checks the dependencies of the project you have open for known vulnerabilities and malicious packages, and tells you what to change: the package, the installed version, the fixed version and the file it came from.\n\nIt reads lockfiles and manifests for npm, Python, Go, Rust, PHP, Ruby, Java, .NET, Dart, Elixir, Swift and Haskell (or any CycloneDX or SPDX SBOM) and checks the exact versions against OSV, marking entries in CISA's Known Exploited Vulnerabilities catalog.\n\nUse it before you add or upgrade a package (it also catches OSV malicious-package records such as typosquats), after a dependency change to see only what the change brought in compared with a git commit, and when a CVE is in the news to learn whether it affects you. It can also write a CycloneDX SBOM for customers, compliance or other scanners.\n\nIt runs on your computer. Package names and versions go to OSV (api.osv.dev) to be checked; file contents never leave your machine and nothing goes to Shielda. It reads only the open project and writes a file only when you ask for an SBOM. Open source (Apache-2.0); the same checks power the self-hosted Security Watch monitor, which alerts on Slack or email when a new advisory affects software you run.",
+        "developerName": "Shielda",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/ShieldaAI/security-watch/tree/main/plugins/security-watch#readme",
+        "supportURL": "https://github.com/ShieldaAI/security-watch/issues",
+        "privacyPolicyURL": "https://github.com/ShieldaAI/security-watch/blob/main/plugins/security-watch/PRIVACY.md",
+        "termsOfServiceURL": "https://github.com/ShieldaAI/security-watch/blob/main/plugins/security-watch/LICENSE",
+        "defaultPrompt": [
+          "Does this project have dependencies with known vulnerabilities?",
+          "Is it safe to add this package, and which version should I use?",
+          "Does CVE-2021-44906 affect this project?"
+        ],
+        "brandColor": "#C2410C",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

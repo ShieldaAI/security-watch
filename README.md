@@ -86,7 +86,7 @@ intake:
 
 ```yaml
 # GitHub Actions: makes the SBOM and sends it; the job fails if the monitor refuses it
-- uses: ShieldaAI/security-watch@v1.3.0
+- uses: ShieldaAI/security-watch@v1.4.0
   with:
     system-id: my-app
     owner: Dana, platform team
@@ -96,7 +96,7 @@ intake:
 
 ```sh
 # Any other pipeline with Node.js 24 and SECURITY_WATCH_INTAKE_TOKEN set
-npx --yes @shieldaai/security-watch@1.3.0 sbom --system-id my-app --upload https://watch.example.com:8787
+npx --yes @shieldaai/security-watch@1.4.0 sbom --system-id my-app --upload https://watch.example.com:8787
 ```
 
 [Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, the receiver (tokens limited to some systems, TLS, Docker), other ways to deliver SBOMs, and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
@@ -130,12 +130,26 @@ If your list contains libraries that are not npm packages (Python, PHP, Java, Go
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.3.0.** This is `@shieldaai/security-watch` 1.3.0, a minor release of the first stable version (1.0.0). It lists the findings worth a temporary mitigation with what is known for writing one (`shield-candidates`), shows which hosts a mitigation covers, works with [Shirudo](docs/shirudo.md), writes OpenVEX for other scanners and reads CycloneDX up to 1.7; 1.2 read scores and exploitation reports from news and added EPSS, and 1.1 added SBOM generation, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
+**Version 1.4.0.** This is `@shieldaai/security-watch` 1.4.0, a minor release of the first stable version (1.0.0). It answers in one command what the monitor answers over time (`security-watch check`: a project, a change since a git commit, a package, an advisory), gives AI coding agents the same checks through an [MCP server and a plugin](docs/agents.md), and is published as a signed container image (`ghcr.io/shieldaai/security-watch`); 1.3 added `shield-candidates`, mitigation status, [Shirudo](docs/shirudo.md) and OpenVEX, 1.2 read scores and exploitation reports from news and added EPSS, and 1.1 added SBOM generation, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
+## Check now, or let your AI agent check
+
+No configuration is needed for a one-off answer. `check` reads the project's lockfiles, asks OSV about every package version and marks CISA known-exploited entries:
+
+```sh
+npx --yes @shieldaai/security-watch@1.4.0 check                         # this project
+npx --yes @shieldaai/security-watch@1.4.0 check --base origin/main      # only what this branch brings in
+npx --yes @shieldaai/security-watch@1.4.0 check --package npm:lodash@4.17.21
+npx --yes @shieldaai/security-watch@1.4.0 check --advisory CVE-2021-44906
+```
+
+Exit code 1 means a finding at or above `--fail-on` (high by default), 2 that the check could not complete. AI coding agents get the same checks, plus SBOM writing, from `security-watch mcp` or the plugin for Claude Code, Codex and Antigravity: they check a package before adding it and a dependency change before handing it back. See [Security Watch for AI agents](docs/agents.md).
+
 ## Features
 
+- One-off checks and AI agents: `security-watch check` for a project, a git change, a package or an advisory, and an [MCP server and plugin](docs/agents.md) with the same checks for coding agents, including OSV malicious-package records.
 - Inventories from your code: `security-watch sbom` and `init --project` read the lockfiles and manifests of 12 ecosystems and write a CycloneDX SBOM; an SBOM folder turns every SBOM your pipelines deliver into a monitored system. A [GitHub Action](docs/sbom.md#github-actions) and a one-line command for other CI are included. Hand-written YAML/JSON inventories and library lists still work. Names alone are accepted; exact installed versions improve applicability checks.
 - cve.now CVE updates and npm stack checks, plus The Hacker News security articles. Optional sources include OSV, GitHub, CISA KEV, official Node.js/Python/PHP feeds and other RSS/Atom feeds.
 - Structured library checks without AI, with optional AI analysis to distinguish new vulnerabilities, updates to known vulnerabilities and general system news. Each finding records source severity, applicability and contextual priority separately.
@@ -171,7 +185,7 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.3.0.tgz
+npm install --global ./shieldaai-security-watch-1.4.0.tgz
 ```
 
 Choose one setup command below. To start from your own code, use `init --project` as in [step 2](#get-started-in-four-steps). For a fictional example with AI disabled:
@@ -298,14 +312,22 @@ Run `security-watch providers` to list provider IDs, default endpoints, credenti
 
 ## Run with Docker
 
-Build the image locally:
+Each release is published as `ghcr.io/shieldaai/security-watch` for linux/amd64 and linux/arm64, with an SBOM and build provenance attached and a keyless Sigstore signature. Check it before you run it:
 
 ```sh
-docker build -t shielda-security-watch .
+gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.0 --repo ShieldaAI/security-watch
+cosign verify ghcr.io/shieldaai/security-watch:1.4.0 \
+  --certificate-identity-regexp '^https://github.com/ShieldaAI/security-watch/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Then:
+
+```sh
 docker volume create security-watch-data
 docker run --rm --user 0 --entrypoint chown \
   --mount type=volume,src=security-watch-data,dst=/data \
-  shielda-security-watch "$(id -u):$(id -g)" /data
+  ghcr.io/shieldaai/security-watch:1.4.0 "$(id -u):$(id -g)" /data
 docker run --rm --name security-watch \
   --user "$(id -u):$(id -g)" \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
@@ -314,8 +336,10 @@ docker run --rm --name security-watch \
   --mount type=bind,src="$(pwd)/watch/security-watch.yaml",dst=/config/security-watch.yaml,readonly \
   --mount type=bind,src="$(pwd)/watch/systems.yaml",dst=/config/systems.yaml,readonly \
   --mount type=volume,src=security-watch-data,dst=/data \
-  shielda-security-watch start --config /config/security-watch.yaml
+  ghcr.io/shieldaai/security-watch:1.4.0 start --config /config/security-watch.yaml
 ```
+
+To build the image from a checkout instead, run `docker build -t ghcr.io/shieldaai/security-watch:1.4.0 .` first; the commands stay the same.
 
 Before running, set `inventory: /config/systems.yaml` and `database: /data/watch.db` in the container's configuration. Create `watch/.env` privately with only the credentials you use; it is not loaded automatically by the npm CLI. Keep configuration, inventory and `.env` readable only by your user, for example with `chmod 600` on those files. The short initialization command assigns the data volume to your UID/GID; the application itself then runs as that user. Your Docker VM must be able to access the configuration/inventory bind mounts. Add a read-only mount under `/config` for any imported lockfile or SBOM folder (for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`) and use the matching path in the inventory.
 
@@ -331,7 +355,7 @@ chmod 600 security-watch.yaml systems.yaml .env
 export SECURITY_WATCH_UID=$(id -u) SECURITY_WATCH_GID=$(id -g)
 ```
 
-Edit the copied inventory, notification routes and credentials, and apply the same `/config/systems.yaml` and `/data/watch.db` settings before running `docker compose up --build -d`. Inspect `docker compose logs --follow`. Compose requires the host UID/GID variables and automatically runs a short volume-ownership initializer before the application starts. Its `watch-data` named volume keeps SQLite on Docker's native filesystem, while the private configuration/inventory remain read-only host mounts. You may persist the UID/GID values in the private `.env` file for later Compose invocations. Add an explicit read-only mount if the inventory imports a lockfile or reads an SBOM folder (`- ./sboms:/config/sboms:ro`). Retain the named volume when recreating containers; `docker compose down --volumes` removes it.
+Edit the copied inventory, notification routes and credentials, and apply the same `/config/systems.yaml` and `/data/watch.db` settings before running `docker compose up -d`, which pulls the published image. Inspect `docker compose logs --follow`. Compose requires the host UID/GID variables and automatically runs a short volume-ownership initializer before the application starts. Its `watch-data` named volume keeps SQLite on Docker's native filesystem, while the private configuration/inventory remain read-only host mounts. You may persist the UID/GID values in the private `.env` file for later Compose invocations. Add an explicit read-only mount if the inventory imports a lockfile or reads an SBOM folder (`- ./sboms:/config/sboms:ro`). Retain the named volume when recreating containers; `docker compose down --volumes` removes it.
 
 ## How decisions work
 
@@ -355,37 +379,39 @@ Models cannot run tools, change recipients, edit version ranges or establish tha
 
 Commands that operate on a configured monitor accept `--config PATH`; the default is `./security-watch.yaml`. For monitor commands, add `--credentials-file PATH` to load a private dotenv file, or export variables through your service manager. The offline `rehearse` command rejects credential files and uses simulated delivery. Existing environment values take precedence for monitor commands. Files are parsed as data, without shell evaluation; they are never loaded implicitly. `init` uses `--directory` instead. Unsupported flag/command combinations are rejected before activity.
 
-| Command                                                                                           | Behavior                                                                                                                  |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `providers`                                                                                       | List supported provider profiles without configuration, credentials or network access                                     |
-| `templates`                                                                                       | List common system IDs available to `init --systems`                                                                      |
-| `ecosystems`                                                                                      | List supported library ecosystems                                                                                         |
-| `sbom [--project PATH] [--output FILE]`                                                           | Read a project's lockfiles and manifests and write a CycloneDX SBOM; no network requests ([guide](docs/sbom.md))          |
-| `upload --input FILE --url URL`                                                                   | Send an SBOM to a monitor's receiver (`intake`); `sbom --upload URL` makes and sends one in a step                        |
-| `import-sbom --input PATH`                                                                        | Show what Security Watch reads from a CycloneDX or SPDX SBOM; exits 2 when some packages cannot be watched                |
-| `normalize-libraries --input PATH`                                                                | Parse a library list without network requests; optional `--ecosystem` sets the group and `--output` saves a new JSON file |
-| `scan`                                                                                            | Run once, save evidence/findings and queue notifications; does not deliver by default                                     |
-| `scan --dry-run`                                                                                  | Use in-memory state, disable model calls and send no notifications; source requests still occur                           |
-| `scan --notify`                                                                                   | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending              |
-| `scan --fixture PATH`                                                                             | Use local evidence instead of network sources and AI                                                                      |
-| `scan --no-ai`                                                                                    | Keep structured matching and disable model calls for this invocation                                                      |
-| `start`                                                                                           | Run the scheduler and delivery worker in the foreground                                                                   |
-| `findings`, `status`, `deliveries`, `budget`                                                      | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations                                    |
-| `health`                                                                                          | Check worker heartbeat, completed-scan freshness and actionable delivery problems; exits 2 when unhealthy                 |
-| `health --scan-only`                                                                              | Check completed scans and delivery without requiring a foreground worker, for external cron schedules                     |
-| `reviews [--all] [--limit N] [--after CURSOR]`                                                    | Inspect the durable local AI dismissal queue and its backlog                                                              |
-| `review FINDING_ID --revision N --disposition dismiss\|investigate --reviewer NAME --reason TEXT` | Adjudicate an exact current review locally without sending a notification                                                 |
-| `explain FINDING_ID`                                                                              | Show a finding, its current policy decision and acknowledgement/suppression controls                                      |
-| `history FINDING_ID`                                                                              | Show saved finding revisions                                                                                              |
-| `acknowledge FINDING_ID`                                                                          | Acknowledge the current revision, or only revision N with `--revision N`                                                  |
-| `suppress FINDING_ID --hours 24 --reason TEXT`                                                    | Suppress until an explicit expiry                                                                                         |
-| `retry DELIVERY_ID`                                                                               | Requeue a failed/uncertain delivery after checking receipt; does not send immediately                                     |
-| `backup --output PATH`                                                                            | Create a consistent SQLite backup at a new destination and verify a temporary restored copy                               |
-| `verify-backup --input PATH`                                                                      | Verify a standalone backup without monitor configuration or replacing a live database                                     |
-| `prune`                                                                                           | Show a read-only plan using configured retention periods                                                                  |
-| `prune --apply`                                                                                   | Apply one bounded retention batch atomically                                                                              |
-| `unlock`                                                                                          | Remove stale lock metadata only when no worker owns the SQLite lock                                                       |
-| `test-notification --channel slack`                                                               | Send an explicit test message; `email` is also supported                                                                  |
+| Command                                                                                           | Behavior                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `check [PROJECT] [--base REF \| --package ECO:NAME@VER \| --advisory ID \| --sbom FILE]`          | Check now, with no configuration: OSV and CISA KEV, nothing stored; exit 1 on a finding at or above `--fail-on` ([guide](docs/agents.md)) |
+| `mcp [PROJECT]`                                                                                   | MCP server on stdio with the same checks and SBOM writing, for AI coding agents ([guide](docs/agents.md))                                 |
+| `providers`                                                                                       | List supported provider profiles without configuration, credentials or network access                                                     |
+| `templates`                                                                                       | List common system IDs available to `init --systems`                                                                                      |
+| `ecosystems`                                                                                      | List supported library ecosystems                                                                                                         |
+| `sbom [--project PATH] [--output FILE]`                                                           | Read a project's lockfiles and manifests and write a CycloneDX SBOM; no network requests ([guide](docs/sbom.md))                          |
+| `upload --input FILE --url URL`                                                                   | Send an SBOM to a monitor's receiver (`intake`); `sbom --upload URL` makes and sends one in a step                                        |
+| `import-sbom --input PATH`                                                                        | Show what Security Watch reads from a CycloneDX or SPDX SBOM; exits 2 when some packages cannot be watched                                |
+| `normalize-libraries --input PATH`                                                                | Parse a library list without network requests; optional `--ecosystem` sets the group and `--output` saves a new JSON file                 |
+| `scan`                                                                                            | Run once, save evidence/findings and queue notifications; does not deliver by default                                                     |
+| `scan --dry-run`                                                                                  | Use in-memory state, disable model calls and send no notifications; source requests still occur                                           |
+| `scan --notify`                                                                                   | Save a scan, attempt due delivery and report the remaining backlog; future or rate-limited jobs stay pending                              |
+| `scan --fixture PATH`                                                                             | Use local evidence instead of network sources and AI                                                                                      |
+| `scan --no-ai`                                                                                    | Keep structured matching and disable model calls for this invocation                                                                      |
+| `start`                                                                                           | Run the scheduler and delivery worker in the foreground                                                                                   |
+| `findings`, `status`, `deliveries`, `budget`                                                      | Inspect saved assessments, monitoring state, delivery outcomes and budget reservations                                                    |
+| `health`                                                                                          | Check worker heartbeat, completed-scan freshness and actionable delivery problems; exits 2 when unhealthy                                 |
+| `health --scan-only`                                                                              | Check completed scans and delivery without requiring a foreground worker, for external cron schedules                                     |
+| `reviews [--all] [--limit N] [--after CURSOR]`                                                    | Inspect the durable local AI dismissal queue and its backlog                                                                              |
+| `review FINDING_ID --revision N --disposition dismiss\|investigate --reviewer NAME --reason TEXT` | Adjudicate an exact current review locally without sending a notification                                                                 |
+| `explain FINDING_ID`                                                                              | Show a finding, its current policy decision and acknowledgement/suppression controls                                                      |
+| `history FINDING_ID`                                                                              | Show saved finding revisions                                                                                                              |
+| `acknowledge FINDING_ID`                                                                          | Acknowledge the current revision, or only revision N with `--revision N`                                                                  |
+| `suppress FINDING_ID --hours 24 --reason TEXT`                                                    | Suppress until an explicit expiry                                                                                                         |
+| `retry DELIVERY_ID`                                                                               | Requeue a failed/uncertain delivery after checking receipt; does not send immediately                                                     |
+| `backup --output PATH`                                                                            | Create a consistent SQLite backup at a new destination and verify a temporary restored copy                                               |
+| `verify-backup --input PATH`                                                                      | Verify a standalone backup without monitor configuration or replacing a live database                                                     |
+| `prune`                                                                                           | Show a read-only plan using configured retention periods                                                                                  |
+| `prune --apply`                                                                                   | Apply one bounded retention batch atomically                                                                                              |
+| `unlock`                                                                                          | Remove stale lock metadata only when no worker owns the SQLite lock                                                                       |
+| `test-notification --channel slack`                                                               | Send an explicit test message; `email` is also supported                                                                                  |
 
 Only one scan/scheduler instance may write a given database. Inspection and acknowledgement use SQLite safely alongside the worker. Do not share a database between containers or hosts or put it on a network filesystem. Stop the worker before replacing a database with a backup; retain permissions and move aside stale SQLite sidecar files with the old database.
 
@@ -426,11 +452,11 @@ The corpus contains source-derived synthetic scenarios with fictional inventorie
 
 ## Boundaries and privacy
 
-cve.now stack queries disclose deduplicated npm package names and versions; lockfiles, SBOMs and deployment metadata are not uploaded. `security-watch sbom` makes no network requests. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives, under the default `minimal` disclosure profile, the matched package and product names and versions plus selected evidence; the `deployment-context` profile adds environment, exposure, criticality and matching keywords (see [SECURITY.md](SECURITY.md)). Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
+`check` and the MCP server send package ecosystems, names and versions (and advisory IDs) to OSV, download the CISA known-exploited catalog, and send CVE IDs to FIRST only when EPSS is asked for; they store nothing. cve.now stack queries disclose deduplicated npm package names and versions; lockfiles, SBOMs and deployment metadata are not uploaded. `security-watch sbom` makes no network requests. The Hacker News feed and article servers receive normal HTTP requests. Optional OSV queries also disclose dependency names and versions; optional GitHub, CISA and additional feed sources receive normal HTTP requests. GitHub authentication is optional. The selected model provider receives, under the default `minimal` disclosure profile, the matched package and product names and versions plus selected evidence; the `deployment-context` profile adds environment, exposure, criticality and matching keywords (see [SECURITY.md](SECURITY.md)). Slack/email receive findings and evidence links. Consider these disclosures before monitoring private dependencies.
 
 Authentication credentials are read from environment variables. Findings, evidence, quoted model output, budget reservations and history are stored locally. There is no automatic application telemetry. An explicitly configured heartbeat service receives success pings and normal request metadata. Protect the configuration, SQLite database, backups and credentials as operational data. Details are in [SECURITY.md](SECURITY.md).
 
-This release has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, VEX import, operating-system package matching, distributed workers, EPSS integration or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported. OSV and GitHub also support [CVSS v4 base-vector scoring](docs/cvss-v4-support.md), with explicit base projection and unsupported-vector diagnostics. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
+This release has no automatic patching, shell execution from news, hosted dashboard, Slack action buttons, VEX import, operating-system package matching, distributed workers or independent security audit. CVSS v3.0/v3.1 vectors and supplied severity labels/scores are supported. OSV and GitHub also support [CVSS v4 base-vector scoring](docs/cvss-v4-support.md), with explicit base projection and unsupported-vector diagnostics. Product backports, reachability and exploit prerequisites require human/vendor evidence. cve.now starts from recent entries, revisits tracked/news-cited CVEs and checks exact npm packages through its stack endpoint; this is not an exhaustive historical audit of every product. Existing configurations retain explicitly enabled legacy sources; set `osv`, `github` and `kev` to `false` to switch exclusively to the new defaults.
 
 Current evidence and findings are loaded into memory during each scan. Retention is disabled until configured, and protected unresolved records may continue growing even after cleanup is enabled. This release targets small installations. Plan storage and review retention dry runs before increasing scale.
 

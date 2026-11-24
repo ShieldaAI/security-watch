@@ -412,6 +412,10 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     }),
   };
 }
+/** One OSV record (`GET /v1/vulns/ID`) read as evidence, for a one-off lookup by identifier. */
+export function osvEvidence(raw: unknown, id: string, now: number): Evidence {
+  return osvRecord(raw, id, [], now);
+}
 async function osv(
   inventory: Inventory,
   previous: Evidence[],

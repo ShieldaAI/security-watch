@@ -1,0 +1,20 @@
+{
+  "name": "security-watch",
+  "displayName": "Security Watch",
+  "version": "1.4.0",
+  "description": "Checks a project's dependencies for known vulnerabilities and malicious packages before and after changes, says whether a CVE affects you, and writes SBOMs.",
+  "author": {
+    "name": "Shielda",
+    "email": "support@shielda.ai",
+    "url": "https://shielda.ai"
+  },
+  "homepage": "https://github.com/ShieldaAI/security-watch/tree/main/plugins/security-watch#readme",
+  "repository": "https://github.com/ShieldaAI/security-watch",
+  "license": "Apache-2.0",
+  "keywords": ["security", "vulnerabilities", "dependencies", "sbom", "supply-chain", "osv", "cve", "mcp"],
+  "icon": "./assets/logo.png",
+  "documentationUrl": "https://github.com/ShieldaAI/security-watch/blob/main/docs/agents.md",
+  "supportUrl": "https://github.com/ShieldaAI/security-watch/issues",
+  "privacyPolicyUrl": "https://github.com/ShieldaAI/security-watch/blob/main/plugins/security-watch/PRIVACY.md",
+  "termsOfServiceUrl": "https://github.com/ShieldaAI/security-watch/blob/main/plugins/security-watch/LICENSE"
+}

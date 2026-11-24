@@ -12,7 +12,7 @@ import {
   parseLibrary,
 } from './ecosystems.js';
 import { hash, LINE_BREAKING, singleLine } from './util.js';
-import { importSbom } from './sbom.js';
+import { importSbom, type SbomImport } from './sbom.js';
 
 // Inventory text is shown in notifications, one value per line. A control character or a Unicode
 // line separator inside a name, owner or note would let that value start a line of its own.
@@ -277,8 +277,8 @@ export function systemFromSbom(
   path: string,
   file: string,
   label: string,
+  imported: SbomImport = importSbom(path),
 ): { system: Inventory['systems'][number]; warnings: string[]; notices: string[] } {
-  const imported = importSbom(path);
   const properties = imported.subject?.properties ?? {};
   const property = (name: string) => properties[`security-watch:${name}`];
   const id =

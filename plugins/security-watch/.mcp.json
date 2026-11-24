@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "security-watch": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp-server.mjs"]
+    }
+  }
+}

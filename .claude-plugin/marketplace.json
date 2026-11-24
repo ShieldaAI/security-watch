@@ -1,0 +1,20 @@
+{
+  "name": "shielda-security-watch",
+  "owner": {
+    "name": "Shielda",
+    "email": "support@shielda.ai",
+    "url": "https://shielda.ai"
+  },
+  "metadata": {
+    "description": "Security Watch from Shielda: dependency vulnerability checks for AI coding agents."
+  },
+  "plugins": [
+    {
+      "name": "security-watch",
+      "source": "./plugins/security-watch",
+      "description": "Checks a project's dependencies for known vulnerabilities and malicious packages before and after changes, says whether a CVE affects you, and writes SBOMs.",
+      "category": "security",
+      "tags": ["security", "vulnerabilities", "dependencies", "sbom", "mcp"]
+    }
+  ]
+}
