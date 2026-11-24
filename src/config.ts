@@ -288,6 +288,41 @@ export const configSchema = z
           ctx.addIssue({ code: 'custom', message: 'Each token needs its own token_env', path: ['tokens'] });
       })
       .optional(),
+    mitigations: z
+      .array(
+        z
+          .object({
+            name: z
+              .string()
+              .trim()
+              .min(1)
+              .max(40)
+              .regex(
+                /^[^\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]+$/,
+                'Use a short single-line name',
+              )
+              .optional(),
+            format: z.enum(['shirudo', 'generic']),
+            file: z.string().trim().min(1).max(4096),
+            max_age_minutes: z.number().int().min(5).max(10080).default(120),
+            systems: z
+              .record(z.string().trim().min(1).max(255), z.string().trim().min(1).max(200))
+              .refine((map) => Object.keys(map).length <= 1000, 'At most 1,000 system mappings')
+              .default({}),
+          })
+          .strict()
+          .transform(({ name, ...source }) => ({
+            ...source,
+            name: name ?? (source.format === 'shirudo' ? 'Shirudo' : 'Mitigations'),
+          })),
+      )
+      .max(10)
+      .superRefine((sources, ctx) => {
+        const names = sources.map((source) => source.name.toLowerCase());
+        if (new Set(names).size !== names.length)
+          ctx.addIssue({ code: 'custom', message: 'Give each mitigation source its own name' });
+      })
+      .optional(),
     maintenance: z
       .object({
         interval_hours: z.number().int().min(1).max(168).default(24),
@@ -469,6 +504,7 @@ export function loadConfig(path: string): Config {
     config.intake.tls_cert_file = resolve(dirname(resolve(path)), config.intake.tls_cert_file);
   if (config.intake?.tls_key_file)
     config.intake.tls_key_file = resolve(dirname(resolve(path)), config.intake.tls_key_file);
+  for (const source of config.mitigations ?? []) source.file = resolve(dirname(resolve(path)), source.file);
   if (config.maintenance?.backup)
     config.maintenance.backup.directory = resolve(
       dirname(resolve(path)),

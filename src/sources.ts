@@ -13,6 +13,14 @@ import type {
   SourceResult,
 } from './types.js';
 import { cleanText, hash, highest, singleLine, timestamp } from './util.js';
+import {
+  githubReferences,
+  githubWeaknesses,
+  osvFixCommits,
+  osvReferences,
+  osvWeaknesses,
+  shieldInputs,
+} from './shield-inputs.js';
 import { collectCveNow, evidenceRelevant, type CveNowState } from './cve-now.js';
 import { VENDOR_FEEDS, vendorArticleBody, vendorArticleTarget, type VendorFeed } from './vendor-sources.js';
 import {
@@ -397,6 +405,11 @@ function osvRecord(raw: unknown, expectedId: string, matches: OsvQuery[], now: n
     packages: packageClaims,
     withdrawn: data.withdrawn === undefined || data.withdrawn === null ? false : !!date(data.withdrawn),
     malware: /^MAL-/.test(expectedId),
+    ...shieldInputs({
+      references: osvReferences(data.references),
+      fix_commits: osvFixCommits(data.affected),
+      weaknesses: osvWeaknesses(data),
+    }),
   };
 }
 async function osv(
@@ -660,6 +673,10 @@ function githubRecord(raw: unknown, type: 'reviewed' | 'malware', now: number): 
     withdrawn:
       data.withdrawn_at === undefined || data.withdrawn_at === null ? false : !!date(data.withdrawn_at),
     malware: type === 'malware',
+    ...shieldInputs({
+      references: githubReferences(data.references),
+      weaknesses: githubWeaknesses(data.cwes),
+    }),
   };
 }
 function nextGithubLink(link: string | undefined): string | undefined {

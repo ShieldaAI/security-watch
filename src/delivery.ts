@@ -323,6 +323,36 @@ function epssLine(a: Assessment): string[] {
   ];
 }
 
+/** Runtime mitigation status from the operator's exports, when configured. Shown only. */
+function mitigationLines(a: Assessment): string[] {
+  const statuses = Array.isArray(a.mitigations) ? a.mitigations : [];
+  const lines = statuses.slice(0, 3).flatMap((status) => {
+    if (!status || typeof status.summary !== 'string') return [];
+    const when = Date.parse(status.exported_at);
+    const at = Number.isFinite(when)
+      ? new Date(when).toISOString().slice(0, 16).replace('T', ' ')
+      : 'unknown time';
+    // The export time, an out-of-date mark and the reminder come before the mitigation names, which
+    // are the operator's free text and are shortened on their own, so they can never push those out.
+    // A mitigation that expires is covered only until then; a digest read later must say so.
+    const expires = typeof status.expires_at === 'string' ? Date.parse(status.expires_at) : Number.NaN;
+    const until = Number.isFinite(expires)
+      ? new Date(expires).toISOString().slice(0, 16).replace('T', ' ')
+      : undefined;
+    const ids = (Array.isArray(status.mitigations) ? status.mitigations.slice(0, 3) : [])
+      .filter((id): id is string => typeof id === 'string')
+      .map((id) => single(id, 40));
+    return [
+      single(
+        `${single(status.summary, 260)} (export ${at} UTC${status.stale ? ', out of date' : ''}${until ? `; expires ${until} UTC` : ''}; a mitigation is temporary and does not close the finding)${ids.length ? ` In place: ${ids.join(', ')}` : ''}`,
+        480,
+      ),
+    ];
+  });
+  if (statuses.length > 3) lines.push(`${statuses.length - 3} more mitigation source(s): see explain.`);
+  return lines;
+}
+
 export function notificationText(job: Notification): { subject: string; text: string } {
   const { assessment: a, reason } = JSON.parse(job.payload) as { assessment: Assessment; reason: string };
   const subject = single(`[${a.priority.toUpperCase()}] ${a.title}`, 180);
@@ -338,6 +368,7 @@ export function notificationText(job: Notification): { subject: string; text: st
     ...(a.exploited ? ['Known exploitation reported.'] : []),
     ...newsSignalLine(a),
     ...epssLine(a),
+    ...mitigationLines(a),
     `Summary: ${single(a.summary, 750)}`,
   ];
   // In the order they give way when the text is too long for one Slack section: the last of these
@@ -422,6 +453,7 @@ export function digestText(jobs: Notification[]): { subject: string; text: strin
       `Applicability: ${single(a.applicability, 40)}; source: ${single(a.source_severity, 40)}`,
       ...newsSignalLine(a),
       ...epssLine(a),
+      ...mitigationLines(a),
       ...(a.news_analysis
         ? [
             `AI news: ${single(a.news_analysis.classification, 60)}; impact: ${single(a.news_analysis.impact, 60)}`,

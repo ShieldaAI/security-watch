@@ -39,7 +39,23 @@ export type {
   NewsSignals,
   NewsStatement,
   EpssScore,
+  AdvisoryReference,
+  FixCommit,
+  ReferenceType,
 } from './types.js';
+export { shieldCandidates } from './shield-candidates.js';
+export type {
+  ShieldCandidate,
+  ShieldCandidateReport,
+  ShieldCandidateInput,
+  ShieldReadiness,
+  FindingControls,
+} from './shield-candidates.js';
+export type { MitigationStatus, MitigationState, MitigationSource, MitigationFormat } from './mitigations.js';
+export { openVex } from './vex.js';
+export type { VexInput, VexDocument, VexStatement } from './vex.js';
+export { syncShirudoSboms } from './shirudo-sboms.js';
+export type { ShirudoSyncOptions, ShirudoSyncPlan, ShirudoSyncImage } from './shirudo-sboms.js';
 export {
   scorePilotResponses,
   type PilotResponseRegister,

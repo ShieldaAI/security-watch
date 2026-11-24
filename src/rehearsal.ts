@@ -285,6 +285,8 @@ export async function runRehearsal(options: {
 
   // Clone validated objects before changing effective runtime settings. No source/provider path can run.
   config.models.enabled = false;
+  // A rehearsal reads no live state: not the operator's mitigation exports either.
+  delete config.mitigations;
   config.sources = {
     ...config.sources,
     cve_now: false,

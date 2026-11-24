@@ -29,6 +29,7 @@
   "normalizeEcosystem",
   "normalizePackageName",
   "notificationText",
+  "openVex",
   "parseConfig",
   "parseLibraryList",
   "providerDefinition",
@@ -44,8 +45,10 @@
   "scorePilotRecall",
   "scorePilotResponses",
   "sendEmail",
+  "shieldCandidates",
   "smtpProblem",
   "startIntake",
+  "syncShirudoSboms",
   "uploadSbom",
   "validateAnalysis",
   "verifyBackup"

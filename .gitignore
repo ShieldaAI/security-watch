@@ -13,3 +13,4 @@ systems.yaml
 .intake-ci/
 sbom.cdx.json
 security-watch.cdx.json
+!test/fixtures/watch-1.2.1.db

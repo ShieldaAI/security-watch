@@ -86,7 +86,7 @@ intake:
 
 ```yaml
 # GitHub Actions: makes the SBOM and sends it; the job fails if the monitor refuses it
-- uses: ShieldaAI/security-watch@v1.2.1
+- uses: ShieldaAI/security-watch@v1.3.0
   with:
     system-id: my-app
     owner: Dana, platform team
@@ -96,7 +96,7 @@ intake:
 
 ```sh
 # Any other pipeline with Node.js 24 and SECURITY_WATCH_INTAKE_TOKEN set
-npx --yes @shieldaai/security-watch@1.2.1 sbom --system-id my-app --upload https://watch.example.com:8787
+npx --yes @shieldaai/security-watch@1.3.0 sbom --system-id my-app --upload https://watch.example.com:8787
 ```
 
 [Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, the receiver (tokens limited to some systems, TLS, Docker), other ways to deliver SBOMs, and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
@@ -130,7 +130,7 @@ If your list contains libraries that are not npm packages (Python, PHP, Java, Go
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.2.1.** This is `@shieldaai/security-watch` 1.2.1, a patch release of 1.2.0, the minor release of the first stable version (1.0.0) that reads CVSS scores, vendor ratings and exploitation reports from news for findings that no advisory has scored yet, and can show FIRST's EPSS for each CVE; 1.1 added SBOM generation from dependency files, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
+**Version 1.3.0.** This is `@shieldaai/security-watch` 1.3.0, a minor release of the first stable version (1.0.0). It lists the findings worth a temporary mitigation with what is known for writing one (`shield-candidates`), shows which hosts a mitigation covers, works with [Shirudo](docs/shirudo.md), writes OpenVEX for other scanners and reads CycloneDX up to 1.7; 1.2 read scores and exploitation reports from news and added EPSS, and 1.1 added SBOM generation, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
@@ -142,6 +142,7 @@ Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for to
 - Separate alert thresholds for libraries, products and news, plus review digests and configurable overrides for potentially critical findings, known exploitation and malware.
 - Slack incoming webhooks and SMTP email, backed by a SQLite delivery queue. An email is retried automatically only when it provably never left. A Slack message is retried when Slack answers HTTP 429 or 5xx or the connection fails before the request is sent; in rare cases Slack may have posted a message it answered 5xx for. Any other uncertain delivery is recorded for manual review and retry.
 - Per-source coverage receipts, bounded CycloneDX and SPDX import (output of Trivy, Syft, cdxgen and GitHub's dependency graph) with package URLs and dependency relationships, and inventory drift reports. Optional artifact kinds cover MCP servers/clients, plugins, skills and models; signature, attestation and remediation lifecycle fields record operator-supplied evidence. They do not perform verification or close findings. See [deployment evidence](docs/configuration.md#agent-deployment-evidence-sboms-and-drift).
+- [Temporary mitigations](docs/mitigations.md): `shield-candidates` lists critical and exploited findings with what someone writing a runtime shield, a blocking policy or a firewall rule needs (fix commits and patch links, installed and fixed versions, weakness types, public exploit code) and says what is still missing; news alone is never enough. Alerts can say how many hosts a mitigation covers, read from files your tools write ([Shirudo](docs/shirudo.md) or a generic format). `vex` writes OpenVEX for scanners such as Trivy and Grype. Mitigations are shown only: they never lower a priority or close a finding.
 - Finding history, revision-bound AI dismissal review, acknowledgement, suppression with an expiry, source checkpoints and model budgets. Optional external heartbeats, bounded retention and verified backups support ongoing operation.
 
 | Inventory item                         | Coverage                                                                                                                                    |
@@ -170,7 +171,7 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.2.1.tgz
+npm install --global ./shieldaai-security-watch-1.3.0.tgz
 ```
 
 Choose one setup command below. To start from your own code, use `init --project` as in [step 2](#get-started-in-four-steps). For a fictional example with AI disabled:

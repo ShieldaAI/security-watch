@@ -318,7 +318,7 @@ export function systemFromSbom(
   // data), which is a known limit rather than a fault, so it is said once as a notice instead of
   // degrading every scan, together with the dependency edges that lead to them.
   const warnings: string[] = [];
-  const notices: string[] = [];
+  const notices: string[] = (imported.notices ?? []).map((notice) => `${id}: ${notice}`);
   const unmatched = new Map<string, number>();
   for (const warning of imported.warnings) {
     const kind = UNMATCHED_KIND.exec(warning)?.[1]?.toLowerCase();

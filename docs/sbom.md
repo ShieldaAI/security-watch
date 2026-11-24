@@ -103,7 +103,7 @@ systems: [] # systems you describe by hand can sit beside them
 - **A file that cannot be read** is reported as an import warning (`doctor`, and a monitoring-health finding at scan time) and left out; the other systems are still watched.
 - **Operating-system packages** (deb, rpm, apk and similar, found in container-image SBOMs) are not matched against advisories. They are listed once as a notice, which does not degrade monitoring. Use your image scanner for them.
 
-CycloneDX JSON 1.4 to 1.6 and SPDX JSON 2.2 and 2.3 are accepted, including GitHub's REST response (`{"sbom": {...}}`). Each file is bounded to 20 MiB and 20,000 packages, and the folder to 1,000 files. For Docker, mount the folder read-only beside the inventory, for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`.
+CycloneDX JSON 1.2 to 1.7 and SPDX JSON 2.2 and 2.3 are accepted; a later CycloneDX 1.x is read by the 1.7 rules and named once as a notice, and 2.x is refused. `security-watch sbom` writes 1.6, which more tools read. GitHub's REST response is accepted too (`{"sbom": {...}}`). Each file is bounded to 20 MiB and 20,000 packages, and the folder to 1,000 files. For Docker, mount the folder read-only beside the inventory, for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`.
 
 ## From a CI pipeline
 
@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: sbom
-        uses: ShieldaAI/security-watch@v1.2.1
+        uses: ShieldaAI/security-watch@v1.3.0
         with:
           system-id: checkout-api
           owner: Dana, platform team
@@ -143,7 +143,7 @@ To use an SBOM made by another tool, pass it as `sbom-file`; the action checks t
 
 ```yaml
 - run: trivy image --format cyclonedx --output image.cdx.json "$IMAGE"
-- uses: ShieldaAI/security-watch@v1.2.1
+- uses: ShieldaAI/security-watch@v1.3.0
   with:
     sbom-file: image.cdx.json
     system-id: checkout-image
@@ -160,7 +160,7 @@ Any job with Node.js 24.10 or newer can run the command:
 security-watch-sbom:
   image: node:24-slim
   script:
-    - npx --yes @shieldaai/security-watch@1.2.1 sbom --system-id checkout-api --output security-watch.cdx.json --upload https://watch.example.com:8787
+    - npx --yes @shieldaai/security-watch@1.3.0 sbom --system-id checkout-api --output security-watch.cdx.json --upload https://watch.example.com:8787
   artifacts:
     paths: [security-watch.cdx.json]
 ```

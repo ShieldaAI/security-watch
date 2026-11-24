@@ -1,5 +1,6 @@
 import type { ModelProvider, OutputFormat } from './providers.js';
 import type { Ecosystem } from './ecosystems.js';
+import type { MitigationSource, MitigationStatus } from './mitigations.js';
 export type Severity = 'unknown' | 'low' | 'medium' | 'high' | 'critical';
 export type Category = 'library' | 'product' | 'news' | 'malware' | 'health';
 export type Applicability = 'affected' | 'not_affected' | 'unknown' | 'conflicting' | 'relevant';
@@ -161,6 +162,30 @@ export interface Evidence {
   withdrawn?: boolean;
   exploited?: boolean;
   malware?: boolean;
+  /**
+   * Links the advisory publishes, most specific first. Inputs for whoever writes a fix or a runtime
+   * shield. Never sent to models; not part of the evidence content hash.
+   */
+  references?: AdvisoryReference[];
+  /** Commits the advisory records as fixing the problem (OSV `GIT` ranges). Same rules as references. */
+  fix_commits?: FixCommit[];
+  /** Weakness identifiers such as CWE-502. Same rules as references. */
+  weaknesses?: string[];
+  /**
+   * Public exploit code the source reports, such as `exploit-db` or `github-poc` (cve.now). Published
+   * code, not exploitation in the wild. Same rules as references.
+   */
+  exploit_sources?: string[];
+}
+export type ReferenceType =
+  'fix' | 'evidence' | 'advisory' | 'report' | 'detection' | 'introduced' | 'package' | 'source' | 'web';
+export interface AdvisoryReference {
+  type: ReferenceType;
+  url: string;
+}
+export interface FixCommit {
+  repo: string;
+  commit: string;
 }
 export interface ModelSpec {
   provider: ModelProvider;
@@ -244,6 +269,11 @@ export interface Config {
     /** Required to listen beyond loopback without TLS, for example behind a TLS proxy. */
     allow_plain_http: boolean;
   };
+  /**
+   * Runtime mitigation status read from JSON Lines exports (Shirudo's `node_vulns`, or the generic
+   * format). Shown in alerts and `shield-candidates`; never changes applicability, priority or routing.
+   */
+  mitigations?: MitigationSource[];
   maintenance?: {
     interval_hours: number;
     retention?: {
@@ -275,6 +305,8 @@ export interface Assessment {
   location?: FindingLocation;
   /** EPSS for the finding's CVE when `sources.epss` is on. Shown only; changes nothing. */
   epss?: EpssScore;
+  /** Runtime mitigation status, one per configured source that covers the system. Shown only; changes nothing. */
+  mitigations?: MitigationStatus[];
   /** News-only or generic product context without deterministic package applicability. */
   news_candidate?: boolean;
   /**
