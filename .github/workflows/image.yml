@@ -1,4 +1,5 @@
 name: Container image
+run-name: Container image ${{ inputs.tag || github.ref_name }}
 # Publishes ghcr.io/shieldaai/security-watch for each release tag: tested, multi-architecture,
 # with an SBOM and build provenance, and signed with a keyless Sigstore signature.
 on:
@@ -78,14 +79,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push linux/amd64 and linux/arm64
+      # Pushed by digest only: no tag points at the image until it has run on both architectures and
+      # is attested and signed, so a failed check never leaves :latest on an unchecked image.
+      - name: Build and push linux/amd64 and linux/arm64 by digest
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.version.outputs.tags }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: VERSION=${{ steps.version.outputs.version }}
           sbom: true
           provenance: mode=max
@@ -113,6 +115,18 @@ jobs:
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Tag the checked, signed image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.version.outputs.tags }}
+        run: |
+          args=()
+          for tag in ${TAGS//,/ }; do args+=(--tag "$tag"); done
+          # One source is copied as it is, so every tag names the same digest that was signed.
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+          for tag in ${TAGS//,/ }; do
+            test "$(docker buildx imagetools inspect "$tag" --format '{{json .Manifest.Digest}}' | tr -d '"')" = "$DIGEST"
+          done
       - name: Summary
         env:
           DIGEST: ${{ steps.push.outputs.digest }}

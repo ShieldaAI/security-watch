@@ -64,10 +64,10 @@ before installing rather than trusting the name.
   package as "MAY be affected", not as affected.
 - "INCOMPLETE" at the top means a source failed or a dependency file could not be read, so
   findings may be missing. Say so and name the file; do not report the project as clean.
-- "Upgrades that fix several at once" gives one version per package that fixes all its findings.
-  Prefer it to upgrading one finding at a time.
-- A clean result means no known advisory matches these versions. It is not a statement that the
-  code is secure.
+- "Upgrades that fix several at once" gives one version per package that fixes all its findings
+  on that release line (5.2.17, or a later 5.2.x). Prefer it to upgrading one finding at a time.
+  Moving to a newer line (6.0) is not checked by that line: check the version you pick with
+  `check_package` first.
 
 ## Without the MCP tools
 

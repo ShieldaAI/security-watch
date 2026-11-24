@@ -282,6 +282,7 @@ test('the image workflow pins its actions, tests before it pushes, and signs', (
     'build-push-action',
     'attest-build-provenance',
     'cosign sign',
+    'imagetools create',
   ];
   const positions = order.map((needle) => workflow.indexOf(needle));
   assert.ok(

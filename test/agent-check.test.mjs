@@ -23,6 +23,7 @@ import {
   checkProject,
   dependencyFilesAt,
   failsAt,
+  isCommitId,
   upgradeSummary,
   fixesAbove,
   formatAdvisoryReport,
@@ -101,6 +102,22 @@ const RECORDS = {
           },
           { type: 'SEMVER', events: [{ introduced: '0' }, { fixed: '9.3.0' }] },
         ],
+      },
+    ],
+  },
+  // Date-style versions, as org.json and pdfminer.six use.
+  'GHSA-date-aaaa-bbbb': osvRecord('GHSA-date-aaaa-bbbb', 'PyPI', 'datever', '0', '20230227'),
+  // One package, one entry per release line, as urllib3 and log4j-core.
+  'GHSA-line-aaaa-bbbb': {
+    ...osvRecord('GHSA-line-aaaa-bbbb', 'PyPI', 'twoline', '0', '2.0.6', { severity: 'HIGH' }),
+    affected: [
+      {
+        package: { ecosystem: 'PyPI', name: 'twoline' },
+        ranges: [{ type: 'ECOSYSTEM', events: [{ introduced: '2.0.0' }, { fixed: '2.0.6' }] }],
+      },
+      {
+        package: { ecosystem: 'PyPI', name: 'twoline' },
+        ranges: [{ type: 'ECOSYSTEM', events: [{ introduced: '0' }, { fixed: '1.26.17' }] }],
       },
     ],
   },
@@ -899,7 +916,7 @@ test('R10: identifiers keep their case, GitHub malware is malware, one upgrade f
   const multi = report.findings.filter((finding) => finding.package.name === 'multi');
   assert.ok(multi.some((finding) => finding.aliases.includes('GHSA-xy12-ab34-cd56')));
   assert.deepEqual(upgradeSummary(report.findings), [
-    '- npm multi 1.0.0: upgrading to 1.3.0 or later fixes all 2.',
+    '- npm multi 1.0.0: upgrading to 1.3.0 (or a later 1.3.x release) fixes all 2. A newer release line is not checked here: check it before moving to one.',
   ]);
   assert.match(formatCheckReport(report), /Upgrades that fix several at once/);
   // Checking packages by name says nothing about lockfiles.
@@ -963,11 +980,11 @@ test('S1/S6: commit IDs are never fixed versions, and one upgrade is judged per 
   });
   // 5.1.0 fixes B but not A, whose fix on the 5.1 line is 5.1.14.
   assert.deepEqual(upgradeSummary([finding('A', '4.2.26; 5.1.14; 5.2.8'), finding('B', '5.1.0')]), [
-    '- npm lib 5.0.0: upgrading to 5.1.14 or later fixes all 2.',
+    '- npm lib 5.0.0: upgrading to 5.1.14 (or a later 5.1.x release) fixes all 2. A newer release line is not checked here: check it before moving to one.',
   ]);
   // A commit ID never becomes a version to upgrade to.
   assert.deepEqual(upgradeSummary([finding('A', '2444cddab2f8'), finding('B', '5.1.0')]), [
-    '- npm lib 5.0.0: upgrading to 5.1.0 or later fixes 1 of 2; 1 name no fixed version.',
+    '- npm lib 5.0.0: upgrading to 5.1.0 (or a later 5.1.x release) fixes 1 of 2; 1 name no fixed version. A newer release line is not checked here: check it before moving to one.',
   ]);
 });
 
@@ -1053,3 +1070,61 @@ test('S8: an advisory lookup stops when the call is cancelled', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Regressions from the final review of 1.4.0.
+
+test('B1: date-style versions are versions, not commit IDs', async () => {
+  assert.equal(isCommitId('20230227'), false);
+  assert.equal(isCommitId('2444cddab2f8'), true);
+  assert.equal(isCommitId('1234567890123456789012345678901234567890'), true);
+  assert.equal(fixesAbove('20231013; 20230227', '20220320'), '20230227; 20231013');
+  const report = await checkPackages([{ ecosystem: 'pypi', name: 'datever', version: '20220320' }], {
+    http: fakeHttp(),
+    now,
+  });
+  assert.equal(report.findings[0].fixed, '20230227');
+  assert.match(formatCheckReport(report), /Fix: upgrade to 20230227\./);
+});
+
+test('B2: the advisory header keeps every release line’s fix', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sw-twoline-'));
+  writeFileSync(join(root, 'requirements.txt'), 'twoline==1.26.0\n');
+  try {
+    const report = await checkAdvisory('GHSA-line-aaaa-bbbb', { project: root, http: fakeHttp(), now });
+    const header = formatAdvisoryReport(report)
+      .split('\n')
+      .find((text) => text.startsWith('Packages it concerns'));
+    assert.match(header, /fixed in 1\.26\.17; 2\.0\.6/);
+    assert.equal(report.severity, 'high');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'B5: a file skipped in the working tree is left out at the base too, and said',
+  { skip: noGit },
+  async () => {
+    const root = project({ lodash: '4.17.21' }, { 'sub/package-lock.json': lockfile({ lodash: '4.17.20' }) });
+    const outside = mkdtempSync(join(tmpdir(), 'sw-outside-'));
+    try {
+      git(root, 'init', '-q');
+      git(root, 'add', '-A');
+      git(root, 'commit', '-qm', 'base');
+      writeFileSync(join(outside, 'package-lock.json'), lockfile({ minimist: '1.2.5' }));
+      rmSync(join(root, 'sub'), { recursive: true });
+      symlinkSync(outside, join(root, 'sub'));
+      const change = await checkChange({ project: root, base: 'HEAD', http: fakeHttp(), now });
+      assert.deepEqual(change.packages.removed, [], 'sub/package-lock.json is not read as removed');
+      assert.equal(change.resolved.length, 0, 'its advisories are not read as fixed');
+      assert.equal(change.head.degraded, true);
+      assert.match(
+        formatChangeReport(change),
+        /sub\/package-lock\.json: reached through a link that leads outside/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  },
+);

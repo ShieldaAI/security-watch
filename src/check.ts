@@ -134,7 +134,9 @@ interface Target {
 }
 
 /** The reader's warnings that mean a file's packages are missing, rather than notes about them. */
-export const isUnreadableWarning = (warning: string): boolean => UNREADABLE.test(warning);
+export const isUnreadableWarning = (warning: string): boolean =>
+  UNREADABLE.test(warning) || UNREADABLE_LINK.test(warning);
+const UNREADABLE_LINK = /: reached through a link that leads outside the project; skipped\.$/;
 const UNREADABLE = /: (?:folder could not be read|could not be read \(.*\)|larger than 20 MiB); skipped\.$/;
 
 const EMPTY_PROJECT = /no supported dependency files|no dependency files|found no/i;
@@ -374,10 +376,20 @@ function uniqueIds(ids: readonly string[]): string[] {
   return [...seen.values()].sort((a, b) => idOrder(a) - idOrder(b) || a.localeCompare(b));
 }
 
+/**
+ * A git commit ID: 7 to 64 hex digits with at least one letter, or a full 40- or 64-digit ID.
+ * Date-style versions (org.json 20230227, pdfminer.six 20251107) are all digits and stay versions.
+ */
+export function isCommitId(text: string): boolean {
+  return (
+    /^[0-9a-f]{40}$|^[0-9a-f]{64}$/i.test(text) || (/^[0-9a-f]{7,64}$/i.test(text) && /[a-f]/i.test(text))
+  );
+}
+
 /** A version that compares, or undefined: commit IDs and other text never pass for a version. */
 export function comparable(version: string): string | undefined {
   const text = version.trim();
-  if (!/^v?\d/.test(text) || /^[0-9a-f]{7,64}$/i.test(text)) return undefined;
+  if (!/^v?\d/.test(text) || isCommitId(text)) return undefined;
   return valid(text) ?? coerce(text)?.version ?? undefined;
 }
 
@@ -392,7 +404,7 @@ export function fixesAbove(fix: string, installed: string | undefined): string |
   const versions: string[] = [];
   for (const raw of fix.split(/[;,]/)) {
     const version = raw.trim();
-    if (!version || /^[0-9a-f]{7,64}$/i.test(version) || seen.has(version)) continue;
+    if (!version || isCommitId(version) || seen.has(version)) continue;
     seen.add(version);
     versions.push(version);
   }
@@ -505,7 +517,8 @@ function git(root: string, args: string[], maxBuffer = 64 * 1024 * 1024): Buffer
 }
 
 function gitError(error: unknown): string {
-  if ((error as { code?: string }).code === 'ENOENT') return 'git is not installed here';
+  if ((error as { code?: string }).code === 'ENOENT')
+    return 'git is not installed here; the container image has none, so use the npm package for change checks';
   const stderr = (error as { stderr?: Buffer }).stderr?.toString().trim();
   return cleanText(stderr || (error instanceof Error ? error.message : 'git failed'), 300);
 }
@@ -571,10 +584,11 @@ function stage(
   gp: GitProject,
   files: Array<{ path: string; size: number; read: () => Buffer }>,
   what: string,
-): { folder: string; project: string; skipped: string[] } {
+): { folder: string; project: string; skipped: string[]; skippedPaths: string[] } {
   const folder = mkdtempSync(join(tmpdir(), 'security-watch-change-'));
   const project = join(folder, basename(gp.root));
   const skipped: string[] = [];
+  const skippedPaths: string[] = [];
   try {
     mkdirSync(project);
     let total = 0;
@@ -582,6 +596,7 @@ function stage(
       // The same limit and wording as reading the project directly, so the check counts as incomplete.
       if (file.size > MAX_GIT_BYTES) {
         skipped.push(`${file.path}: larger than 20 MiB; skipped.`);
+        skippedPaths.push(file.path);
         continue;
       }
       total += file.size;
@@ -591,13 +606,14 @@ function stage(
         content = file.read();
       } catch (error) {
         skipped.push(`${file.path}: could not be read (${gitError(error)}); skipped.`);
+        skippedPaths.push(file.path);
         continue;
       }
       const destination = join(project, ...file.path.split('/'));
       mkdirSync(dirname(destination), { recursive: true });
       writeFileSync(destination, content);
     }
-    return { folder, project, skipped };
+    return { folder, project, skipped, skippedPaths };
   } catch (error) {
     rmSync(folder, { recursive: true, force: true });
     throw error;
@@ -617,7 +633,7 @@ function relativeToProject(gp: GitProject, path: string): string | undefined {
 export function dependencyFilesAt(
   project: string,
   base: string,
-): { folder: string; project: string; commit: string; skipped: string[] } {
+): { folder: string; project: string; commit: string; skipped: string[]; skippedPaths: string[] } {
   const gp = gitProject(project);
   const commit = baseCommit(gp, base);
   const listed = git(gp.top, [
@@ -660,6 +676,7 @@ export function dependencyFilesInWorkingTree(project: string): {
   folder: string;
   project: string;
   skipped: string[];
+  skippedPaths: string[];
 } {
   const gp = gitProject(project);
   const listed = git(gp.top, [
@@ -675,6 +692,7 @@ export function dependencyFilesInWorkingTree(project: string): {
     .split('\0')
     .filter(Boolean);
   const files: Array<{ path: string; size: number; read: () => Buffer }> = [];
+  const outside: string[] = [];
   const seen = new Set<string>();
   for (const entry of listed) {
     const path = relativeToProject(gp, entry);
@@ -689,14 +707,22 @@ export function dependencyFilesInWorkingTree(project: string): {
     }
     if (!stat.isFile()) continue; // a link, or a submodule's folder
     // A folder on the way can be a link that leads out of the project, as the file itself cannot.
-    if (!isInside(realpathSync.native(absolute), gp.root)) continue;
+    if (!isInside(realpathSync.native(absolute), gp.root)) {
+      outside.push(path);
+      continue;
+    }
     files.push({ path, size: stat.size, read: () => readFileSync(absolute) });
     if (files.length > MAX_GIT_FILES)
       throw new Error(
         `More than ${MAX_GIT_FILES} dependency files in the working tree; check a smaller folder.`,
       );
   }
-  return stage(gp, files, 'the working tree');
+  const staged = stage(gp, files, 'the working tree');
+  for (const path of outside) {
+    staged.skipped.push(`${path}: reached through a link that leads outside the project; skipped.`);
+    staged.skippedPaths.push(path);
+  }
+  return staged;
 }
 
 function findingKey(finding: CheckFinding): string {
@@ -735,6 +761,10 @@ export async function checkChange(options: ProjectCheckOptions & { base: string 
   let after: ReturnType<typeof dependencyFilesInWorkingTree> | undefined;
   try {
     after = dependencyFilesInWorkingTree(project);
+    // A file left out on one side is left out on both, or its packages would read as removed (or
+    // added) and their advisories as fixed (or brought in).
+    for (const path of after.skippedPaths) rmSync(join(before.project, ...path.split('/')), { force: true });
+    for (const path of before.skippedPaths) rmSync(join(after.project, ...path.split('/')), { force: true });
     const baseTarget = stagedTarget(before, options, `${options.base} (${before.commit.slice(0, 12)})`);
     const headTarget = stagedTarget(after, options, realpathSync(project));
     const http = options.http ?? cachingHttp();
@@ -834,6 +864,21 @@ async function osvRecordById(
   }
 }
 
+function advisorySeverity(
+  records: readonly Evidence[],
+  findings: readonly CheckFinding[],
+): Severity | undefined {
+  const levels = [
+    ...records.map((item) => item.severity ?? 'unknown'),
+    ...findings.map((finding) => finding.severity),
+  ];
+  const top = levels.reduce<Severity>(
+    (best, value) => (SEVERITY_ORDER.indexOf(value) > SEVERITY_ORDER.indexOf(best) ? value : best),
+    'unknown',
+  );
+  return top === 'unknown' ? undefined : top;
+}
+
 /** CVE and GHSA identifiers in the case OSV uses; anything else as typed. */
 export function normalizeAdvisoryId(value: string): string {
   const id = value.trim();
@@ -885,13 +930,15 @@ export async function checkAdvisory(
   for (const item of records)
     for (const claim of item.packages ?? []) {
       const key = `${claim.ecosystem}\0${claim.name}\0${claim.range ?? ''}`;
-      if (!packages.has(key))
-        packages.set(key, {
-          ecosystem: claim.ecosystem,
-          name: claim.name,
-          ...(claim.range ? { range: claim.range } : {}),
-          ...(claim.fixed ? { fixed: claim.fixed } : {}),
-        });
+      const known = packages.get(key);
+      // One package often has an entry per release line (urllib3 1.26.17 and 2.0.6): keep every fix.
+      const fixed = fixesAbove([known?.fixed, claim.fixed].filter(Boolean).join('; '), undefined);
+      packages.set(key, {
+        ecosystem: claim.ecosystem,
+        name: claim.name,
+        ...(claim.range ? { range: claim.range } : {}),
+        ...(fixed ? { fixed } : {}),
+      });
     }
   const affectedPackages = new Set(
     findings.map((finding) => `${finding.package.ecosystem}:${finding.package.name}`),
@@ -917,11 +964,8 @@ export async function checkAdvisory(
       records.flatMap((item) => [item.id.replace(/^osv:/, ''), ...(item.aliases ?? [])]),
     ).filter((alias) => alias.toUpperCase() !== id.toUpperCase()),
     ...(main?.url ? { url: main.url } : {}),
-    ...(main?.severity && main.severity !== 'unknown'
-      ? { severity: main.severity }
-      : records.find((item) => item.severity && item.severity !== 'unknown')
-        ? { severity: records.find((item) => item.severity && item.severity !== 'unknown')!.severity! }
-        : {}),
+    // The highest severity any of its records gives, so the header never reads lower than a finding.
+    ...(advisorySeverity(records, findings) ? { severity: advisorySeverity(records, findings)! } : {}),
     packages: [...packages.values()].slice(0, 50),
     findings,
     present_not_affected: [...present].sort(),
@@ -1013,10 +1057,16 @@ export function upgradeSummary(findings: readonly CheckFinding[]): string[] {
     if (group.length < 2) continue;
     const installed = comparable(group[0]!.package.version!);
     if (!installed) continue;
+    // The version as the advisory writes it, for each form that compares (20260719, not 20260719.0.0).
+    const written = new Map<string, string>();
     const fixLists = group.map((finding) =>
       (finding.fixed ?? '')
         .split(/[;,]/)
-        .map((fix) => comparable(fix))
+        .map((fix) => {
+          const value = comparable(fix);
+          if (value && !written.has(value)) written.set(value, fix.trim());
+          return value;
+        })
         .filter((fix): fix is string => fix !== undefined),
     );
     const open = fixLists.filter((fixes) => !fixes.length).length;
@@ -1027,8 +1077,16 @@ export function upgradeSummary(findings: readonly CheckFinding[]): string[] {
       .sort((a, b) => (gt(a, b) ? 1 : -1));
     const target = candidates.find((candidate) => lists.every((fixes) => fixedBy(candidate, fixes)));
     if (!target) continue;
+    const shown = written.get(target) ?? target;
+    // Release lines exist for dotted versions (5.2.17 is on 5.2); a date version has none.
+    const lined = /^v?\d+\.\d+/.test(shown);
+    const count = open
+      ? `${lists.length} of ${group.length}; ${open} name no fixed version`
+      : `all ${group.length}`;
     out.push(
-      `- ${key}: upgrading to ${target} or later fixes ${open ? `${lists.length} of ${group.length}; ${open} name no fixed version` : `all ${group.length}`}.`,
+      lined
+        ? `- ${key}: upgrading to ${shown} (or a later ${line(target)}.x release) fixes ${count}. A newer release line is not checked here: check it before moving to one.`
+        : `- ${key}: upgrading to ${shown} or later fixes ${count}.`,
     );
   }
   return out;
