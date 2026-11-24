@@ -312,14 +312,13 @@ Run `security-watch providers` to list provider IDs, default endpoints, credenti
 
 ## Run with Docker
 
-Each release is published as `ghcr.io/shieldaai/security-watch` for linux/amd64 and linux/arm64, with an SBOM and build provenance attached and a keyless Sigstore signature. Check it before you run it:
+Each release is published as `ghcr.io/shieldaai/security-watch` for linux/amd64 and linux/arm64, with an SBOM and build provenance attached, and a GitHub build provenance attestation signed through Sigstore. Check it before you run it:
 
 ```sh
 gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.0 --repo ShieldaAI/security-watch
-cosign verify ghcr.io/shieldaai/security-watch:1.4.0 \
-  --certificate-identity-regexp '^https://github.com/ShieldaAI/security-watch/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+It confirms the image was built by this repository's release workflow from the tagged commit.
 
 Then:
 

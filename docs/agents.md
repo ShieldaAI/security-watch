@@ -99,7 +99,7 @@ dependency files, when a CVE is in the news) and how to fix findings without hid
 }
 ```
 
-Or the signed container image, with the project mounted read-only:
+Or the container image (with signed build provenance), with the project mounted read-only:
 
 ```json
 {

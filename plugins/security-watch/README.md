@@ -94,7 +94,7 @@ from the plugin directory in the app.
 Antigravity CLI: `agy plugin install` with the path to this folder in a clone of the repository.
 
 Any other MCP client: run `npx --yes @shieldaai/security-watch@1.4.0 mcp /path/to/project`, or
-the signed container image
+the container image (with signed build provenance)
 `docker run -i --rm -v "$PWD:/project:ro" ghcr.io/shieldaai/security-watch:1.4.0 mcp /project`
 (the image has no git, so `check_dependency_change` needs the npm form, and `write_sbom` needs a
 writable mount).
