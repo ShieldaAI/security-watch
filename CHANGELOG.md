@@ -16,10 +16,13 @@ Security Watch hands findings to whoever writes temporary mitigations (runtime s
 - **CycloneDX 1.2 to 1.7.** SBOMs from CycloneDX 1.2 up to 1.7 are read (1.4 to 1.6 before); a later 1.x is read by the 1.7 rules with a notice that does not degrade monitoring; 2.x and malformed versions are refused. A CycloneDX document without a `components` list is an empty system instead of an error. `security-watch sbom` still writes 1.6, which more tools read.
 - Guides: [temporary mitigations](docs/mitigations.md) and [Security Watch with Shirudo](docs/shirudo.md).
 
+### Verified
+
+- The VEX output was loaded into Trivy 0.71.2 (`trivy sbom --vex`): `not_affected` statements suppressed exactly their CVEs for npm (including a scoped package whose inventory purl was written with a literal `@`) and for a Maven package whose purl Security Watch built; `affected` and `under_investigation` statements left the findings in the report.
+
 ### Not verified
 
 - The Shirudo integration follows Shirudo's documentation of 24 November 2026 and is tested against files in that format, not against a running Shirudo deployment, which needs Shirudo's kernel patches and a TPM. Shirudo is pre-release.
-- The VEX output was checked against the OpenVEX 0.2.0 field rules, not by loading it into Trivy, Grype or Docker Scout.
 - Upgrading is tested with a database written by the released 1.2.1 build (`test/fixtures/watch-1.2.1.db`): no revision, fingerprint, delivery or analysis basis changes.
 - How often advisories carry fix links and exploit entries was measured on one advisory (Log4Shell), not on a corpus.
 
