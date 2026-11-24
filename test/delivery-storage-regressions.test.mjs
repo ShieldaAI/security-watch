@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -215,6 +216,36 @@ test('two processes opening an old database at once both finish on the current s
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+// What made the test above fail on a macOS runner: SQLite deletes -wal and -shm when the last
+// connection closes, and lstat in another process can still find the file, with no links left.
+test('a sidecar another process is deleting is not taken for a hard link', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'watch-sidecar-race-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, 'watch.db');
+  new Store(path).close();
+  const real = fs.lstatSync;
+  const sidecar =
+    (links) =>
+    (file, ...rest) => {
+      const stat = real(file, ...rest);
+      if (!String(file).endsWith('-wal') && !String(file).endsWith('-shm')) return stat;
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { nlink: links });
+    };
+  t.after(() => {
+    fs.lstatSync = real;
+    syncBuiltinESMExports();
+  });
+  writeFileSync(`${path}-wal`, '', { mode: 0o600 });
+  // Being deleted: no links left. The store opens.
+  fs.lstatSync = sidecar(0);
+  syncBuiltinESMExports();
+  new Store(path).close();
+  // A real second link is still refused.
+  fs.lstatSync = sidecar(2);
+  syncBuiltinESMExports();
+  assert.throws(() => new Store(path), /without symbolic or hard links/);
 });
 
 test('a manual backup that fails verification leaves nothing at the requested path', () => {
