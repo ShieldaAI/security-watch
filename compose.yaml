@@ -1,7 +1,7 @@
-# Uses the published, signed image. To build from source instead: docker build -t ghcr.io/shieldaai/security-watch:1.4.0 .
+# Uses the published, signed image. To build from source instead: docker build -t ghcr.io/shieldaai/security-watch:1.4.1 .
 services:
   data-init:
-    image: ghcr.io/shieldaai/security-watch:1.4.0
+    image: ghcr.io/shieldaai/security-watch:1.4.1
     user: '0:0'
     entrypoint: [chown]
     command:
@@ -17,7 +17,7 @@ services:
     volumes:
       - watch-data:/data
   security-watch:
-    image: ghcr.io/shieldaai/security-watch:1.4.0
+    image: ghcr.io/shieldaai/security-watch:1.4.1
     user: '${SECURITY_WATCH_UID:?Set SECURITY_WATCH_UID to your user ID}:${SECURITY_WATCH_GID:?Set SECURITY_WATCH_GID to your group ID}'
     depends_on:
       data-init:

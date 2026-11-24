@@ -2,6 +2,16 @@
 
 Versions follow [semantic versioning](https://semver.org/). What counts as a compatible change is defined in the [compatibility policy](docs/compatibility.md).
 
+## 1.4.1
+
+A package listed more than once in one system gives one finding and one alert, and upgrading sends nothing again. Existing configurations, inventories and databases work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.4.1`, the image is `ghcr.io/shieldaai/security-watch:1.4.1`.
+
+### Fixed
+
+- **One package listed twice in one system gave two findings and two alerts.** A package release is now one component of the system, however often it is listed: an SBOM that lists it once per path with a `bom-ref` of its own (Syft does this for a package found in two folders), or a system that combines `components:`, `libraries:`, `sbom:` and `lockfile:` naming the same release. Versions written two ways count as one release, as the SBOM importer already judged them (Python `2.0` and `2.0.0`, Go `v1.9.1` and `1.9.1`); different releases stay separate. One listing is kept: the one declared under `components:` (where remediation records and verification results are written), then an SBOM entry, a `libraries:` entry, a lockfile entry. Its note lists every place the package was found (at most 500 characters, with room kept for an operator's note), it takes the others' dependency edges and remediation records, and the package URL (from a listing that writes the version the same way), reference and verification results it lacks. `security-watch check` (with `--sbom`, a project, or `--package` named twice) reports such a package once. A scan folds an inventory it is given directly as well, such as a rehearsal snapshot.
+- **A finding keeps going when its listing changes.** A package release keeps the component ID it had at the previous scan when that ID is no longer used but the release is still there (the copy that was kept was removed and another stays, or the SBOM generator gave the package a new `bom-ref`), so the finding already reported goes on instead of a new alert. `vex` and `shield-candidates` use the same IDs.
+- **Upgrading sends nothing again.** At the first scan after the upgrade, the finding of a listing that was folded becomes inactive without an alert and says which component it is watched as; the finding kept gets no new revision. With an analysis model enabled, the findings of a system whose duplicates were folded are analysed again once, as after any change to that system's components, and a finding that waits for a review of an AI dismissal asks for that review again.
+
 ## 1.4.0
 
 Security Watch answers now what the monitor answers over time, for people and for AI coding agents, and is published as a container image with signed build provenance. Existing configurations, inventories and databases work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.4.0`.

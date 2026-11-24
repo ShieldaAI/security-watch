@@ -77,7 +77,7 @@ The parentheses keep your shell where it was:
 
 ```sh
 repo="$(git rev-parse --show-toplevel)"
-(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.0 check "$repo")
+(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.1 check "$repo")
 ```
 
 - `--base HEAD`: only what the working tree changed compared with that commit;
@@ -90,7 +90,7 @@ repo="$(git rev-parse --show-toplevel)"
   is incomplete (a source failed or a dependency file could not be read); never report that as clean.
 
 For an SBOM (the output path is absolute, because the command runs in a temporary folder):
-`(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.0 sbom --project "$repo" --output "$repo/sbom.cdx.json")`.
+`(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.1 sbom --project "$repo" --output "$repo/sbom.cdx.json")`.
 
 The first run downloads the package from npm, and every check calls api.osv.dev. If your sandbox
 blocks network access, ask the user to allow it or to run the command themselves.

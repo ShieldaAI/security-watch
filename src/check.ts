@@ -17,7 +17,7 @@ import { parseConfig } from './config.js';
 import { runScan } from './engine.js';
 import { normalizeEcosystem, normalizePackageName, exactLibraryVersion, ECOSYSTEMS } from './ecosystems.js';
 import { safeHttp } from './http.js';
-import { systemFromSbom } from './inventory.js';
+import { foldDuplicateComponents, systemFromSbom } from './inventory.js';
 import { generateSbom, isDependencyFilePath, type DependencyFile } from './manifests.js';
 import { importCycloneDxValue, importSbom, type SbomImport } from './sbom.js';
 import { osvEvidence } from './sources.js';
@@ -339,7 +339,11 @@ function toFinding(
   const files =
     (purl ? locations.get(purl) : undefined) ??
     (component.note?.startsWith('found in ')
-      ? component.note.slice('found in '.length).split(/,\s*/).filter(Boolean)
+      ? component.note
+          .slice('found in '.length)
+          .replace(/ and others$/, '')
+          .split(/,\s*/)
+          .filter(Boolean)
       : []);
   return {
     id,
@@ -458,19 +462,22 @@ export async function checkPackages(
 ): Promise<CheckReport> {
   if (!packages.length) throw new Error('Name at least one package.');
   if (packages.length > 100) throw new Error('Check at most 100 packages at a time.');
-  const components: Component[] = packages.map((item, index) => {
-    const ecosystem = normalizeEcosystem(item.ecosystem);
-    const name = normalizePackageName(ecosystem, item.name);
-    if (!name) throw new Error('Package name is empty.');
-    const version = item.version?.trim() ? exactLibraryVersion(item.version.trim(), ecosystem) : undefined;
-    return {
-      id: `package:${index}`,
-      ecosystem,
-      name,
-      ...(version ? { version } : {}),
-      provenance: { source: 'check', reference: 'request' },
-    } as Component;
-  });
+  // A package named twice is one check, not two identical findings.
+  const components: Component[] = foldDuplicateComponents(
+    packages.map((item, index) => {
+      const ecosystem = normalizeEcosystem(item.ecosystem);
+      const name = normalizePackageName(ecosystem, item.name);
+      if (!name) throw new Error('Package name is empty.');
+      const version = item.version?.trim() ? exactLibraryVersion(item.version.trim(), ecosystem) : undefined;
+      return {
+        id: `package:${index}`,
+        ecosystem,
+        name,
+        ...(version ? { version } : {}),
+        provenance: { source: 'check', reference: 'request' },
+      } as Component;
+    }),
+  );
   const target: Target = {
     kind: 'packages',
     label: packages.map((item) => `${item.name}${item.version ? `@${item.version}` : ''}`).join(', '),

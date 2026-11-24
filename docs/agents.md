@@ -24,12 +24,12 @@ paths and notes never leave the machine.
 ## On the command line
 
 ```sh
-npx --yes @shieldaai/security-watch@1.4.0 check                       # the current folder
-npx --yes @shieldaai/security-watch@1.4.0 check ./services/api --production
-npx --yes @shieldaai/security-watch@1.4.0 check --base origin/main... # only what this branch changed
-npx --yes @shieldaai/security-watch@1.4.0 check --package npm:lodash@4.17.21 --package pypi:requests@2.32.4
-npx --yes @shieldaai/security-watch@1.4.0 check --advisory CVE-2021-44906
-npx --yes @shieldaai/security-watch@1.4.0 check --sbom image.cdx.json   # Trivy, Syft, cdxgen, GitHub
+npx --yes @shieldaai/security-watch@1.4.1 check                       # the current folder
+npx --yes @shieldaai/security-watch@1.4.1 check ./services/api --production
+npx --yes @shieldaai/security-watch@1.4.1 check --base origin/main... # only what this branch changed
+npx --yes @shieldaai/security-watch@1.4.1 check --package npm:lodash@4.17.21 --package pypi:requests@2.32.4
+npx --yes @shieldaai/security-watch@1.4.1 check --advisory CVE-2021-44906
+npx --yes @shieldaai/security-watch@1.4.1 check --sbom image.cdx.json   # Trivy, Syft, cdxgen, GitHub
 ```
 
 - `--json` prints the whole report for scripts.
@@ -54,7 +54,7 @@ critical vulnerability, without blocking on ones that were already there.
 ## The MCP server
 
 ```sh
-npx --yes @shieldaai/security-watch@1.4.0 mcp /path/to/project
+npx --yes @shieldaai/security-watch@1.4.1 mcp /path/to/project
 ```
 
 It speaks MCP over stdio (protocol versions 2024-11-05 to 2025-11-25). The project is the
@@ -93,7 +93,7 @@ dependency files, when a CVE is in the news) and how to fix findings without hid
   "mcpServers": {
     "security-watch": {
       "command": "npx",
-      "args": ["--yes", "@shieldaai/security-watch@1.4.0", "mcp", "/path/to/project"]
+      "args": ["--yes", "@shieldaai/security-watch@1.4.1", "mcp", "/path/to/project"]
     }
   }
 }
@@ -112,7 +112,7 @@ Or the container image (with signed build provenance), with the project mounted 
         "--rm",
         "-v",
         "/path/to/project:/project:ro",
-        "ghcr.io/shieldaai/security-watch:1.4.0",
+        "ghcr.io/shieldaai/security-watch:1.4.1",
         "mcp",
         "/project"
       ]

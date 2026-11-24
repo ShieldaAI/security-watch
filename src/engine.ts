@@ -17,6 +17,7 @@ import { ModelAnalyzer, PROMPT_VERSION } from './models.js';
 import { Store } from './store.js';
 import { safeHttp } from './http.js';
 import { missingCredentials } from './config.js';
+import { foldedInto, foldInventory, keepComponentIds } from './inventory.js';
 import { canonicalHash, hash, severityRank, timestamp } from './util.js';
 import type {
   Assessment,
@@ -217,7 +218,7 @@ export async function runScan(options: {
   onUrgent?: () => Promise<void>;
   signal?: AbortSignal;
 }): Promise<ScanReport> {
-  const { config, inventory, store, signal } = options;
+  const { config, store, signal } = options;
   checkCancellation(signal);
   const now = options.now ?? Date.now();
   const transport = options.http ?? safeHttp;
@@ -226,10 +227,11 @@ export async function runScan(options: {
     return transport(url, { ...request, ...(signal ? { signal } : {}) });
   };
   const priorInventory = store.getMeta('inventory:baseline');
-  const drift = compareInventories(
-    priorInventory ? (JSON.parse(priorInventory) as Inventory) : undefined,
-    inventory,
-  );
+  const previousInventory = priorInventory ? (JSON.parse(priorInventory) as Inventory) : undefined;
+  // A package release keeps the component identifier it had at the last scan, and so its findings.
+  // A snapshot or a caller's own inventory is folded too; one from loadInventory already is.
+  const inventory = keepComponentIds(foldInventory(options.inventory), previousInventory);
+  const drift = compareInventories(previousInventory, inventory);
   const previousById = new Map(store.findings().map((a) => [a.id, a]));
   // Events of findings still reported keep their identifier when a record gains an alias.
   const knownEvents = new Set(
@@ -304,9 +306,15 @@ export async function runScan(options: {
         : undefined,
     );
   };
+  // A package listed twice in one system was two components before 1.4.1 and is one now. The
+  // finding of the listing that was folded is retired like any other, without an alert, and says
+  // where the package is still watched.
   const retire = (previous: Assessment) => {
     // A retired finding is not looked up any more; an ageing score or shield status would only mislead.
     const { epss: _epss, mitigations: _mitigations, ...assessment } = previous;
+    const kept = previous.component_id
+      ? foldedInto(previousInventory, inventory, previous.system_id, previous.component_id)
+      : undefined;
     store.saveAssessment(
       {
         ...assessment,
@@ -314,7 +322,9 @@ export async function runScan(options: {
         updated_at: timestamp(now),
         reasons: [
           ...assessment.reasons,
-          'No longer in the current assessment. This does not establish remediation.',
+          kept
+            ? `The same package and version is listed more than once in this system; it is watched as ${kept}, which keeps its own finding. This does not establish remediation.`
+            : 'No longer in the current assessment. This does not establish remediation.',
         ],
       },
       {

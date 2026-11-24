@@ -27,7 +27,7 @@ programs (Codex, the ChatGPT desktop app).
 ## What it runs, reads and sends
 
 - **Runs:** the skill tells the agent to run
-  `npx --yes @shieldaai/security-watch@1.4.0 check <project>` from a temporary folder outside the
+  `npx --yes @shieldaai/security-watch@1.4.1 check <project>` from a temporary folder outside the
   project, so the project's `.npmrc` and `node_modules` cannot change which checker runs. Your
   host asks before running it, under the permissions you set. The package's
   `npm-shrinkwrap.json` fixes every dependency to the version that release was tested with.
@@ -93,9 +93,9 @@ from the plugin directory in the app.
 
 Antigravity CLI: `agy plugin install` with the path to this folder in a clone of the repository.
 
-Any other MCP client: run `npx --yes @shieldaai/security-watch@1.4.0 mcp /path/to/project`, or
+Any other MCP client: run `npx --yes @shieldaai/security-watch@1.4.1 mcp /path/to/project`, or
 the container image (with signed build provenance)
-`docker run -i --rm -v "$PWD:/project:ro" ghcr.io/shieldaai/security-watch:1.4.0 mcp /project`
+`docker run -i --rm -v "$PWD:/project:ro" ghcr.io/shieldaai/security-watch:1.4.1 mcp /project`
 (the image has no git, so `check_dependency_change` needs the npm form, and `write_sbom` needs a
 writable mount).
 
@@ -110,7 +110,7 @@ appears. It reads the monitor's database and changes nothing.
 ## What it runs, reads and sends
 
 - **Runs:** when a session starts, `scripts/start-mcp-server.mjs` runs
-  `npx --yes --package=@shieldaai/security-watch@1.4.0 -- security-watch-mcp <project>` with npm
+  `npx --yes --package=@shieldaai/security-watch@1.4.1 -- security-watch-mcp <project>` with npm
   from the same Node.js installation. The version is pinned and changes only with a new plugin
   version, and the package's `npm-shrinkwrap.json` fixes every dependency, sub-dependencies
   included, to the version that release was tested with. npx starts in the plugin's data folder

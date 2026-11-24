@@ -21,7 +21,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '1.4.0';
+export const VERSION = '1.4.1';
 export const PACKAGE = '@shieldaai/security-watch';
 export const MIN_NODE = [24, 10];
 
