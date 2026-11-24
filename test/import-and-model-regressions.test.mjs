@@ -49,7 +49,8 @@ test('a legacy npm name or one unreadable lockfile entry does not reject the who
     ),
   );
   const names = inventory.systems[0].components.map((component) => component.name);
-  assert.deepEqual(names.sort(), ['JSONStream', 'JSONStream', 'laravel/framework', 'lodash'].sort());
+  // The library and the lockfile entry name the same version: one component (1.4.1).
+  assert.deepEqual(names.sort(), ['JSONStream', 'laravel/framework', 'lodash'].sort());
   assert.deepEqual(inventory.import_warnings, [
     'api: Lockfile entry node_modules/Bad Name: unsupported package name or version; not imported.',
   ]);

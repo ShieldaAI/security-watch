@@ -9,6 +9,7 @@ import {
   mergeNotes,
   normalizeEcosystem,
   normalizePackageName,
+  packageKey,
   parseLibrary,
 } from './ecosystems.js';
 import { hash, LINE_BREAKING, singleLine } from './util.js';
@@ -257,6 +258,112 @@ function importLockfile(path: string): { components: Component[]; warnings: stri
   return { components, warnings };
 }
 
+/** Where a component was found, as its note says, or the lockfile path its identifier carries. */
+function placeOf(component: Component): string | undefined {
+  if (component.note) return component.note;
+  return component.id.startsWith('lock:') ? `found in ${component.id.slice('lock:'.length)}` : undefined;
+}
+
+/** Joins notes, keeping every "found in" location in one list the way the SBOM importer writes it. */
+function joinPlaces(places: string[]): string | undefined {
+  const found: string[] = [];
+  let more = false;
+  let note: string | undefined;
+  let foundAt = -1;
+  const others: string[] = [];
+  for (const place of places) {
+    if (place.startsWith('found in ')) {
+      if (foundAt < 0) foundAt = others.length;
+      let list = place.slice('found in '.length);
+      if (list.endsWith(' and others')) {
+        more = true;
+        list = list.slice(0, -' and others'.length);
+      }
+      for (const location of list.split(', '))
+        if (location && !found.includes(location)) found.push(location);
+    } else others.push(place);
+  }
+  if (found.length) {
+    let list = `found in ${found[0]}`;
+    for (const location of found.slice(1)) {
+      if (list.length + location.length + 2 > 480) {
+        more = true;
+        break;
+      }
+      list += `, ${location}`;
+    }
+    if (more) list += ' and others';
+    others.splice(foundAt, 0, list);
+  }
+  for (const place of others) note = mergeNotes(note, place);
+  return note;
+}
+
+/**
+ * One package at one exact version is one component of a system, however many times it is listed:
+ * Syft lists a package once for each path it was found at, and a system can name a library that its
+ * SBOM or lockfile lists again. Each listing would be its own finding and its own alert.
+ *
+ * The listing with the smallest identifier is kept, so the choice does not depend on the order a
+ * generator writes its document in, and its identifier, which a finding's identifier is made from,
+ * is one the system already had. It takes over every place the others were found at and their
+ * dependency edges. Different versions of one package stay separate components.
+ */
+export function foldDuplicateComponents(components: Component[]): Component[] {
+  const groups = new Map<string, Component[]>();
+  for (const component of components) {
+    const key = packageKey(component);
+    if (!key) continue;
+    const identity = JSON.stringify([key, component.version ?? null]);
+    const group = groups.get(identity);
+    if (group) group.push(component);
+    else groups.set(identity, [component]);
+  }
+  const keptFor = new Map<Component, Component>();
+  const renamed = new Map<string, string>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const ordered = [...group].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const first = ordered[0]!;
+    const note = joinPlaces(ordered.map(placeOf).filter((place) => place !== undefined));
+    const dependencies = new Map<string, NonNullable<Component['dependencies']>[number]>();
+    for (const member of ordered)
+      for (const link of member.dependencies ?? [])
+        if (!dependencies.has(link.ref) && dependencies.size < 1000) dependencies.set(link.ref, link);
+    const kept: Component = {
+      ...first,
+      ...(note ? { note } : {}),
+      ...(dependencies.size ? { dependencies: [...dependencies.values()] } : {}),
+    };
+    for (const member of group) {
+      keptFor.set(member, kept);
+      if (member !== first) renamed.set(member.id, first.id);
+    }
+  }
+  if (!keptFor.size) return components;
+  const result: Component[] = [];
+  const placed = new Set<Component>();
+  for (const component of components) {
+    const kept = keptFor.get(component) ?? component;
+    if (placed.has(kept)) continue;
+    placed.add(kept);
+    result.push(kept);
+  }
+  // Edges that led to a folded listing now lead to the one kept.
+  return result.map((component) =>
+    component.dependencies?.some((link) => link.component_id && renamed.has(link.component_id))
+      ? {
+          ...component,
+          dependencies: component.dependencies.map((link) =>
+            link.component_id && renamed.has(link.component_id)
+              ? { ...link, component_id: renamed.get(link.component_id)! }
+              : link,
+          ),
+        }
+      : component,
+  );
+}
+
 const SBOM_FILES = 1000;
 const UNMATCHED_KIND =
   /unsupported package ecosystem (deb|rpm|apk|alpm|opkg|qpkg|bitnami|oci|docker|githubactions|github); not imported/i;
@@ -311,7 +418,7 @@ export function systemFromSbom(
     );
   }
   const { lockfile: _lockfile, libraries: _libraries, sbom: _sbom, ...system } = parsed.data;
-  system.components = imported.components;
+  system.components = foldDuplicateComponents(imported.components);
   if (imported.dependencies.length) system.sbom_dependencies = dependencyGraph.parse(imported.dependencies);
   // A container SBOM always lists the image's operating-system packages, and GitHub's export lists
   // the workflow's actions. Security Watch does not match those (it has no distribution backport
@@ -456,6 +563,8 @@ export function loadInventory(path: string): Inventory {
         throw new Error(`Duplicate component ID in ${system.id}: ${component.id}`);
       componentIds.add(component.id);
     }
+    // After the identity check: a repeated identifier is still a mistake in the inventory.
+    system.components = foldDuplicateComponents(system.components);
     const productNames = new Set<string>();
     for (const product of system.products) {
       const name = product.name.toLowerCase();

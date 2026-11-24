@@ -21,11 +21,15 @@ import { syncShirudoSboms } from '../dist/shirudo-sboms.js';
 import { currentStatus } from '../dist/mitigations.js';
 import { safeHttpsUrl } from '../dist/shield-inputs.js';
 import { shieldCandidates } from '../dist/shield-candidates.js';
-import { notificationText } from '../dist/delivery.js';
+import { deliverPending, notificationText } from '../dist/delivery.js';
 import { parseConfig } from '../dist/config.js';
 import { Store } from '../dist/store.js';
 import { runScan } from '../dist/engine.js';
 import { loadInventory } from '../dist/inventory.js';
+import * as duplicates from './fixtures/duplicates-1.4.0.mjs';
+import { hash } from '../dist/util.js';
+
+const hashOf = (ref) => hash(ref).slice(0, 32);
 
 const now = Date.parse('2026-11-24T12:00:00Z');
 const iso = (time = now) => new Date(time).toISOString();
@@ -600,6 +604,92 @@ test('UPG-01: upgrading a real 1.2.1 database changes no revision, fingerprint, 
     assert.deepEqual(snapshot(), before);
   }
   assert.ok(existsSync(db));
+});
+
+// UPG-02: a database written by the released 1.4.0 build, which made one finding and one alert for
+// each listing of a package (see test/fixtures/duplicates-1.4.0.mjs).
+
+test('UPG-02: folding a package listed three times re-sends nothing and keeps the finding already sent', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'sw-upgrade-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const db = join(dir, 'watch.db');
+  copyFileSync(fileURLToPath(new URL('./fixtures/watch-1.4.0-duplicates.db', import.meta.url)), db);
+  const { chmodSync } = await import('node:fs');
+  chmodSync(db, 0o600);
+  const read = () => {
+    const d = new DatabaseSync(db, { readOnly: true });
+    const q = (sql) => d.prepare(sql).all();
+    const out = {
+      findings: Object.fromEntries(
+        q('select id,payload,fingerprint,revision from findings order by 1').map((row) => [
+          row.id,
+          { ...row, payload: JSON.parse(row.payload) },
+        ]),
+      ),
+      finding_revisions: q('select finding_id,revision from finding_revisions order by 1,2'),
+      notifications: q('select finding_id,revision,channel,status from notifications order by 1,2,3'),
+    };
+    d.close();
+    return out;
+  };
+  const before = read();
+  const alpha = Object.values(before.findings).filter(
+    (finding) => finding.payload.component_id && finding.payload.component_id !== 'beta',
+  );
+  // 1.4.0: the declared alpha, two SBOM listings of alpha 1.0.0 and alpha 1.5.0, each alerted.
+  assert.equal(alpha.length, 4);
+  assert.ok(before.notifications.every((row) => row.status === 'accepted'));
+  assert.equal(before.notifications.length, 5);
+
+  const config = parseConfig(duplicates.configInput);
+  const sent = [];
+  const http = duplicates.http(sent);
+  let inventory;
+  for (const time of [duplicates.t0 + 14_400_000, duplicates.t0 + 18_000_000]) {
+    inventory = loadInventory(duplicates.writeInventory(dir, time));
+    const store = new Store(db);
+    await runScan({ config, inventory, store, http, now: time });
+    await deliverPending(store, config, http, { now: time, credentials: duplicates.credentials });
+    store.close();
+  }
+  assert.deepEqual(sent, [], 'no message is sent');
+  const after = read();
+  assert.deepEqual(after.notifications, before.notifications, 'no alert is queued or re-sent');
+
+  const web = inventory.systems.find((system) => system.id === 'web');
+  const kept = new Set(web.components.map((component) => component.id));
+  assert.deepEqual([...kept].sort(), ['alpha', 'beta', `sbom:${hashOf('alpha-legacy')}`].sort());
+  const folded = Object.keys(before.findings).filter(
+    (id) => before.findings[id].payload.component_id && !kept.has(before.findings[id].payload.component_id),
+  );
+  assert.equal(folded.length, 2);
+  for (const [id, finding] of Object.entries(after.findings)) {
+    const earlier = before.findings[id];
+    assert.ok(earlier, 'no new finding');
+    if (folded.includes(id)) {
+      assert.equal(finding.payload.active, false);
+      assert.equal(finding.revision, earlier.revision + 1);
+      assert.match(
+        finding.payload.reasons.at(-1),
+        /listed more than once in this system; it is watched as alpha/,
+      );
+    } else {
+      // The finding already sent, the other version and beta keep their identity and revision.
+      assert.notEqual(finding.payload.active, false);
+      assert.equal(finding.revision, earlier.revision, id);
+      assert.equal(finding.fingerprint, earlier.fingerprint, id);
+    }
+  }
+  const revisions = (rows, id) => rows.filter((row) => row.finding_id === id).length;
+  for (const id of Object.keys(after.findings))
+    assert.equal(
+      revisions(after.finding_revisions, id),
+      revisions(before.finding_revisions, id) + (folded.includes(id) ? 1 : 0),
+    );
+  // The finding kept says every place the package was found at.
+  const location = Object.values(after.findings).find((finding) => finding.payload.component_id === 'alpha')
+    .payload.location;
+  assert.equal(location.component_note, 'found in app/node_modules/alpha, tools/node_modules/alpha');
 });
 
 // Second review: N1, N3, N4 and the mass-removal guard.
