@@ -690,6 +690,33 @@ test('UPG-02: folding a package listed three times re-sends nothing and keeps th
   const location = Object.values(after.findings).find((finding) => finding.payload.component_id === 'alpha')
     .payload.location;
   assert.equal(location.component_note, 'found in app/node_modules/alpha, tools/node_modules/alpha');
+
+  // Later the operator removes the declared alpha: the SBOM still lists it, and its finding goes on.
+  const time = duplicates.t0 + 21_600_000;
+  const path = duplicates.writeInventory(dir, time);
+  writeFileSync(
+    path,
+    readFileSync(path, 'utf8').replace(
+      '      - { id: alpha, ecosystem: npm, name: alpha, version: 1.0.0 }\n',
+      '',
+    ),
+  );
+  const store = new Store(db);
+  await runScan({ config, inventory: loadInventory(path), store, http, now: time });
+  await deliverPending(store, config, http, { now: time, credentials: duplicates.credentials });
+  store.close();
+  assert.deepEqual(sent, []);
+  const last = read();
+  assert.deepEqual(last.notifications, before.notifications);
+  for (const [id, finding] of Object.entries(after.findings)) {
+    assert.equal(last.findings[id].revision, finding.revision, id);
+    assert.equal(last.findings[id].payload.active, finding.payload.active, id);
+  }
+  assert.equal(
+    Object.values(last.findings).find((finding) => finding.payload.component_id === 'alpha').payload.location
+      .component_note,
+    'found in app/node_modules/alpha, tools/node_modules/alpha',
+  );
 });
 
 // Second review: N1, N3, N4 and the mass-removal guard.

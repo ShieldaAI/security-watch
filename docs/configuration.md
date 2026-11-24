@@ -649,11 +649,17 @@ CycloneDX `evidence.occurrences` locations become its note (`found in package-lo
 20 MiB, 20,000 components and 32 nesting levels. Supported package URLs determine package
 identity and exact version; conflicting versions, duplicate references and invalid SHA-256
 hashes fail import. The same package listed twice without a reference of its own (nested under
-two parents) is imported once. One package at one exact version is one component of a system however
-often it is listed: an SBOM that lists it once per path (Syft does), or a system whose `libraries`,
-`sbom` and `lockfile` each name it, gives one component, one finding and one alert. The listing with
-the smallest component ID is kept; its note lists every place the package was found, and the others'
-dependency edges move to it. Different versions stay separate components. SHA-256 component hashes and the input-file digest are retained.
+two parents) is imported once. One package release is one component of a system however often it is
+listed: an SBOM that lists it once per path (Syft does), or a system whose `components`, `libraries`,
+`sbom` and `lockfile` each name it, gives one component, one finding and one alert. Versions written
+two ways are one release (Python `2.0` and `2.0.0`, Go `v1.9.1` and `1.9.1`); different releases stay
+separate components. The listing kept is the one under `components`, then an SBOM entry, a `libraries`
+entry, a lockfile entry (the smallest component ID among equals). Its note lists every place the
+package was found, within 500 characters; it takes the others' dependency edges and remediation
+records, and the package URL, reference and verification results it lacks (not their digest or
+deployment observation, which would change a finding already reported). When the kept listing later
+disappears and another copy stays, or a generator renames the reference, the component keeps the ID
+it had at the previous scan, so its finding goes on without a new alert. SHA-256 component hashes and the input-file digest are retained.
 Original package URLs and component references are preserved. Dependency graphs are bounded
 to 20,000 source entries, 1,000 targets per entry and 100,000 total edges. The import report's
 `dependencies` and inventory system's `sbom_dependencies` retain `{ref, depends_on}` entries.

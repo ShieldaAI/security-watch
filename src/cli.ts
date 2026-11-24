@@ -17,7 +17,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { parse as parseYaml, stringify } from 'yaml';
 import { z } from 'zod';
 import { loadConfig, parseConfig, missingCredentials } from './config.js';
-import { loadInventory } from './inventory.js';
+import { keepComponentIds, loadInventory } from './inventory.js';
 import {
   checkAdvisory,
   checkChange,
@@ -45,6 +45,12 @@ import { runScan, readFixture, healthFinding } from './engine.js';
 import { deliverPending, slackProblem, smtpProblem } from './delivery.js';
 import { safeHttp, validateDestination } from './http.js';
 
+/** The inventory as it is now, with the component identifiers the last scan gave its findings. */
+function currentInventory(path: string, store: Store): Inventory {
+  const baseline = store.getMeta('inventory:baseline');
+  return keepComponentIds(loadInventory(path), baseline ? (JSON.parse(baseline) as Inventory) : undefined);
+}
+
 /** Whether the heartbeat would refuse this address. */
 function heartbeatProblem(address: string, allowPrivate: boolean | undefined): boolean {
   try {
@@ -57,7 +63,7 @@ function heartbeatProblem(address: string, allowPrivate: boolean | undefined): b
 import { acquireLock, unlockStoppedWorker } from './lock.js';
 import { decide } from './assessment.js';
 import { catchingUpFrom, checkHealth } from './health.js';
-import type { Assessment, Config, Severity } from './types.js';
+import type { Assessment, Config, Inventory, Severity } from './types.js';
 import { PROVIDERS, providerDefinition } from './providers.js';
 import { loadEnvFile, starterSystems, SYSTEM_TEMPLATES } from './setup.js';
 import { ECOSYSTEMS, parseLibraryList } from './ecosystems.js';
@@ -1364,8 +1370,9 @@ async function main(): Promise<void> {
         /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/.test(author)
       )
         throw new Error('--author must be one line of at most 200 characters');
-      // The packages and their versions come from the inventory as it is now.
-      const inventory = loadInventory(config.inventory);
+      // The packages and their versions come from the inventory as it is now, with the component
+      // identifiers the last scan gave the findings.
+      const inventory = currentInventory(config.inventory, store);
       if (values.system !== undefined && !inventory.systems.some((system) => system.id === values.system))
         throw new Error(`No system ${values.system} in the inventory`);
       const ages = maxAges(config.mitigations);
@@ -1417,7 +1424,7 @@ async function main(): Promise<void> {
       // The inventory as it is now gives package versions; a stored location is the fallback.
       let inventory;
       try {
-        inventory = loadInventory(config.inventory);
+        inventory = currentInventory(config.inventory, store);
       } catch {
         inventory = undefined;
       }

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import { explain as explainPython, valid as validPython } from '@renovatebot/pep440';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
 import type { Component, Inventory } from './types.js';
@@ -264,77 +265,205 @@ function placeOf(component: Component): string | undefined {
   return component.id.startsWith('lock:') ? `found in ${component.id.slice('lock:'.length)}` : undefined;
 }
 
-/** Joins notes, keeping every "found in" location in one list the way the SBOM importer writes it. */
-function joinPlaces(places: string[]): string | undefined {
-  const found: string[] = [];
+const NOTE_LIMIT = 500;
+const AND_OTHERS = ' and others';
+
+/**
+ * Joins the notes of several listings into one note of at most 500 characters. Every "found in"
+ * location goes into one list, written the way the SBOM importer writes it (and `check` reads it
+ * back); other notes are kept as written, joined with " | ". Room is always left for the list, so
+ * an operator's note cannot push out every place the package was found, nor the other way round.
+ */
+function joinPlaces(places: readonly string[]): string | undefined {
+  const found = new Set<string>();
+  let foundLength = 0;
   let more = false;
-  let note: string | undefined;
+  // The number of other notes that came before the first "found in" list.
   let foundAt = -1;
   const others: string[] = [];
-  for (const place of places) {
-    if (place.startsWith('found in ')) {
-      if (foundAt < 0) foundAt = others.length;
-      let list = place.slice('found in '.length);
-      if (list.endsWith(' and others')) {
-        more = true;
-        list = list.slice(0, -' and others'.length);
+  for (const place of places)
+    for (const part of place.split(' | ')) {
+      if (!part.startsWith('found in ')) {
+        if (part && !others.includes(part)) others.push(part);
+        continue;
       }
-      for (const location of list.split(', '))
-        if (location && !found.includes(location)) found.push(location);
-    } else others.push(place);
+      if (foundAt < 0) foundAt = others.length;
+      let list = part.slice('found in '.length);
+      if (list.endsWith(AND_OTHERS)) {
+        more = true;
+        list = list.slice(0, -AND_OTHERS.length);
+      }
+      for (const location of list.split(', ')) {
+        if (!location || found.has(location)) continue;
+        // Enough to fill any note: the rest is said as "and others", without being collected.
+        if (foundLength > NOTE_LIMIT) {
+          more = true;
+          break;
+        }
+        found.add(location);
+        foundLength += location.length + 2;
+      }
+    }
+  const reserve = found.size
+    ? Math.min('found in '.length + foundLength + (more ? AND_OTHERS.length : 0), 160)
+    : 0;
+  const kept: string[] = [];
+  let used = 0;
+  let before = 0;
+  for (let [index, other] of others.entries()) {
+    const separator = kept.length || reserve ? 3 : 0;
+    // A long first note is shortened rather than left out.
+    if (!kept.length && other.length + separator + reserve > NOTE_LIMIT)
+      other = `${other.slice(0, NOTE_LIMIT - separator - reserve - 1)}…`;
+    const cost = other.length + separator;
+    if (used + cost + reserve > NOTE_LIMIT) continue;
+    kept.push(other);
+    used += cost;
+    if (index < foundAt) before++;
   }
-  if (found.length) {
-    let list = `found in ${found[0]}`;
-    for (const location of found.slice(1)) {
-      if (list.length + location.length + 2 > 480) {
+  if (!found.size) return kept.length ? kept.join(' | ') : undefined;
+  const budget = NOTE_LIMIT - used;
+  const locations = [...found];
+  let list = `found in ${locations[0]}`;
+  if (list.length > budget) {
+    list = `${list.slice(0, budget - 1)}…`;
+    more = false;
+  } else
+    for (const [index, location] of locations.slice(1).entries()) {
+      const last = index === locations.length - 2 && !more;
+      if (list.length + 2 + location.length + (last ? 0 : AND_OTHERS.length) > budget) {
         more = true;
         break;
       }
       list += `, ${location}`;
     }
-    if (more) list += ' and others';
-    others.splice(foundAt, 0, list);
-  }
-  for (const place of others) note = mergeNotes(note, place);
-  return note;
+  if (more && list.length + AND_OTHERS.length <= budget) list += AND_OTHERS;
+  kept.splice(before, 0, list);
+  return kept.join(' | ');
 }
 
 /**
- * One package at one exact version is one component of a system, however many times it is listed:
- * Syft lists a package once for each path it was found at, and a system can name a library that its
- * SBOM or lockfile lists again. Each listing would be its own finding and its own alert.
- *
- * The listing with the smallest identifier is kept, so the choice does not depend on the order a
- * generator writes its document in, and its identifier, which a finding's identifier is made from,
- * is one the system already had. It takes over every place the others were found at and their
- * dependency edges. Different versions of one package stay separate components.
+ * One key for every spelling of one release of one package, as the SBOM importer judges versions:
+ * Go tools write v1.8.0 or 1.8.0, and in Python 1.0, 1.0.0 and 1.0.post0 differ only in spelling
+ * where the release is the same. A map of keys keeps grouping linear in the number of listings.
  */
-export function foldDuplicateComponents(components: Component[]): Component[] {
+function releaseKey(component: Component): string | undefined {
+  const key = packageKey(component);
+  if (!key) return undefined;
+  const version = component.version;
+  let release: string | null = version ?? null;
+  if (version !== undefined && component.ecosystem === 'Go') release = version.replace(/^v/, '');
+  else if (version !== undefined && component.ecosystem === 'PyPI' && validPython(version)) {
+    const parts = explainPython(version)!;
+    const numbers = [...parts.release];
+    while (numbers.length > 1 && numbers.at(-1) === 0) numbers.pop();
+    release = JSON.stringify([parts.epoch, numbers, parts.pre, parts.post, parts.dev, parts.local]);
+  }
+  return JSON.stringify([key, release]);
+}
+
+/**
+ * Which listing of a package is kept: one the operator declared under `components:` (it is where
+ * remediation records, verification results and observations are written), then an SBOM entry (it
+ * carries the package URL and digest), a `libraries:` entry, a lockfile entry; the smallest
+ * identifier among equals. None of this depends on the order a generator writes its document in.
+ */
+function listingRank(component: Component): number {
+  const source = /^(sbom|library|lock|package):/.exec(component.id)?.[1];
+  return source === undefined ? 0 : ['sbom', 'library', 'lock', 'package'].indexOf(source) + 1;
+}
+const byListing = (a: Component, b: Component): number =>
+  listingRank(a) - listingRank(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Evidence the kept listing takes from the others when it has none of its own. A digest and a
+ * deployment observation are left out on purpose: they decide a finding's remediation status, so
+ * taking them would make the finding already reported a new revision and send it again. Provenance
+ * says where the kept listing itself came from, so it is not taken either.
+ */
+const FILLED = [
+  'purl',
+  'sbom_ref',
+  'artifact_kind',
+  'origin',
+  'source_url',
+  'source_revision',
+  'signature_verification',
+  'attestation_verification',
+] as const;
+
+/** The components of one system that are one package at one release, in list order. */
+function sameReleaseGroups(components: readonly Component[]): Component[][] {
   const groups = new Map<string, Component[]>();
   for (const component of components) {
-    const key = packageKey(component);
+    const key = releaseKey(component);
     if (!key) continue;
-    const identity = JSON.stringify([key, component.version ?? null]);
-    const group = groups.get(identity);
+    const group = groups.get(key);
     if (group) group.push(component);
-    else groups.set(identity, [component]);
+    else groups.set(key, [component]);
   }
+  return [...groups.values()];
+}
+
+/** Points dependency links at new component identifiers. */
+function renameLinks(components: Component[], renamed: ReadonlyMap<string, string>): Component[] {
+  if (!renamed.size) return components;
+  return components.map((component) =>
+    component.dependencies?.some((link) => link.component_id && renamed.has(link.component_id))
+      ? {
+          ...component,
+          dependencies: component.dependencies.map((link) =>
+            link.component_id && renamed.has(link.component_id)
+              ? { ...link, component_id: renamed.get(link.component_id)! }
+              : link,
+          ),
+        }
+      : component,
+  );
+}
+
+/**
+ * One package at one release is one component of a system, however many times it is listed: Syft
+ * lists a package once for each path it was found at, and a system can name a library that its
+ * SBOM or lockfile lists again. Each listing would otherwise be its own finding and its own alert.
+ *
+ * One listing is kept (see `listingRank`), so a finding's identifier, which is made from the
+ * component's, is one the system already had. It takes over every place the others were found at,
+ * their dependency edges, their remediation records and the evidence it lacks. Different releases of
+ * one package stay separate components. A list without such repeats is returned as it is.
+ */
+export function foldDuplicateComponents(components: Component[]): Component[] {
   const keptFor = new Map<Component, Component>();
   const renamed = new Map<string, string>();
-  for (const group of groups.values()) {
+  for (const group of sameReleaseGroups(components)) {
     if (group.length < 2) continue;
-    const ordered = [...group].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const ordered = [...group].sort(byListing);
     const first = ordered[0]!;
+    const kept: Component = { ...first };
     const note = joinPlaces(ordered.map(placeOf).filter((place) => place !== undefined));
+    if (note) kept.note = note;
+    const members = new Set(group.map((member) => member.id));
     const dependencies = new Map<string, NonNullable<Component['dependencies']>[number]>();
     for (const member of ordered)
       for (const link of member.dependencies ?? [])
-        if (!dependencies.has(link.ref) && dependencies.size < 1000) dependencies.set(link.ref, link);
-    const kept: Component = {
-      ...first,
-      ...(note ? { note } : {}),
-      ...(dependencies.size ? { dependencies: [...dependencies.values()] } : {}),
-    };
+        // A link from one listing to another of the same package would be a link to itself.
+        if (!(link.component_id && members.has(link.component_id)) && !dependencies.has(link.ref))
+          if (dependencies.size < 1000) dependencies.set(link.ref, link);
+    if (dependencies.size) kept.dependencies = [...dependencies.values()];
+    else delete kept.dependencies;
+    const records = new Map<string, NonNullable<Component['remediation_evidence']>[number]>();
+    for (const member of ordered)
+      for (const record of member.remediation_evidence ?? [])
+        if (records.size < 100) records.set(JSON.stringify(record), record);
+    if (records.size) kept.remediation_evidence = [...records.values()];
+    for (const field of FILLED)
+      if (kept[field] === undefined) {
+        // A package URL names its version: only one written as the kept listing writes it fits.
+        const source = ordered.find(
+          (member) => member[field] !== undefined && (field !== 'purl' || member.version === kept.version),
+        );
+        if (source) (kept as unknown as Record<string, unknown>)[field] = source[field];
+      }
     for (const member of group) {
       keptFor.set(member, kept);
       if (member !== first) renamed.set(member.id, first.id);
@@ -349,19 +478,103 @@ export function foldDuplicateComponents(components: Component[]): Component[] {
     placed.add(kept);
     result.push(kept);
   }
-  // Edges that led to a folded listing now lead to the one kept.
-  return result.map((component) =>
-    component.dependencies?.some((link) => link.component_id && renamed.has(link.component_id))
-      ? {
-          ...component,
-          dependencies: component.dependencies.map((link) =>
-            link.component_id && renamed.has(link.component_id)
-              ? { ...link, component_id: renamed.get(link.component_id)! }
-              : link,
-          ),
+  return renameLinks(result, renamed);
+}
+
+/** Every system of an inventory with its repeated listings folded (see `foldDuplicateComponents`). */
+export function foldInventory(inventory: Inventory): Inventory {
+  let changed = false;
+  const systems = inventory.systems.map((system) => {
+    const components = foldDuplicateComponents(system.components);
+    if (components === system.components) return system;
+    changed = true;
+    return { ...system, components };
+  });
+  return changed ? { ...inventory, systems } : inventory;
+}
+
+/**
+ * Gives each component the identifier its package release had at the previous scan, when that
+ * listing is gone but the release is still in the system: the copy that was kept was removed and
+ * another remains, or a generator gave the package a new reference. A finding's identifier is made
+ * from the component's, so the finding already reported goes on instead of a new one being sent.
+ * The note still says where the package is now. The scan applies this before it assesses, and the
+ * commands that read the inventory beside stored findings apply it with the same previous inventory.
+ */
+export function keepComponentIds(inventory: Inventory, previous: Inventory | undefined): Inventory {
+  if (!previous) return inventory;
+  const previousSystems = new Map(previous.systems.map((system) => [system.id, system]));
+  let changed = false;
+  const systems = inventory.systems.map((system) => {
+    const before = previousSystems.get(system.id);
+    if (!before) return system;
+    const earlier = new Map<string, Component[]>();
+    for (const component of before.components ?? []) {
+      const key = releaseKey(component);
+      if (!key) continue;
+      const list = earlier.get(key);
+      if (list) list.push(component);
+      else earlier.set(key, [component]);
+    }
+    const candidatesOf = (component: Component): string[] => {
+      const key = releaseKey(component);
+      return [...((key && earlier.get(key)) || [])].sort(byListing).map((item) => item.id);
+    };
+    // A component takes an earlier identifier no current component uses, or one whose component has
+    // itself moved to another; otherwise it keeps its own. No two components end with one identifier.
+    const owners = new Map(system.components.map((component) => [component.id, component]));
+    const moving = new Map<Component, string[]>();
+    const used = new Set<string>();
+    for (const component of system.components) {
+      const candidates = candidatesOf(component);
+      if (candidates.length && !candidates.includes(component.id)) moving.set(component, candidates);
+      else used.add(component.id);
+    }
+    // A component waiting for an identifier its owner still holds is tried again when that owner
+    // moves, so a long chain of moves takes one pass, not one pass per link.
+    const assigned = new Map<Component, string>();
+    const waiting = new Map<Component, Component[]>();
+    const queue = [...moving.keys()];
+    for (let next = 0; next < queue.length; next++) {
+      const component = queue[next]!;
+      if (assigned.has(component)) continue;
+      let id: string | undefined;
+      const blockers: Component[] = [];
+      for (const candidate of moving.get(component)!) {
+        if (used.has(candidate)) continue;
+        const owner = owners.get(candidate);
+        if (!owner || assigned.has(owner)) {
+          id = candidate;
+          break;
         }
-      : component,
-  );
+        blockers.push(owner);
+      }
+      if (id === undefined) {
+        for (const owner of blockers) {
+          const list = waiting.get(owner);
+          if (list) list.push(component);
+          else waiting.set(owner, [component]);
+        }
+        continue;
+      }
+      assigned.set(component, id);
+      used.add(id);
+      queue.push(...(waiting.get(component) ?? []));
+      waiting.delete(component);
+    }
+    const renamed = new Map<string, string>();
+    const components = system.components.map((component) => {
+      const id = assigned.get(component);
+      if (!id) return component;
+      renamed.set(component.id, id);
+      const note = placeOf(component);
+      return { ...component, id, ...(note ? { note } : {}) };
+    });
+    if (!renamed.size) return system;
+    changed = true;
+    return { ...system, components: renameLinks(components, renamed) };
+  });
+  return changed ? { ...inventory, systems } : inventory;
 }
 
 const SBOM_FILES = 1000;
@@ -599,4 +812,25 @@ export function loadInventory(path: string): Inventory {
     ...(importWarnings.length ? { import_warnings: importWarnings } : {}),
     ...(nameNotices.length ? { name_notices: nameNotices } : {}),
   };
+}
+
+/**
+ * For a finding retired because its listing was folded into another listing of the same package
+ * release: the component that is watched in its place. Nothing when the package was listed once.
+ */
+export function foldedInto(
+  previous: Inventory | undefined,
+  current: Inventory,
+  systemId: string,
+  componentId: string,
+): string | undefined {
+  const system = current.systems.find((item) => item.id === systemId);
+  if (!system || system.components.some((item) => item.id === componentId)) return undefined;
+  const before = previous?.systems.find((item) => item.id === systemId)?.components ?? [];
+  const listing = before.find((item) => item.id === componentId);
+  const key = listing && releaseKey(listing);
+  if (!listing || !key) return undefined;
+  const release = (item: Component) => releaseKey(item) === key;
+  if (before.filter(release).length < 2) return undefined;
+  return system.components.find(release)?.id;
 }

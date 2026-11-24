@@ -339,7 +339,11 @@ function toFinding(
   const files =
     (purl ? locations.get(purl) : undefined) ??
     (component.note?.startsWith('found in ')
-      ? component.note.slice('found in '.length).split(/,\s*/).filter(Boolean)
+      ? component.note
+          .slice('found in '.length)
+          .replace(/ and others$/, '')
+          .split(/,\s*/)
+          .filter(Boolean)
       : []);
   return {
     id,
