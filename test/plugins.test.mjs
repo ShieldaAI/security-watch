@@ -272,32 +272,42 @@ test('MCP Registry: server.json matches the npm package and the image', () => {
   );
 });
 
-test('the image workflow pins its actions, tests before it pushes, and signs', () => {
+test('the image workflow uses only GitHub’s own actions, pinned, and tests before it tags', () => {
   const workflow = read('.github/workflows/image.yml');
-  for (const [, ref] of workflow.matchAll(/uses: ([^\s]+)/g)) assert.match(ref, /@[0-9a-f]{40}$/, ref);
+  // The repository allows only GitHub-owned actions, pinned to a full commit: anything else makes the
+  // run fail at startup (it did for v1.4.0 with docker/* and sigstore/* actions).
+  for (const [, ref] of workflow.matchAll(/uses: ([^\s]+)/g)) {
+    assert.match(ref, /^(actions|github)\//, `${ref} is not a GitHub-owned action`);
+    assert.match(ref, /@[0-9a-f]{40}$/, ref);
+  }
   const order = [
     '--target test',
     'check-docker.mjs',
-    'docker/login-action',
-    'build-push-action',
+    'docker login ghcr.io',
+    'docker buildx build',
+    'Run the pushed image',
+    'imagetools create --tag "$IMAGE:$VERSION"',
     'attest-build-provenance',
-    'cosign sign',
-    'imagetools create',
+    'Move the release-line and latest tags',
   ];
   const positions = order.map((needle) => workflow.indexOf(needle));
   assert.ok(
     positions.every((position) => position >= 0),
-    'every step is there',
+    `every step is there: ${order.filter((_, i) => positions[i] < 0)}`,
   );
   assert.deepEqual(
     [...positions].sort((a, b) => a - b),
     positions,
     'in this order',
   );
-  assert.match(workflow, /platforms: linux\/amd64,linux\/arm64/);
-  assert.match(workflow, /provenance: mode=max/);
-  assert.match(workflow, /sbom: true/);
+  // Both architectures are built and run on their own hardware.
+  assert.match(workflow, /platform: linux\/amd64\n\s+runner: ubuntu-latest/);
+  assert.match(workflow, /platform: linux\/arm64\n\s+runner: ubuntu-24\.04-arm/);
+  assert.match(workflow, /--provenance=mode=max/);
+  assert.match(workflow, /--sbom=true/);
+  assert.match(workflow, /push-by-digest=true/);
   assert.match(workflow, /^permissions:\n {2}contents: read$/m);
+  assert.match(workflow, /^run-name: Container image \$\{\{ inputs\.tag \|\| github\.ref_name \}\}$/m);
 });
 
 test('launcher: picks the open project and refuses to read itself', () => {

@@ -29,11 +29,12 @@ for alerts, and tell the user which variable to set in `~/security-watch/.env`.
 
 ## Run it on a server with Docker
 
-The image is `ghcr.io/shieldaai/security-watch:1.4.0` (signed, linux/amd64 and linux/arm64). The
+The image is `ghcr.io/shieldaai/security-watch:1.4.0` (linux/amd64 and linux/arm64, with signed build provenance). The
 repository's `compose.yaml` runs it read-only, without capabilities, with the database in a
 volume. Point the user at the README section "Run with Docker" rather than writing your own
 compose file: it explains the user and group IDs the volume needs. `docker compose up -d` pulls
-the image; `cosign verify` (the command is in each release's notes) checks its signature first.
+the image; `gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.0 --repo
+ShieldaAI/security-watch` checks first that this repository's release workflow built it.
 
 ## Keep the list of systems current from CI
 
