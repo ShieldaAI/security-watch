@@ -39,6 +39,11 @@ function verifyFile(path: string): void {
   // Closing any descriptor for a live SQLite inode releases this process's POSIX locks.
   // Inspect existing files without opening them, including when another Store is already open.
   const stat = lstatSync(path);
+  // SQLite deletes the -wal and -shm files when the last connection to a database closes. A file
+  // that another process is deleting can still be found with no links left (macOS reports this);
+  // it is gone, not a hard link.
+  if (stat.nlink === 0)
+    throw Object.assign(new Error(`${path} was removed while it was being checked`), { code: 'ENOENT' });
   if (!stat.isFile() || stat.nlink !== 1)
     throw new Error('Database paths must be regular files without symbolic or hard links');
   if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)
