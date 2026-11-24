@@ -4,6 +4,8 @@ Versions follow [semantic versioning](https://semver.org/). What counts as a com
 
 ## 1.4.1
 
+A package listed more than once in one system gives one finding and one alert, and upgrading sends nothing again. Existing configurations, inventories and databases work unchanged. To be published under the default `latest` tag; the GitHub Action is used as `uses: ShieldaAI/security-watch@v1.4.1`, the image is `ghcr.io/shieldaai/security-watch:1.4.1`.
+
 ### Fixed
 
 - **One package listed twice in one system gave two findings and two alerts.** A package at one exact version now becomes one component of the system, however often it is listed: an SBOM that lists it once per path with a `bom-ref` of its own (Syft does this for a package found in two folders), or a system that combines `libraries:`, `sbom:` and `lockfile:` naming the same version. The listing with the smallest component ID is kept, so its finding keeps the ID it already has; the component's note lists every place the package was found, and the dependency edges of the other listings move to it. Different versions of one package stay separate. `security-watch check` (with `--sbom`, a project or `--package` named twice) reports such a package once.

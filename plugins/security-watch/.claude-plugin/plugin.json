@@ -1,7 +1,7 @@
 {
   "name": "security-watch",
   "displayName": "Security Watch",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Checks a project's dependencies for known vulnerabilities and malicious packages before and after changes, says whether a CVE affects you, and writes SBOMs.",
   "author": {
     "name": "Shielda",

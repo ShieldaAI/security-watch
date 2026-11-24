@@ -86,7 +86,7 @@ intake:
 
 ```yaml
 # GitHub Actions: makes the SBOM and sends it; the job fails if the monitor refuses it
-- uses: ShieldaAI/security-watch@v1.4.0
+- uses: ShieldaAI/security-watch@v1.4.1
   with:
     system-id: my-app
     owner: Dana, platform team
@@ -96,7 +96,7 @@ intake:
 
 ```sh
 # Any other pipeline with Node.js 24 and SECURITY_WATCH_INTAKE_TOKEN set
-npx --yes @shieldaai/security-watch@1.4.0 sbom --system-id my-app --upload https://watch.example.com:8787
+npx --yes @shieldaai/security-watch@1.4.1 sbom --system-id my-app --upload https://watch.example.com:8787
 ```
 
 [Watch a project from its dependency files](docs/sbom.md) covers the files that are read, GitLab CI, the receiver (tokens limited to some systems, TLS, Docker), other ways to deliver SBOMs, and SBOMs from Trivy, Syft, cdxgen or GitHub's dependency graph, which are accepted as they are.
@@ -130,7 +130,7 @@ If your list contains libraries that are not npm packages (Python, PHP, Java, Go
 
 To try it with no network access and fictional data first, follow the [offline advisory preview](docs/offline-advisory-preview.md). The rest of this page covers the options in detail.
 
-**Version 1.4.0.** This is `@shieldaai/security-watch` 1.4.0, a minor release of the first stable version (1.0.0). It answers in one command what the monitor answers over time (`security-watch check`: a project, a change since a git commit, a package, an advisory), gives AI coding agents the same checks through an [MCP server and a plugin](docs/agents.md), and is published as a signed container image (`ghcr.io/shieldaai/security-watch`); 1.3 added `shield-candidates`, mitigation status, [Shirudo](docs/shirudo.md) and OpenVEX, 1.2 read scores and exploitation reports from news and added EPSS, and 1.1 added SBOM generation, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
+**Version 1.4.1.** This is `@shieldaai/security-watch` 1.4.1, a patch release of 1.4: a package listed more than once in one system now gives one finding and one alert. 1.4 answers in one command what the monitor answers over time (`security-watch check`: a project, a change since a git commit, a package, an advisory), gives AI coding agents the same checks through an [MCP server and a plugin](docs/agents.md), and is published as a signed container image (`ghcr.io/shieldaai/security-watch`); 1.3 added `shield-candidates`, mitigation status, [Shirudo](docs/shirudo.md) and OpenVEX, 1.2 read scores and exploitation reports from news and added EPSS, and 1.1 added SBOM generation, an SBOM folder for pipelines, SPDX import and a GitHub Action. It is published under the default `latest` tag and has no independent security audit. Read the [coverage and security limits](SECURITY.md) before relying on it, the [compatibility policy](docs/compatibility.md) for what stays stable, and the [changelog](CHANGELOG.md) for what changed.
 
 Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for tool permissions and approvals, and [SafeCall Node](https://github.com/GuardianMesh/llm-safecall-node) or [SafeCall Python](https://github.com/GuardianMesh/llm-safecall) for model response validation. The [package selection guide](https://github.com/ShieldaAI/agent-guard/blob/main/docs/package-guide.md) explains how they fit together.
 
@@ -139,10 +139,10 @@ Related projects: [Agent Guard](https://github.com/ShieldaAI/agent-guard) for to
 No configuration is needed for a one-off answer. `check` reads the project's lockfiles, asks OSV about every package version and marks CISA known-exploited entries:
 
 ```sh
-npx --yes @shieldaai/security-watch@1.4.0 check                         # this project
-npx --yes @shieldaai/security-watch@1.4.0 check --base origin/main      # only what this branch brings in
-npx --yes @shieldaai/security-watch@1.4.0 check --package npm:lodash@4.17.21
-npx --yes @shieldaai/security-watch@1.4.0 check --advisory CVE-2021-44906
+npx --yes @shieldaai/security-watch@1.4.1 check                         # this project
+npx --yes @shieldaai/security-watch@1.4.1 check --base origin/main      # only what this branch brings in
+npx --yes @shieldaai/security-watch@1.4.1 check --package npm:lodash@4.17.21
+npx --yes @shieldaai/security-watch@1.4.1 check --advisory CVE-2021-44906
 ```
 
 Exit code 1 means a finding at or above `--fail-on` (high by default), 2 that the check could not complete. AI coding agents get the same checks, plus SBOM writing, from `security-watch mcp` or the plugin for Claude Code, Codex and Antigravity: they check a package before adding it and a dependency change before handing it back. See [Security Watch for AI agents](docs/agents.md).
@@ -185,7 +185,7 @@ To build and install from a source checkout:
 npm ci
 npm run check
 npm pack
-npm install --global ./shieldaai-security-watch-1.4.0.tgz
+npm install --global ./shieldaai-security-watch-1.4.1.tgz
 ```
 
 Choose one setup command below. To start from your own code, use `init --project` as in [step 2](#get-started-in-four-steps). For a fictional example with AI disabled:
@@ -315,7 +315,7 @@ Run `security-watch providers` to list provider IDs, default endpoints, credenti
 Each release is published as `ghcr.io/shieldaai/security-watch` for linux/amd64 and linux/arm64, with an SBOM and build provenance attached, and a GitHub build provenance attestation signed through Sigstore. Check it before you run it:
 
 ```sh
-gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.0 --repo ShieldaAI/security-watch
+gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.1 --repo ShieldaAI/security-watch
 ```
 
 It confirms the image was built by this repository's release workflow from the tagged commit.
@@ -326,7 +326,7 @@ Then:
 docker volume create security-watch-data
 docker run --rm --user 0 --entrypoint chown \
   --mount type=volume,src=security-watch-data,dst=/data \
-  ghcr.io/shieldaai/security-watch:1.4.0 "$(id -u):$(id -g)" /data
+  ghcr.io/shieldaai/security-watch:1.4.1 "$(id -u):$(id -g)" /data
 docker run --rm --name security-watch \
   --user "$(id -u):$(id -g)" \
   --read-only --cap-drop ALL --security-opt no-new-privileges \
@@ -335,10 +335,10 @@ docker run --rm --name security-watch \
   --mount type=bind,src="$(pwd)/watch/security-watch.yaml",dst=/config/security-watch.yaml,readonly \
   --mount type=bind,src="$(pwd)/watch/systems.yaml",dst=/config/systems.yaml,readonly \
   --mount type=volume,src=security-watch-data,dst=/data \
-  ghcr.io/shieldaai/security-watch:1.4.0 start --config /config/security-watch.yaml
+  ghcr.io/shieldaai/security-watch:1.4.1 start --config /config/security-watch.yaml
 ```
 
-To build the image from a checkout instead, run `docker build -t ghcr.io/shieldaai/security-watch:1.4.0 .` first; the commands stay the same.
+To build the image from a checkout instead, run `docker build -t ghcr.io/shieldaai/security-watch:1.4.1 .` first; the commands stay the same.
 
 Before running, set `inventory: /config/systems.yaml` and `database: /data/watch.db` in the container's configuration. Create `watch/.env` privately with only the credentials you use; it is not loaded automatically by the npm CLI. Keep configuration, inventory and `.env` readable only by your user, for example with `chmod 600` on those files. The short initialization command assigns the data volume to your UID/GID; the application itself then runs as that user. Your Docker VM must be able to access the configuration/inventory bind mounts. Add a read-only mount under `/config` for any imported lockfile or SBOM folder (for example `--mount type=bind,src="$(pwd)/watch/sboms",dst=/config/sboms,readonly`) and use the matching path in the inventory.
 

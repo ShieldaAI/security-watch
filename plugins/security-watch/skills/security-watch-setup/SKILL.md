@@ -20,7 +20,7 @@ commit, and never ask for them in chat. They go in a private `.env` file the use
 
 ```sh
 repo="$(git rev-parse --show-toplevel)"
-(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.0 init --directory "$HOME/security-watch" --yes --project "$repo")
+(cd "$(mktemp -d)" && npx --yes @shieldaai/security-watch@1.4.1 init --directory "$HOME/security-watch" --yes --project "$repo")
 ```
 
 It prints the next commands: `doctor`, then `scan --dry-run`, which shows what it would alert on
@@ -29,11 +29,11 @@ for alerts, and tell the user which variable to set in `~/security-watch/.env`.
 
 ## Run it on a server with Docker
 
-The image is `ghcr.io/shieldaai/security-watch:1.4.0` (linux/amd64 and linux/arm64, with signed build provenance). The
+The image is `ghcr.io/shieldaai/security-watch:1.4.1` (linux/amd64 and linux/arm64, with signed build provenance). The
 repository's `compose.yaml` runs it read-only, without capabilities, with the database in a
 volume. Point the user at the README section "Run with Docker" rather than writing your own
 compose file: it explains the user and group IDs the volume needs. `docker compose up -d` pulls
-the image; `gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.0 --repo
+the image; `gh attestation verify oci://ghcr.io/shieldaai/security-watch:1.4.1 --repo
 ShieldaAI/security-watch` checks first that this repository's release workflow built it.
 
 ## Keep the list of systems current from CI
@@ -41,7 +41,7 @@ ShieldaAI/security-watch` checks first that this repository's release workflow b
 Add the GitHub Action to the project's workflow so every merge sends a fresh SBOM:
 
 ```yaml
-- uses: ShieldaAI/security-watch@v1.4.0
+- uses: ShieldaAI/security-watch@v1.4.1
   with:
     system-id: my-app
     owner: Dana, platform team
@@ -54,7 +54,7 @@ Without `upload-url` the Action only writes the SBOM and keeps it as a workflow 
 receiver and its tokens are set up on the monitor's side (the `intake` section of its
 configuration; see `docs/sbom.md` in the repository). Ask the user for the real owner and note:
 alerts repeat them, so that whoever receives one knows where to look. Pipelines other than GitHub
-Actions run `npx --yes @shieldaai/security-watch@1.4.0 sbom --system-id my-app --upload URL`
+Actions run `npx --yes @shieldaai/security-watch@1.4.1 sbom --system-id my-app --upload URL`
 with `SECURITY_WATCH_INTAKE_TOKEN` set.
 
 ## Do not
