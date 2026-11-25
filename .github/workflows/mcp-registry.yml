@@ -1,0 +1,159 @@
+name: MCP Registry
+# Publishes server.json to the official MCP Registry as io.github.ShieldaAI/security-watch once a
+# release's npm package and container image are both live (server.json names both).
+#
+# It signs in with GitHub's OIDC token for this repository, which the registry accepts for the
+# io.github.ShieldaAI namespace: no personal access token or stored secret is involved.
+# Runs on a published GitHub release (the release script creates it after npm publish), or by
+# hand for an existing release: gh workflow run mcp-registry.yml -f version=1.4.1
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version to publish, such as 1.4.1 (its tag v<version> must exist)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: mcp-registry
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # the registry's GitHub OIDC sign-in
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.16
+      SERVER_NAME: io.github.ShieldaAI/security-watch
+      PACKAGE: '@shieldaai/security-watch'
+      IMAGE: shieldaai/security-watch
+    steps:
+      - name: Work out the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${RELEASE_TAG#v}}"
+          # Only exact releases: a prerelease (published to npm under next) is not sent to the registry.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::not an exact release version: '$version'; nothing to publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.version.outputs.skip == 'false'
+        with:
+          ref: refs/tags/v${{ steps.version.outputs.version }}
+          persist-credentials: false
+
+      - name: Check server.json against the release
+        if: steps.version.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          file=server.json
+          [ "$(jq -r .name "$file")" = "$SERVER_NAME" ] || { echo "::error::$file names another server" >&2; exit 1; }
+          [ "$(jq -r .version "$file")" = "$VERSION" ] || { echo "::error::$file is not at $VERSION" >&2; exit 1; }
+          [ "$(jq -r '.packages[] | select(.registryType == "npm") | .version' "$file")" = "$VERSION" ] ||
+            { echo "::error::$file's npm package is not at $VERSION" >&2; exit 1; }
+          [ "$(jq -r '.packages[] | select(.registryType == "oci") | .identifier' "$file")" = "ghcr.io/$IMAGE:$VERSION" ] ||
+            { echo "::error::$file's image is not ghcr.io/$IMAGE:$VERSION" >&2; exit 1; }
+
+      - name: Skip if the registry already has this version
+        id: existing
+        if: steps.version.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          found=$(curl -fsS --retry 3 "https://registry.modelcontextprotocol.io/v0.1/servers?search=${SERVER_NAME}" |
+            jq --arg n "$SERVER_NAME" --arg v "$VERSION" '[.servers[] | select(.server.name == $n and .server.version == $v)] | length')
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          [ "$found" = 0 ] || echo "::notice::$SERVER_NAME $VERSION is already in the registry"
+
+      # The registry checks mcpName in the package npm serves, so wait until npm serves it.
+      - name: Wait for npm
+        if: steps.existing.outputs.found == '0'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          url="https://registry.npmjs.org/${PACKAGE/\//%2f}/$VERSION"
+          for _ in $(seq 1 40); do
+            name=$(curl -fsS "$url" 2> /dev/null | jq -r '.mcpName // empty' || true)
+            [ "$name" = "$SERVER_NAME" ] && { echo "npm serves $PACKAGE@$VERSION with mcpName $name"; exit 0; }
+            echo "waiting for npm to serve $PACKAGE@$VERSION ..."
+            sleep 15
+          done
+          echo "::error::npm does not serve $PACKAGE@$VERSION with mcpName $SERVER_NAME after 10 minutes" >&2
+          exit 1
+
+      # The registry also reads the io.modelcontextprotocol.server.name label from the image, which the
+      # image workflow (started by the same v* tag) publishes a few minutes after the release.
+      - name: Wait for the container image
+        if: steps.existing.outputs.found == '0'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json'
+          for _ in $(seq 1 80); do
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:${IMAGE}:pull" 2> /dev/null | jq -r '.token // empty' || true)
+            if [ -n "$token" ] && curl -fsS -o /dev/null -H "Authorization: Bearer $token" -H "Accept: $accept" \
+              "https://ghcr.io/v2/${IMAGE}/manifests/${VERSION}" 2> /dev/null; then
+              echo "ghcr.io/$IMAGE:$VERSION is public"
+              exit 0
+            fi
+            echo "waiting for ghcr.io/$IMAGE:$VERSION ..."
+            sleep 20
+          done
+          echo "::error::ghcr.io/$IMAGE:$VERSION is not publicly pullable after 26 minutes; check the Container image workflow" >&2
+          exit 1
+
+      # The repository allows GitHub-owned actions only, so no installer action: the release file is
+      # pinned by its SHA-256 (GitHub's recorded digest for that asset). Change both lines together.
+      - name: Download mcp-publisher
+        if: steps.existing.outputs.found == '0'
+        working-directory: ${{ runner.temp }}
+        env:
+          MCP_PUBLISHER_SHA256: 6e2f799550cf843c6fd3350498d56cc49be3dc0af1e6237eb0e6435c7a9d5c05
+        run: |
+          set -euo pipefail
+          archive=mcp-publisher_linux_amd64.tar.gz
+          curl -fsSL --retry 3 -o "$archive" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/$archive"
+          echo "${MCP_PUBLISHER_SHA256}  $archive" | sha256sum --check --strict
+          tar xzf "$archive" mcp-publisher
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Publish
+        if: steps.existing.outputs.found == '0'
+        run: |
+          set -euo pipefail
+          mcp-publisher validate
+          mcp-publisher login github-oidc
+          mcp-publisher publish
+
+      - name: Confirm
+        if: steps.existing.outputs.found == '0'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 10); do
+            found=$(curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=${SERVER_NAME}" |
+              jq --arg n "$SERVER_NAME" --arg v "$VERSION" '[.servers[] | select(.server.name == $n and .server.version == $v)] | length')
+            [ "$found" != 0 ] && { echo "$SERVER_NAME $VERSION is in the MCP Registry" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+            sleep 15
+          done
+          echo "::warning::published, but the registry search does not list $VERSION yet" >&2

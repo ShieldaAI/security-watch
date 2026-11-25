@@ -310,6 +310,42 @@ test('the image workflow uses only GitHub’s own actions, pinned, and tests bef
   assert.match(workflow, /^run-name: Container image \$\{\{ inputs\.tag \|\| github\.ref_name \}\}$/m);
 });
 
+test('the MCP Registry workflow uses only GitHub’s own actions and waits for npm and the image', () => {
+  const workflow = read('.github/workflows/mcp-registry.yml');
+  // Same policy as the image workflow: a third-party installer action fails the run at startup.
+  for (const [, ref] of workflow.matchAll(/uses: ([^\s]+)/g)) {
+    assert.match(ref, /^(actions|github)\//, `${ref} is not a GitHub-owned action`);
+    assert.match(ref, /@[0-9a-f]{40}$/, ref);
+  }
+  const order = [
+    'Check server.json',
+    'Wait for npm',
+    'Wait for the container image',
+    'sha256sum --check',
+    'login github-oidc',
+    'mcp-publisher publish',
+  ];
+  const positions = order.map((needle) => workflow.indexOf(needle));
+  assert.ok(
+    positions.every((position) => position >= 0),
+    `every step is there: ${order.filter((_, i) => positions[i] < 0)}`,
+  );
+  assert.deepEqual(
+    [...positions].sort((a, b) => a - b),
+    positions,
+    'in this order',
+  );
+  assert.match(workflow, /^permissions:\n {2}contents: read$/m);
+  assert.match(workflow, /id-token: write/);
+  const server = JSON.parse(read('server.json'));
+  assert.match(workflow, new RegExp(`SERVER_NAME: ${server.name.replaceAll('.', '\\.')}\\n`));
+  assert.ok(
+    server.packages.some(
+      (p) => p.registryType === 'oci' && p.identifier.startsWith('ghcr.io/shieldaai/security-watch:'),
+    ),
+  );
+});
+
 test('launcher: picks the open project and refuses to read itself', () => {
   const plugin = DIR;
   const repo = resolve('/work/repo');
